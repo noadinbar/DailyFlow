@@ -1,0 +1,43 @@
+Project name: DailyFlow
+
+Project overview:
+DailyFlow is a web application that helps users manage their schedule, routines, and wellbeing in one place.
+The full product is planned to include:
+- onboarding questionnaire
+- calendar screen
+- meals and grocery planning
+- workouts
+- stress and break recommendations
+- overview / weekly summary
+
+Main integrations and infrastructure:
+- Frontend: React
+- Backend: Python on AWS Lambda
+- Authentication: Amazon Cognito
+- Database: DynamoDB
+- Hosting: AWS Amplify
+- External integrations: Google Calendar
+- Future integrations: OpenAI and Apple Watch / HRV-based data
+
+Final product goal:
+The final product should support a full user flow where a user signs in, completes an onboarding questionnaire, connects Google Calendar, syncs availability, receives personalized suggestions, and manages their schedule through the platform.
+
+Current milestone scope:
+For now, only focus on the first milestone:
+- onboarding questionnaire
+- Google Calendar connection later
+- calendar screen later
+
+Important:
+Do not implement Meals, Workouts, Stress, Overview, OpenAI, or Apple Watch logic yet unless explicitly requested.
+Do not add backend or AWS integration unless explicitly requested.
+For now, build frontend skeletons and simple placeholder flows only.
+
+Coding style:
+- Keep the code simple and minimal
+- Do not over-engineer
+- Use clear and scalable structure
+- Prefer readable components
+- Do not add unnecessary libraries
+- Use English for code, file names, and comments
+- Before generating code, first explain the file structure and plan
