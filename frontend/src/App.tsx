@@ -1,10 +1,10 @@
 import React from 'react';
-import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
+import AuthScreen from './components/Auth/AuthScreen';
 
 export default function App() {
   return (
     <main className="df-page">
-      <OnboardingQuestionnaireWizard />
+      <AuthScreen />
     </main>
   );
 }

@@ -23,7 +23,7 @@ body {
 .df-page {
   min-height: 100vh;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   padding: 24px 16px;
 }
@@ -186,5 +186,134 @@ body {
 .df-checkboxItem input {
   width: 16px;
   height: 16px;
+}
+
+.df-authWrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.df-authCard {
+  max-width: 1100px;
+  min-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  padding: 36px;
+}
+
+.df-authHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.df-authLogo {
+  width: 420px;
+  height: auto;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.df-authTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.df-authSubtitle {
+  margin: 8px 0 0 0;
+  color: var(--df-muted);
+  font-size: 14px;
+}
+
+.df-authToggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.df-authToggleBtn {
+  border: 1px solid var(--df-border);
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 10px;
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--df-text);
+  width: 100%;
+}
+
+.df-authToggleBtnActive {
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--df-primary);
+}
+
+.df-authForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  flex: 1;
+  margin: 0 auto;
+  max-width: 420px;
+}
+
+.df-authForm label {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+}
+
+.df-authForm .df-input {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  flex: 1;
+}
+
+.df-fieldLabel {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 6px;
+  color: var(--df-text);
+  text-align: center;
+}
+
+.df-authForm .df-fieldLabel {
+  margin-bottom: 0;
+  text-align: left;
+  min-width: 120px;
+}
+
+.df-errorText {
+  color: #b91c1c;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.df-successText {
+  color: #047857;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.df-authSubmit {
+  margin-top: 6px;
+  width: 100%;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
