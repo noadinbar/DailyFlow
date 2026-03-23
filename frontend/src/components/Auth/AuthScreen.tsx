@@ -20,11 +20,20 @@ type Errors = Partial<
   Record<'username' | 'password' | 'email' | 'confirmPassword' | 'form', string>
 >;
 
+type AuthScreenProps = {
+  // Called after Cognito sign up succeeds (account created).
+  onSignedUp?: (user: { username: string; email: string }) => void;
+  // Called after Cognito log in succeeds.
+  onLoggedIn?: (user: { username: string }) => void;
+};
+
 function fieldError(errors: Errors, key: keyof Errors) {
   return errors[key] ? <div className="df-errorText">{errors[key]}</div> : null;
 }
 
-export default function AuthScreen() {
+export default function AuthScreen(props: AuthScreenProps) {
+  const { onSignedUp, onLoggedIn } = props;
+
   const [mode, setMode] = useState<AuthMode>('login');
 
   const [username, setUsername] = useState<string>('');
@@ -79,6 +88,7 @@ export default function AuthScreen() {
         const payload: LoginPayload = { username, password };
         await submitLoginPlaceholder(payload);
         setSuccessMessage('Log in successful.');
+        onLoggedIn?.({ username });
       } else {
         const payload: SignUpPayload = { username, email, password, confirmPassword };
         const result = await submitSignUpPlaceholder(payload);
@@ -87,6 +97,7 @@ export default function AuthScreen() {
             ? 'Sign up successful. Please confirm your account in Cognito.'
             : 'Sign up successful.'
         );
+        onSignedUp?.({ username, email });
       }
     } catch (e) {
       setErrors({ form: 'Something went wrong. Please try again.' });
