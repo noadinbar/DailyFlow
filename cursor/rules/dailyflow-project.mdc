@@ -19,6 +19,12 @@ Main integrations and infrastructure:
 - External integrations: Google Calendar
 - Future integrations: OpenAI and Apple Watch / HRV-based data
 
+Current implemented state:
+- AWS Cognito is already connected in the frontend
+- Sign up and Log in already work
+- A frontend questionnaire screen already exists
+- DynamoDB tables already exist, including Users
+
 Final product goal:
 The final product should support a full user flow where a user signs in, completes an onboarding questionnaire, connects Google Calendar, syncs availability, receives personalized suggestions, and manages their schedule through the platform.
 
