@@ -2,8 +2,9 @@ import React from 'react';
 import AuthScreen from './components/Auth/AuthScreen';
 import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
 import HomePlaceholder from './components/Home/HomePlaceholder';
+import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
 
-type Screen = 'auth' | 'questionnaire' | 'home';
+type Screen = 'auth' | 'questionnaire' | 'questionnaireSaved' | 'home';
 
 type AuthUser = {
   username: string;
@@ -42,7 +43,15 @@ export default function App() {
         />
       )}
 
-      {screen === 'questionnaire' && <OnboardingQuestionnaireWizard />}
+      {screen === 'questionnaire' && (
+        <OnboardingQuestionnaireWizard
+          onSubmittedSuccess={() => {
+            setScreen('questionnaireSaved');
+          }}
+        />
+      )}
+
+      {screen === 'questionnaireSaved' && <QuestionnaireSavedPlaceholder />}
 
       {screen === 'home' && <HomePlaceholder username={authState.user?.username} />}
     </main>

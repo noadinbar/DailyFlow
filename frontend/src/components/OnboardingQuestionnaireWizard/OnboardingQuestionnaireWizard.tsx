@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import ProgressBar from './ProgressBar';
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { configureAmplify } from '../../services/auth/amplifyConfig';
 
 type Gender = 'male' | 'female' | 'non_binary' | 'prefer_not_to_say' | '';
 type DietaryPreference =
@@ -19,7 +21,13 @@ function formatStepText(stepIndex1Based: number, totalSteps: number) {
   return `Step ${stepIndex1Based} of ${totalSteps}`;
 }
 
-export default function OnboardingQuestionnaireWizard() {
+type OnboardingQuestionnaireWizardProps = {
+  onSubmittedSuccess?: () => void;
+};
+
+export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionnaireWizardProps) {
+  const { onSubmittedSuccess } = props;
+
   const [stepIndex, setStepIndex] = useState<number>(0); // 0..TOTAL_STEPS-1
 
   const [gender, setGender] = useState<Gender>('');
@@ -38,6 +46,9 @@ export default function OnboardingQuestionnaireWizard() {
     }),
     [dietaryPreference, gender, preferredWorkoutTimes, workoutsPerWeek]
   );
+
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submissionError, setSubmissionError] = useState<string>('');
 
   const isNextDisabled = useMemo(() => {
     if (stepIndex === 0) return gender === '';
@@ -64,8 +75,74 @@ export default function OnboardingQuestionnaireWizard() {
   }
 
   function handleSubmit() {
-    // Frontend skeleton only: no backend/AWS integration yet.
-    console.log('Onboarding questionnaire data:', collectedData);
+    void (async () => {
+      setIsSubmitting(true);
+      setSubmissionError('');
+
+      try {
+        configureAmplify();
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        const idToken = session.tokens?.idToken?.toString();
+        const token = accessToken || idToken;
+
+        if (!token) {
+          setSubmissionError('You are not authenticated. Please log in again.');
+          return;
+        }
+
+        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+        if (!baseUrl) {
+          setSubmissionError('Missing API base URL configuration (VITE_API_BASE_URL).');
+          return;
+        }
+
+        const endpointUrl = `${baseUrl.replace(/\/$/, '')}/onboarding/questionnaire`;
+
+        const requestBody: Record<string, unknown> = {
+          gender: collectedData.gender,
+          dietary_preferences: collectedData.dietaryPreference,
+          workouts_per_week: collectedData.workoutsPerWeek,
+          preferred_workout_times: collectedData.preferredWorkoutTimes,
+        };
+
+        // Avoid sending null/undefined values.
+        for (const key of Object.keys(requestBody)) {
+          if (requestBody[key] === null || requestBody[key] === undefined) {
+            delete requestBody[key];
+          }
+        }
+
+        const response = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          let message = `Request failed with status ${response.status}.`;
+          try {
+            const maybeJson = await response.json();
+            if (maybeJson && typeof maybeJson.message === 'string') message = maybeJson.message;
+          } catch {
+            // keep fallback message
+          }
+          setSubmissionError(message);
+          return;
+        }
+
+        onSubmittedSuccess?.();
+      } catch (e) {
+        const anyErr = e as any;
+        const message = anyErr && typeof anyErr.message === 'string' ? anyErr.message : 'Request failed.';
+        setSubmissionError(message);
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   }
 
   return (
@@ -232,6 +309,8 @@ export default function OnboardingQuestionnaireWizard() {
         </div>
       )}
 
+      {submissionError && <div className="df-errorText">{submissionError}</div>}
+
       <nav className="df-actions" aria-label="Wizard navigation">
         <button className="df-btn" onClick={goBack} disabled={stepIndex === 0}>
           Back
@@ -242,8 +321,12 @@ export default function OnboardingQuestionnaireWizard() {
             Next
           </button>
         ) : (
-          <button className="df-btn df-btnPrimary" onClick={handleSubmit} disabled={isNextDisabled}>
-            Submit
+          <button
+            className="df-btn df-btnPrimary"
+            onClick={handleSubmit}
+            disabled={isNextDisabled || isSubmitting}
+          >
+            {isSubmitting ? 'Submitting...' : 'Submit'}
           </button>
         )}
       </nav>
