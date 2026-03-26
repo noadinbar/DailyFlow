@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import ProgressBar from './ProgressBar';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { configureAmplify } from '../../services/auth/amplifyConfig';
+import { setOnboardingCompletedTrue } from '../../services/auth/cognitoPlaceholders';
 
 type Gender = 'male' | 'female' | 'non_binary' | 'prefer_not_to_say' | '';
 type DietaryPreference =
@@ -23,10 +24,11 @@ function formatStepText(stepIndex1Based: number, totalSteps: number) {
 
 type OnboardingQuestionnaireWizardProps = {
   onSubmittedSuccess?: () => void;
+  onUnauthorized?: () => void;
 };
 
 export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionnaireWizardProps) {
-  const { onSubmittedSuccess } = props;
+  const { onSubmittedSuccess, onUnauthorized } = props;
 
   const [stepIndex, setStepIndex] = useState<number>(0); // 0..TOTAL_STEPS-1
 
@@ -58,6 +60,29 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
     return true;
   }, [dietaryPreference, gender, preferredWorkoutTimes.length, stepIndex, workoutsPerWeek]);
 
+  useEffect(() => {
+    // Protect the questionnaire screen entry: require a valid authenticated session.
+    void (async () => {
+      try {
+        configureAmplify();
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        const idToken = session.tokens?.idToken?.toString();
+        const token = accessToken || idToken;
+        if (!token) {
+          setSubmissionError('You are not authenticated. Please log in again.');
+          onUnauthorized?.();
+        }
+      } catch (e) {
+        setSubmissionError('You are not authenticated. Please log in again.');
+        // eslint-disable-next-line no-console
+        console.error(e);
+        onUnauthorized?.();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function goBack() {
     setStepIndex((s) => Math.max(0, s - 1));
   }
@@ -88,6 +113,7 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
 
         if (!token) {
           setSubmissionError('You are not authenticated. Please log in again.');
+          onUnauthorized?.();
           return;
         }
 
@@ -113,13 +139,32 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
           }
         }
 
-        const response = await fetch(endpointUrl, {
+        console.debug('[DailyFlow][Questionnaire] Starting questionnaire save request', {
+          endpointUrl,
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(requestBody),
+        });
+
+        let response: Response;
+        try {
+          response = await fetch(endpointUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(requestBody),
+          });
+        } catch (fetchErr) {
+          console.error('[DailyFlow][Questionnaire] Fetch failed (no response received)', fetchErr);
+          setSubmissionError(
+            'Network error: failed to connect to the server. Please check your API URL / connectivity and try again.'
+          );
+          return;
+        }
+
+        console.debug('[DailyFlow][Questionnaire] Questionnaire save request completed', {
+          ok: response.ok,
+          status: response.status,
         });
 
         if (!response.ok) {
@@ -134,7 +179,25 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
           return;
         }
 
-        onSubmittedSuccess?.();
+        try {
+          console.debug(
+            '[DailyFlow][Questionnaire] Save succeeded, updating Cognito custom:onboardingCompleted'
+          );
+          // Mark onboarding as completed in Cognito only after questionnaire save succeeds.
+          await setOnboardingCompletedTrue();
+          console.debug('[DailyFlow][Questionnaire] Cognito onboardingCompleted updated successfully');
+
+          console.debug('[DailyFlow][Questionnaire] Navigating to next screen now');
+          onSubmittedSuccess?.();
+        } catch (err) {
+          // Questionnaire already succeeded, but onboarding flag update failed.
+          // Keep the user in place and show an error so they can retry later.
+          setSubmissionError(
+            'Questionnaire saved, but failed to update onboarding status. Please try again.'
+          );
+          // eslint-disable-next-line no-console
+          console.error(err);
+        }
       } catch (e) {
         const anyErr = e as any;
         const message = anyErr && typeof anyErr.message === 'string' ? anyErr.message : 'Request failed.';

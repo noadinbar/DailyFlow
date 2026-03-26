@@ -94,10 +94,13 @@ export default function AuthScreen(props: AuthScreenProps) {
         const result = await submitSignUpPlaceholder(payload);
         setSuccessMessage(
           result.confirmationRequired
-            ? 'Sign up successful. Please confirm your account in Cognito.'
-            : 'Sign up successful.'
+            ? 'Account created. Waiting for admin approval. Please log in after approval.'
+            : 'Account created successfully. You can log in now.'
         );
-        onSignedUp?.({ username, email });
+        // Manual admin confirmation: do not navigate away or auto-sign-in.
+        // Switch UI back to Log in so the user can continue immediately.
+        setMode('login');
+        setErrors({});
       }
     } catch (e) {
       setErrors({ form: 'Something went wrong. Please try again.' });

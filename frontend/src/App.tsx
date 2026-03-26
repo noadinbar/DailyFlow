@@ -3,6 +3,8 @@ import AuthScreen from './components/Auth/AuthScreen';
 import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
 import HomePlaceholder from './components/Home/HomePlaceholder';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
+import { fetchOnboardingCompleted } from './services/auth/cognitoPlaceholders';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 type Screen = 'auth' | 'questionnaire' | 'questionnaireSaved' | 'home';
 
@@ -18,6 +20,7 @@ type AuthState = {
 
 export default function App() {
   const [screen, setScreen] = React.useState<Screen>('auth');
+  const [isCheckingOnboarding, setIsCheckingOnboarding] = React.useState<boolean>(false);
   const [authState, setAuthState] = React.useState<AuthState>({
     isAuthenticated: false,
     user: undefined,
@@ -29,13 +32,40 @@ export default function App() {
     setScreen('questionnaire');
   }
 
-  function handleLoggedIn(user: { username: string }) {
-    setAuthState({ isAuthenticated: true, user });
-    setScreen('home');
+  async function handleLoggedIn(user: { username: string }) {
+    setIsCheckingOnboarding(true);
+    try {
+      // Extra safety: only navigate after we can actually read an authenticated session.
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const idToken = session.tokens?.idToken?.toString();
+      const token = accessToken || idToken;
+      if (!token) throw new Error('Missing authenticated session token.');
+
+      const completed = await fetchOnboardingCompleted();
+      setAuthState({ isAuthenticated: true, user });
+      setScreen(completed ? 'home' : 'questionnaire');
+    } catch (e) {
+      // If onboarding flag can't be read or session is missing, do not allow forward navigation.
+      // eslint-disable-next-line no-console
+      console.error(e);
+      setAuthState({ isAuthenticated: false, user: undefined });
+      setScreen('auth');
+    } finally {
+      setIsCheckingOnboarding(false);
+    }
   }
 
   return (
     <main className="df-page">
+      {isCheckingOnboarding && (
+        <section className="df-card" aria-label="Checking onboarding status">
+          <h1 className="df-title" style={{ textAlign: 'center' }}>
+            Loading...
+          </h1>
+        </section>
+      )}
+
       {screen === 'auth' && (
         <AuthScreen
           onSignedUp={(user) => handleSignedUp(user)}
@@ -45,8 +75,13 @@ export default function App() {
 
       {screen === 'questionnaire' && (
         <OnboardingQuestionnaireWizard
+          onUnauthorized={() => {
+            setAuthState({ isAuthenticated: false, user: undefined });
+            setScreen('auth');
+          }}
           onSubmittedSuccess={() => {
-            setScreen('questionnaireSaved');
+            // Post-questionnaire success navigates to the current placeholder/main.
+            setScreen('home');
           }}
         />
       )}
