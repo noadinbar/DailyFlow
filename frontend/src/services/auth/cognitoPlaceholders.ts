@@ -181,3 +181,12 @@ export async function setOnboardingCompletedTrue(): Promise<void> {
   }
 }
 
+export async function signOutCurrentUser(): Promise<void> {
+  configureAmplify();
+  try {
+    await signOut();
+  } catch (err) {
+    throw new Error(toAmplifyErrorMessage(err));
+  }
+}
+

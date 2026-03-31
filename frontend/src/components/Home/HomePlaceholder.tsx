@@ -1,7 +1,33 @@
 import React from 'react';
 
-export default function HomePlaceholder(props: { username?: string }) {
-  const { username } = props;
+type HomePlaceholderProps = {
+  username?: string;
+  onLogout?: () => Promise<void>;
+};
+
+export default function HomePlaceholder(props: HomePlaceholderProps) {
+  const { username, onLogout } = props;
+  const [errorMessage, setErrorMessage] = React.useState<string>('');
+  const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
+
+  async function handleLogoutClick() {
+    setErrorMessage('');
+    setIsLoggingOut(true);
+    try {
+      if (onLogout) await onLogout();
+    } catch (e) {
+      const anyErr = e as any;
+      const message =
+        anyErr && typeof anyErr.message === 'string'
+          ? anyErr.message
+          : 'Failed to sign out. Please try again.';
+      setErrorMessage(message);
+      // eslint-disable-next-line no-console
+      console.error(e);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
 
   return (
     <section className="df-card" aria-label="Home placeholder">
@@ -13,6 +39,14 @@ export default function HomePlaceholder(props: { username?: string }) {
           Welcome, {username}
         </p>
       )}
+
+      {errorMessage && <div className="df-errorText">{errorMessage}</div>}
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
+        <button className="df-btn" onClick={() => void handleLogoutClick()} disabled={isLoggingOut}>
+          {isLoggingOut ? 'Signing out...' : 'Sign out'}
+        </button>
+      </div>
     </section>
   );
 }

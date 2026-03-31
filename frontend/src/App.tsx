@@ -3,7 +3,7 @@ import AuthScreen from './components/Auth/AuthScreen';
 import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
 import HomePlaceholder from './components/Home/HomePlaceholder';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
-import { fetchOnboardingCompleted } from './services/auth/cognitoPlaceholders';
+import { fetchOnboardingCompleted, signOutCurrentUser } from './services/auth/cognitoPlaceholders';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
 type Screen = 'auth' | 'questionnaire' | 'questionnaireSaved' | 'home';
@@ -56,6 +56,12 @@ export default function App() {
     }
   }
 
+  async function handleLogout() {
+    await signOutCurrentUser();
+    setAuthState({ isAuthenticated: false, user: undefined });
+    setScreen('auth');
+  }
+
   return (
     <main className="df-page">
       {isCheckingOnboarding && (
@@ -88,7 +94,9 @@ export default function App() {
 
       {screen === 'questionnaireSaved' && <QuestionnaireSavedPlaceholder />}
 
-      {screen === 'home' && <HomePlaceholder username={authState.user?.username} />}
+      {screen === 'home' && (
+        <HomePlaceholder username={authState.user?.username} onLogout={() => handleLogout()} />
+      )}
     </main>
   );
 }
