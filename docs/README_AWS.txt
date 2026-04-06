@@ -2,9 +2,9 @@ cognito userpool id: us-east-1_gMsRyvXxx
 
 app client id: 5n5der5h6kag5omd0krqj4ee65
 
-amplify app id: d2hysw41mze4hw
+amplify app id: dnp9vhzk0bw8l
 
-amplify domain: https://production.d2hysw41mze4hw.amplifyapp.com
+amplify domain: https://main.dnp9vhzk0bw8l.amplifyapp.com
 
 tables: 1. Users
 2. Integrations
