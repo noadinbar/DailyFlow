@@ -18,8 +18,22 @@ type AuthState = {
   user?: AuthUser;
 };
 
+function getInitialScreenFromLocation(): Screen {
+  if (typeof window === 'undefined') return 'auth';
+
+  const isCalendarPath = window.location.pathname === '/calendar';
+  const params = new URLSearchParams(window.location.search);
+  const hasGoogleOAuthParams = Boolean(params.get('code')) && Boolean(params.get('state'));
+
+  if (isCalendarPath && hasGoogleOAuthParams) {
+    return 'home';
+  }
+
+  return 'auth';
+}
+
 export default function App() {
-  const [screen, setScreen] = React.useState<Screen>('auth');
+  const [screen, setScreen] = React.useState<Screen>(() => getInitialScreenFromLocation());
   const [isCheckingOnboarding, setIsCheckingOnboarding] = React.useState<boolean>(false);
   const [authState, setAuthState] = React.useState<AuthState>({
     isAuthenticated: false,

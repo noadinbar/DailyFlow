@@ -1,8 +1,17 @@
 import React from 'react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 type HomePlaceholderProps = {
   username?: string;
   onLogout?: () => Promise<void>;
+};
+
+type GoogleCalendarItem = {
+  id: string;
+  summary: string;
+  primary: boolean;
+  selected: boolean;
+  backgroundColor?: string;
 };
 
 export default function HomePlaceholder(props: HomePlaceholderProps) {
@@ -10,6 +19,9 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
+  const [isLoadingCalendars, setIsLoadingCalendars] = React.useState<boolean>(false);
+  const [googleCalendars, setGoogleCalendars] = React.useState<GoogleCalendarItem[]>([]);
+  const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
 
   async function handleLogoutClick() {
     setErrorMessage('');
@@ -52,6 +64,52 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       setErrorMessage(message);
       setIsConnectingGoogleCalendar(false);
     }
+  }
+
+  React.useEffect(() => {
+    void (async () => {
+      setIsLoadingCalendars(true);
+      try {
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        const idToken = session.tokens?.idToken?.toString();
+        const token = accessToken || idToken;
+        if (!token) return;
+
+        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+        if (!baseUrl) return;
+
+        const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/calendars`;
+        const response = await fetch(endpointUrl, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!response.ok) return;
+
+        const payload = (await response.json()) as { calendars?: GoogleCalendarItem[] };
+        const calendars = Array.isArray(payload.calendars) ? payload.calendars : [];
+        setGoogleCalendars(calendars);
+        setSelectedCalendarIds(
+          calendars
+            .filter((calendar) => calendar.selected)
+            .map((calendar) => calendar.id)
+            .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+        );
+      } catch {
+        // Keep calendar screen usable even if calendar list fetch fails.
+      } finally {
+        setIsLoadingCalendars(false);
+      }
+    })();
+  }, []);
+
+  function toggleCalendarSelection(calendarId: string) {
+    setSelectedCalendarIds((current) => {
+      if (current.includes(calendarId)) return current.filter((id) => id !== calendarId);
+      return [...current, calendarId];
+    });
   }
 
   return (
@@ -241,26 +299,36 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
 
             <div className="df-calendarsList">
               <h2>Calendars</h2>
-              <div className="df-calendarLegend">
-                <span className="df-dot df-dotBlue" />
-                Personal
-              </div>
-              <div className="df-calendarLegend">
-                <span className="df-dot df-dotBlue" />
-                Work
-              </div>
-              <div className="df-calendarLegend">
-                <span className="df-dot df-dotGreen" />
-                University
-              </div>
-              <div className="df-calendarLegend">
-                <span className="df-dot df-dotPink" />
-                Family
-              </div>
-              <div className="df-calendarLegend">
-                <span className="df-dot df-dotPurple" />
-                DailyFlow
-              </div>
+              {isLoadingCalendars && (
+                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  Loading calendars...
+                </div>
+              )}
+              {!isLoadingCalendars && googleCalendars.length === 0 && (
+                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  No connected calendars yet.
+                </div>
+              )}
+              {!isLoadingCalendars &&
+                googleCalendars.map((calendar) => {
+                  const calendarId = calendar.id || '';
+                  if (!calendarId) return null;
+                  const isSelected = selectedCalendarIds.includes(calendarId);
+                  return (
+                    <label key={calendarId} className="df-calendarLegend">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleCalendarSelection(calendarId)}
+                      />
+                      <span
+                        className="df-dot"
+                        style={{ background: calendar.backgroundColor || '#3b82f6' }}
+                      />
+                      {calendar.summary || calendarId}
+                    </label>
+                  );
+                })}
             </div>
           </aside>
         </div>
