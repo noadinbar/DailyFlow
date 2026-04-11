@@ -129,6 +129,7 @@ export default function App() {
   async function handleLoggedIn(user: { username: string }) {
     setIsCheckingOnboarding(true);
     try {
+      configureAmplify();
       const session = await fetchAuthSession();
       const accessToken = session.tokens?.accessToken?.toString();
       const idToken = session.tokens?.idToken?.toString();
@@ -165,57 +166,71 @@ export default function App() {
   const showBlockingLoader = isCheckingOnboarding || isHydratingCalendarRoute;
 
   return (
-    <main className="df-page">
+    <main className="df-page" style={{ position: 'relative' }}>
+      {/* Keep Routes mounted during login/calendar hydration so navigate() updates the URL reliably. */}
+      <Routes>
+        <Route
+          path="/calendar"
+          element={
+            screen === 'home' && authState.isAuthenticated ? (
+              <HomePlaceholder username={authState.user?.username} onLogout={() => handleLogout()} />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+        <Route
+          path="*"
+          element={
+            <>
+              {screen === 'auth' && (
+                <AuthScreen
+                  onSignedUp={(user) => handleSignedUp(user)}
+                  onLoggedIn={(user) => void handleLoggedIn(user)}
+                />
+              )}
+
+              {screen === 'questionnaire' && (
+                <OnboardingQuestionnaireWizard
+                  onUnauthorized={() => {
+                    setAuthState({ isAuthenticated: false, user: undefined });
+                    setScreen('auth');
+                    navigate('/', { replace: true });
+                  }}
+                  onSubmittedSuccess={() => {
+                    setScreen('home');
+                    navigate('/calendar', { replace: true });
+                  }}
+                />
+              )}
+
+              {screen === 'questionnaireSaved' && <QuestionnaireSavedPlaceholder />}
+            </>
+          }
+        />
+      </Routes>
+
       {showBlockingLoader && (
-        <section className="df-card" aria-label="Loading">
-          <h1 className="df-title" style={{ textAlign: 'center' }}>
-            Loading...
-          </h1>
-        </section>
-      )}
-
-      {!showBlockingLoader && (
-        <Routes>
-          <Route
-            path="/calendar"
-            element={
-              screen === 'home' && authState.isAuthenticated ? (
-                <HomePlaceholder username={authState.user?.username} onLogout={() => handleLogout()} />
-              ) : (
-                <Navigate to="/" replace />
-              )
-            }
-          />
-          <Route
-            path="*"
-            element={
-              <>
-                {screen === 'auth' && (
-                  <AuthScreen
-                    onSignedUp={(user) => handleSignedUp(user)}
-                    onLoggedIn={(user) => void handleLoggedIn(user)}
-                  />
-                )}
-
-                {screen === 'questionnaire' && (
-                  <OnboardingQuestionnaireWizard
-                    onUnauthorized={() => {
-                      setAuthState({ isAuthenticated: false, user: undefined });
-                      setScreen('auth');
-                      navigate('/', { replace: true });
-                    }}
-                    onSubmittedSuccess={() => {
-                      setScreen('home');
-                      navigate('/calendar', { replace: true });
-                    }}
-                  />
-                )}
-
-                {screen === 'questionnaireSaved' && <QuestionnaireSavedPlaceholder />}
-              </>
-            }
-          />
-        </Routes>
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(247, 247, 248, 0.92)',
+          }}
+          role="status"
+          aria-live="polite"
+          aria-label="Loading"
+        >
+          <section className="df-card">
+            <h1 className="df-title" style={{ textAlign: 'center' }}>
+              Loading...
+            </h1>
+          </section>
+        </div>
       )}
     </main>
   );
