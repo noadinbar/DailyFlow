@@ -12,11 +12,18 @@ import boto3
 GOOGLE_CALENDAR_LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
+_CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "https://main.dnp9vhzk0bw8l.amplifyapp.com",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
+}
+
 
 def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": dict(_CORS_HEADERS),
         "body": json.dumps(body),
     }
 
@@ -160,6 +167,16 @@ def _update_connection_tokens(user_id: str, connection: Dict[str, Any], new_toke
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    request_context = event.get("requestContext") or {}
+    http = request_context.get("http") or {}
+    method = (http.get("method") or event.get("httpMethod") or "").upper()
+    if method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": dict(_CORS_HEADERS),
+            "body": "",
+        }
+
     user_id = _extract_cognito_sub(event)
     if not user_id:
         return _json_response(401, {"message": "Missing Cognito user id (sub) in request."})

@@ -70,10 +70,15 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           return;
         }
 
-        // Full-page navigation (not fetch) to avoid CORS on the redirect to Google.
+        // Full-page navigation only — never use fetch() here (fetch follows redirects and hits Google with CORS).
         // access_token is required so the API can resolve Cognito sub (browser navigation cannot send Authorization).
         const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
-        window.location.href = startUrl;
+        const form = document.createElement('form');
+        form.method = 'GET';
+        form.action = startUrl;
+        form.style.display = 'none';
+        document.body.appendChild(form);
+        form.submit();
       } catch (e) {
         const anyErr = e as any;
         const message =
