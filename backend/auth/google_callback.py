@@ -146,4 +146,5 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         target = f"{frontend}?google_oauth_error=storage"
         return _redirect(302, target)
 
-    return _redirect(302, frontend)
+    separator = "&" if "?" in frontend else "?"
+    return _redirect(302, f"{frontend}{separator}google_calendar_connected=1")

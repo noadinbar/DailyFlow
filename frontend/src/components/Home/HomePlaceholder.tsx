@@ -6,6 +6,8 @@ type HomePlaceholderProps = {
   onLogout?: () => Promise<void>;
 };
 
+const GOOGLE_CALENDAR_CONNECTED_FLAG = 'dailyflow_google_calendar_connected';
+
 type GoogleCalendarItem = {
   id: string;
   summary: string;
@@ -20,8 +22,8 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
   const [calendarsLoadState, setCalendarsLoadState] = React.useState<
-    'loading' | 'ready' | 'error'
-  >('loading');
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
   const [calendarsListError, setCalendarsListError] = React.useState<string>('');
   const [googleCalendars, setGoogleCalendars] = React.useState<GoogleCalendarItem[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
@@ -30,6 +32,9 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     setErrorMessage('');
     setIsLoggingOut(true);
     try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(GOOGLE_CALENDAR_CONNECTED_FLAG);
+      }
       if (onLogout) await onLogout();
     } catch (e) {
       const anyErr = e as any;
@@ -59,47 +64,16 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
 
         const session = await fetchAuthSession();
         const accessToken = session.tokens?.accessToken?.toString();
-        const idToken = session.tokens?.idToken?.toString();
-        const token = accessToken || idToken;
-        if (!token) {
+        if (!accessToken) {
           setErrorMessage('You need to be signed in to connect Google Calendar.');
           setIsConnectingGoogleCalendar(false);
           return;
         }
 
-        const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start`;
-        const response = await fetch(endpointUrl, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        let payload: { authorizationUrl?: string; message?: string } = {};
-        try {
-          payload = (await response.json()) as typeof payload;
-        } catch {
-          payload = {};
-        }
-
-        if (!response.ok) {
-          const message =
-            typeof payload.message === 'string' && payload.message.trim()
-              ? payload.message
-              : `Could not start Google connection (${response.status}).`;
-          setErrorMessage(message);
-          setIsConnectingGoogleCalendar(false);
-          return;
-        }
-
-        const authorizationUrl = payload.authorizationUrl;
-        if (typeof authorizationUrl !== 'string' || !authorizationUrl.trim()) {
-          setErrorMessage('Invalid response from server (missing authorizationUrl).');
-          setIsConnectingGoogleCalendar(false);
-          return;
-        }
-
-        window.location.assign(authorizationUrl);
+        // Full-page navigation (not fetch) to avoid CORS on the redirect to Google.
+        // access_token is required so the API can resolve Cognito sub (browser navigation cannot send Authorization).
+        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
+        window.location.href = startUrl;
       } catch (e) {
         const anyErr = e as any;
         const message =
@@ -169,6 +143,9 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
       );
       setCalendarsLoadState('ready');
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(GOOGLE_CALENDAR_CONNECTED_FLAG, '1');
+      }
     } catch (e) {
       const anyErr = e as { message?: string };
       setCalendarsListError(
@@ -179,7 +156,26 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   }, []);
 
   React.useEffect(() => {
-    void loadGoogleCalendars();
+    if (typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const fromCallback = params.get('google_calendar_connected') === '1';
+    if (fromCallback) {
+      window.localStorage.setItem(GOOGLE_CALENDAR_CONNECTED_FLAG, '1');
+      params.delete('google_calendar_connected');
+      const nextSearch = params.toString();
+      const next = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', next);
+    }
+
+    const shouldLoad =
+      fromCallback || window.localStorage.getItem(GOOGLE_CALENDAR_CONNECTED_FLAG) === '1';
+
+    if (shouldLoad) {
+      void loadGoogleCalendars();
+    } else {
+      setCalendarsLoadState('idle');
+    }
   }, [loadGoogleCalendars]);
 
   function toggleCalendarSelection(calendarId: string) {
@@ -376,6 +372,11 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
 
             <div className="df-calendarsList" aria-busy={calendarsLoadState === 'loading'}>
               <h2>Calendars</h2>
+              {calendarsLoadState === 'idle' && (
+                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  Connect Google Calendar to load your calendar list.
+                </div>
+              )}
               {calendarsLoadState === 'loading' && (
                 <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
                   Loading calendars...
