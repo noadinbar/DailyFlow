@@ -19,7 +19,10 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
-  const [isLoadingCalendars, setIsLoadingCalendars] = React.useState<boolean>(false);
+  const [calendarsLoadState, setCalendarsLoadState] = React.useState<
+    'loading' | 'ready' | 'error'
+  >('loading');
+  const [calendarsListError, setCalendarsListError] = React.useState<string>('');
   const [googleCalendars, setGoogleCalendars] = React.useState<GoogleCalendarItem[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
 
@@ -66,44 +69,83 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     }
   }
 
-  React.useEffect(() => {
-    void (async () => {
-      setIsLoadingCalendars(true);
-      try {
-        const session = await fetchAuthSession();
-        const accessToken = session.tokens?.accessToken?.toString();
-        const idToken = session.tokens?.idToken?.toString();
-        const token = accessToken || idToken;
-        if (!token) return;
+  const loadGoogleCalendars = React.useCallback(async () => {
+    setCalendarsLoadState('loading');
+    setCalendarsListError('');
+    setGoogleCalendars([]);
 
-        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-        if (!baseUrl) return;
-
-        const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/calendars`;
-        const response = await fetch(endpointUrl, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (!response.ok) return;
-
-        const payload = (await response.json()) as { calendars?: GoogleCalendarItem[] };
-        const calendars = Array.isArray(payload.calendars) ? payload.calendars : [];
-        setGoogleCalendars(calendars);
-        setSelectedCalendarIds(
-          calendars
-            .filter((calendar) => calendar.selected)
-            .map((calendar) => calendar.id)
-            .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-        );
-      } catch {
-        // Keep calendar screen usable even if calendar list fetch fails.
-      } finally {
-        setIsLoadingCalendars(false);
+    try {
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const idToken = session.tokens?.idToken?.toString();
+      const token = accessToken || idToken;
+      if (!token) {
+        setCalendarsListError('You need to be signed in to load calendars.');
+        setCalendarsLoadState('error');
+        return;
       }
-    })();
+
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) {
+        setCalendarsListError('Missing API base URL (VITE_API_BASE_URL).');
+        setCalendarsLoadState('error');
+        return;
+      }
+
+      const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/calendars`;
+      const response = await fetch(endpointUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let payload: { message?: string; calendars?: GoogleCalendarItem[] } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
+
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not load calendars (${response.status}).`;
+        setCalendarsListError(message);
+        setCalendarsLoadState('error');
+        return;
+      }
+
+      const calendars = Array.isArray(payload.calendars) ? payload.calendars : [];
+      setGoogleCalendars(calendars);
+      setSelectedCalendarIds(
+        calendars
+          .filter((calendar) => calendar.selected !== false)
+          .map((calendar) => calendar.id)
+          .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+      );
+      setCalendarsLoadState('ready');
+
+      const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+      if (params.get('code') && params.get('state')) {
+        params.delete('code');
+        params.delete('state');
+        const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, '', next);
+      }
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setCalendarsListError(
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to load calendars.'
+      );
+      setCalendarsLoadState('error');
+    }
   }, []);
+
+  React.useEffect(() => {
+    void loadGoogleCalendars();
+  }, [loadGoogleCalendars]);
 
   function toggleCalendarSelection(calendarId: string) {
     setSelectedCalendarIds((current) => {
@@ -297,22 +339,31 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
               </div>
             </div>
 
-            <div className="df-calendarsList">
+            <div className="df-calendarsList" aria-busy={calendarsLoadState === 'loading'}>
               <h2>Calendars</h2>
-              {isLoadingCalendars && (
+              {calendarsLoadState === 'loading' && (
                 <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
                   Loading calendars...
                 </div>
               )}
-              {!isLoadingCalendars && googleCalendars.length === 0 && (
-                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
-                  No connected calendars yet.
+              {calendarsLoadState === 'error' && (
+                <div className="df-calendarLegend" style={{ color: '#b91c1c' }} role="alert">
+                  {calendarsListError}
                 </div>
               )}
-              {!isLoadingCalendars &&
+              {calendarsLoadState === 'ready' && googleCalendars.length === 0 && (
+                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  No calendars returned for this account.
+                </div>
+              )}
+              {calendarsLoadState === 'ready' &&
                 googleCalendars.map((calendar) => {
                   const calendarId = calendar.id || '';
                   if (!calendarId) return null;
+                  const displayName =
+                    typeof calendar.summary === 'string' && calendar.summary.trim()
+                      ? calendar.summary.trim()
+                      : calendarId;
                   const isSelected = selectedCalendarIds.includes(calendarId);
                   return (
                     <label key={calendarId} className="df-calendarLegend">
@@ -320,12 +371,14 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => toggleCalendarSelection(calendarId)}
+                        aria-label={`Expose calendar ${displayName} to DailyFlow`}
                       />
                       <span
                         className="df-dot"
                         style={{ background: calendar.backgroundColor || '#3b82f6' }}
+                        aria-hidden
                       />
-                      {calendar.summary || calendarId}
+                      <span>{displayName}</span>
                     </label>
                   );
                 })}
