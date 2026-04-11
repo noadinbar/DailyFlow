@@ -48,25 +48,68 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   function handleConnectGoogleCalendarClick() {
     setIsConnectingGoogleCalendar(true);
     setErrorMessage('');
-    try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      if (!baseUrl) {
-        setErrorMessage('Missing API base URL configuration (VITE_API_BASE_URL).');
-        setIsConnectingGoogleCalendar(false);
-        return;
-      }
+    void (async () => {
+      try {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+        if (!baseUrl) {
+          setErrorMessage('Missing API base URL configuration (VITE_API_BASE_URL).');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
 
-      const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start`;
-      window.location.assign(endpointUrl);
-    } catch (e) {
-      const anyErr = e as any;
-      const message =
-        anyErr && typeof anyErr.message === 'string'
-          ? anyErr.message
-          : 'Failed to start Google Calendar connection.';
-      setErrorMessage(message);
-      setIsConnectingGoogleCalendar(false);
-    }
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        const idToken = session.tokens?.idToken?.toString();
+        const token = accessToken || idToken;
+        if (!token) {
+          setErrorMessage('You need to be signed in to connect Google Calendar.');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+
+        const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start`;
+        const response = await fetch(endpointUrl, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        let payload: { authorizationUrl?: string; message?: string } = {};
+        try {
+          payload = (await response.json()) as typeof payload;
+        } catch {
+          payload = {};
+        }
+
+        if (!response.ok) {
+          const message =
+            typeof payload.message === 'string' && payload.message.trim()
+              ? payload.message
+              : `Could not start Google connection (${response.status}).`;
+          setErrorMessage(message);
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+
+        const authorizationUrl = payload.authorizationUrl;
+        if (typeof authorizationUrl !== 'string' || !authorizationUrl.trim()) {
+          setErrorMessage('Invalid response from server (missing authorizationUrl).');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+
+        window.location.assign(authorizationUrl);
+      } catch (e) {
+        const anyErr = e as any;
+        const message =
+          anyErr && typeof anyErr.message === 'string'
+            ? anyErr.message
+            : 'Failed to start Google Calendar connection.';
+        setErrorMessage(message);
+        setIsConnectingGoogleCalendar(false);
+      }
+    })();
   }
 
   const loadGoogleCalendars = React.useCallback(async () => {
@@ -126,14 +169,6 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
       );
       setCalendarsLoadState('ready');
-
-      const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
-      if (params.get('code') && params.get('state')) {
-        params.delete('code');
-        params.delete('state');
-        const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}${window.location.hash}`;
-        window.history.replaceState({}, '', next);
-      }
     } catch (e) {
       const anyErr = e as { message?: string };
       setCalendarsListError(

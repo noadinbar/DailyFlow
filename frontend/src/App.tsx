@@ -20,20 +20,6 @@ type AuthState = {
   user?: AuthUser;
 };
 
-function getInitialScreenFromLocation(): Screen {
-  if (typeof window === 'undefined') return 'auth';
-
-  const isCalendarPath = window.location.pathname === '/calendar';
-  const params = new URLSearchParams(window.location.search);
-  const hasGoogleOAuthParams = Boolean(params.get('code')) && Boolean(params.get('state'));
-
-  if (isCalendarPath && hasGoogleOAuthParams) {
-    return 'home';
-  }
-
-  return 'auth';
-}
-
 function shouldStartHydratingCalendar(): boolean {
   if (typeof window === 'undefined') return false;
   return window.location.pathname === '/calendar';
@@ -43,7 +29,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [screen, setScreen] = React.useState<Screen>(() => getInitialScreenFromLocation());
+  const [screen, setScreen] = React.useState<Screen>('auth');
   const [isCheckingOnboarding, setIsCheckingOnboarding] = React.useState<boolean>(false);
   const [isHydratingCalendarRoute, setIsHydratingCalendarRoute] = React.useState<boolean>(() =>
     shouldStartHydratingCalendar()
