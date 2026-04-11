@@ -5,6 +5,13 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+_CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "https://main.dnp9vhzk0bw8l.amplifyapp.com",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+}
+
 
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
     """
@@ -53,12 +60,22 @@ def _iso_utc_now() -> str:
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    request_context = event.get("requestContext") or {}
+    http = request_context.get("http") or {}
+    method = (http.get("method") or event.get("httpMethod") or "").upper()
+    if method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": dict(_CORS_HEADERS),
+            "body": "",
+        }
+
     aws_region = os.getenv("AWS_REGION")
     users_table_name = os.getenv("USERS_TABLE")
     if not users_table_name:
         return {
             "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
+            "headers": dict(_CORS_HEADERS),
             "body": json.dumps({"message": "Missing USERS_TABLE env var."}),
         }
 
@@ -66,7 +83,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not user_id:
         return {
             "statusCode": 401,
-            "headers": {"Content-Type": "application/json"},
+            "headers": dict(_CORS_HEADERS),
             "body": json.dumps({"message": "Missing Cognito user id (sub) in request."}),
         }
 
@@ -75,7 +92,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except json.JSONDecodeError:
         return {
             "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
+            "headers": dict(_CORS_HEADERS),
             "body": json.dumps({"message": "Request body must be valid JSON."}),
         }
 
@@ -140,7 +157,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": dict(_CORS_HEADERS),
         "body": json.dumps(
             {
                 "message": "Onboarding questionnaire saved.",
