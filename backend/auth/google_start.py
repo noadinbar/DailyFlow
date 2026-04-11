@@ -4,7 +4,10 @@ from urllib.parse import urlencode
 
 import boto3
 
-from .google_oauth_state import build_oauth_state
+try:
+    from .google_oauth_state import build_oauth_state
+except ImportError:
+    from google_oauth_state import build_oauth_state
 
 GOOGLE_AUTH_BASE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"

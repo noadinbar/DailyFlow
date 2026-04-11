@@ -8,7 +8,11 @@ from urllib.request import Request, urlopen
 
 import boto3
 
-from .google_oauth_state import verify_oauth_state
+try:
+    from .google_oauth_state import verify_oauth_state
+except ImportError:
+    # Lambda zip with `lambda_function.py` at root (no package): sibling modules only.
+    from google_oauth_state import verify_oauth_state
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
