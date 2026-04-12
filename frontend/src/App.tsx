@@ -20,9 +20,15 @@ type AuthState = {
   user?: AuthUser;
 };
 
+function normalizePathname(pathname: string): string {
+  if (!pathname) return '/';
+  const normalized = pathname.replace(/\/+$/, '');
+  return normalized === '' ? '/' : normalized;
+}
+
 function shouldStartHydratingCalendar(): boolean {
   if (typeof window === 'undefined') return false;
-  return window.location.pathname === '/calendar';
+  return normalizePathname(window.location.pathname) === '/calendar';
 }
 
 export default function App() {
@@ -40,7 +46,7 @@ export default function App() {
   });
 
   React.useEffect(() => {
-    if (location.pathname !== '/calendar') {
+    if (normalizePathname(location.pathname) !== '/calendar') {
       setIsHydratingCalendarRoute(false);
       return;
     }
