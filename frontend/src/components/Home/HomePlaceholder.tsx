@@ -6,8 +6,15 @@ type HomePlaceholderProps = {
   onLogout?: () => Promise<void>;
 };
 
-/** Sidebar + integration: backend GET /auth/google/calendars is source of truth (200 vs 404). */
-type CalendarSidebarState = 'checking' | 'not_connected' | 'ready' | 'error';
+/** Backend GET /auth/google/calendars: 200 connected, 404 not connected, 403 expired Google token. */
+const GOOGLE_RECONNECT_MESSAGE = 'Google connection expired, reconnect required';
+
+type CalendarSidebarState =
+  | 'checking'
+  | 'not_connected'
+  | 'ready'
+  | 'reconnect_required'
+  | 'error';
 
 type GoogleCalendarItem = {
   id: string;
@@ -130,6 +137,18 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
         return;
       }
 
+      if (
+        response.status === 403 &&
+        typeof payload.message === 'string' &&
+        payload.message === GOOGLE_RECONNECT_MESSAGE
+      ) {
+        setGoogleCalendars([]);
+        setSelectedCalendarIds([]);
+        setCalendarsListError(GOOGLE_RECONNECT_MESSAGE);
+        setCalendarSidebarState('reconnect_required');
+        return;
+      }
+
       if (!response.ok) {
         const message =
           typeof payload.message === 'string' && payload.message.trim()
@@ -233,6 +252,11 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
             {calendarSidebarState === 'ready' && (
               <span className="df-calendarLegend" style={{ color: '#15803d', marginRight: 12 }}>
                 Google Calendar connected
+              </span>
+            )}
+            {calendarSidebarState === 'reconnect_required' && (
+              <span className="df-calendarLegend" style={{ color: '#b45309', marginRight: 12 }}>
+                {GOOGLE_RECONNECT_MESSAGE}
               </span>
             )}
             <button
@@ -388,6 +412,11 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
               {calendarSidebarState === 'not_connected' && (
                 <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
                   Connect Google Calendar to load your calendar list.
+                </div>
+              )}
+              {calendarSidebarState === 'reconnect_required' && (
+                <div className="df-calendarLegend" style={{ color: '#b45309' }} role="alert">
+                  {calendarsListError}
                 </div>
               )}
               {calendarSidebarState === 'error' && (

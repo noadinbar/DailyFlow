@@ -11,6 +11,7 @@ import boto3
 
 GOOGLE_CALENDAR_LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_RECONNECT_MESSAGE = "Google connection expired, reconnect required"
 
 _CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -26,6 +27,10 @@ def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         "headers": dict(_CORS_HEADERS),
         "body": json.dumps(body),
     }
+
+
+def _json_google_reconnect_required() -> Dict[str, Any]:
+    return _json_response(403, {"message": GOOGLE_RECONNECT_MESSAGE})
 
 
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
@@ -192,6 +197,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     _, connection = stored
     access_token = connection.get("access_token") or connection.get("accessToken")
     refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
+    has_refresh = bool(isinstance(refresh_token, str) and refresh_token.strip())
 
     if not access_token:
         return _json_response(404, {"message": "Google Calendar is not connected for this user."})
@@ -199,22 +205,33 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         _, payload = _calendar_list_request(access_token)
     except HTTPError as err:
-        if err.code == 401 and refresh_token:
-            try:
-                new_tokens = _refresh_access_token(refresh_token)
-                if not new_tokens:
-                    return _json_response(500, {"message": "Missing Google OAuth client configuration."})
-                _update_connection_tokens(user_id, connection, new_tokens)
-                refreshed_access_token = (
-                    connection.get("access_token") or connection.get("accessToken") or ""
-                )
-                _, payload = _calendar_list_request(refreshed_access_token)
-            except Exception:
-                return _json_response(502, {"message": "Failed to refresh Google access token."})
-        else:
+        if err.code != 401:
             return _json_response(
                 502,
                 {"message": f"Google Calendar API request failed with status {err.code}."},
+            )
+
+        if not has_refresh:
+            return _json_google_reconnect_required()
+
+        try:
+            new_tokens = _refresh_access_token(refresh_token)
+        except Exception:
+            return _json_google_reconnect_required()
+
+        if not new_tokens or not isinstance(new_tokens.get("access_token"), str) or not new_tokens.get("access_token"):
+            return _json_response(500, {"message": "Missing Google OAuth client configuration."})
+
+        _update_connection_tokens(user_id, connection, new_tokens)
+        refreshed_access_token = connection.get("access_token") or connection.get("accessToken") or ""
+        try:
+            _, payload = _calendar_list_request(refreshed_access_token)
+        except HTTPError as err2:
+            if err2.code == 401:
+                return _json_google_reconnect_required()
+            return _json_response(
+                502,
+                {"message": f"Google Calendar API request failed with status {err2.code}."},
             )
     except (URLError, TimeoutError):
         return _json_response(502, {"message": "Failed to reach Google Calendar API."})
