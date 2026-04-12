@@ -6,7 +6,8 @@ type HomePlaceholderProps = {
   onLogout?: () => Promise<void>;
 };
 
-const GOOGLE_CALENDAR_CONNECTED_FLAG = 'dailyflow_google_calendar_connected';
+/** Sidebar + integration: backend GET /auth/google/calendars is source of truth (200 vs 404). */
+type CalendarSidebarState = 'checking' | 'not_connected' | 'ready' | 'error';
 
 type GoogleCalendarItem = {
   id: string;
@@ -21,9 +22,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
-  const [calendarsLoadState, setCalendarsLoadState] = React.useState<
-    'idle' | 'loading' | 'ready' | 'error'
-  >('idle');
+  const [calendarSidebarState, setCalendarSidebarState] = React.useState<CalendarSidebarState>('checking');
   const [calendarsListError, setCalendarsListError] = React.useState<string>('');
   const [googleCalendars, setGoogleCalendars] = React.useState<GoogleCalendarItem[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
@@ -32,9 +31,6 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     setErrorMessage('');
     setIsLoggingOut(true);
     try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(GOOGLE_CALENDAR_CONNECTED_FLAG);
-      }
       if (onLogout) await onLogout();
     } catch (e) {
       const anyErr = e as any;
@@ -88,8 +84,8 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     })();
   }
 
-  const loadGoogleCalendars = React.useCallback(async () => {
-    setCalendarsLoadState('loading');
+  const refreshGoogleCalendarFromBackend = React.useCallback(async () => {
+    setCalendarSidebarState('checking');
     setCalendarsListError('');
     setGoogleCalendars([]);
 
@@ -100,14 +96,14 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       const token = accessToken || idToken;
       if (!token) {
         setCalendarsListError('You need to be signed in to load calendars.');
-        setCalendarsLoadState('error');
+        setCalendarSidebarState('error');
         return;
       }
 
       const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
       if (!baseUrl?.trim()) {
         setCalendarsListError('Missing API base URL (VITE_API_BASE_URL).');
-        setCalendarsLoadState('error');
+        setCalendarSidebarState('error');
         return;
       }
 
@@ -126,13 +122,21 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
         payload = {};
       }
 
+      if (response.status === 404) {
+        setGoogleCalendars([]);
+        setSelectedCalendarIds([]);
+        setCalendarsListError('');
+        setCalendarSidebarState('not_connected');
+        return;
+      }
+
       if (!response.ok) {
         const message =
           typeof payload.message === 'string' && payload.message.trim()
             ? payload.message
             : `Could not load calendars (${response.status}).`;
         setCalendarsListError(message);
-        setCalendarsLoadState('error');
+        setCalendarSidebarState('error');
         return;
       }
 
@@ -144,16 +148,13 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           .map((calendar) => calendar.id)
           .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
       );
-      setCalendarsLoadState('ready');
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(GOOGLE_CALENDAR_CONNECTED_FLAG, '1');
-      }
+      setCalendarSidebarState('ready');
     } catch (e) {
       const anyErr = e as { message?: string };
       setCalendarsListError(
         typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to load calendars.'
       );
-      setCalendarsLoadState('error');
+      setCalendarSidebarState('error');
     }
   }, []);
 
@@ -161,24 +162,15 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     if (typeof window === 'undefined') return;
 
     const params = new URLSearchParams(window.location.search);
-    const fromCallback = params.get('google_calendar_connected') === '1';
-    if (fromCallback) {
-      window.localStorage.setItem(GOOGLE_CALENDAR_CONNECTED_FLAG, '1');
+    if (params.get('google_calendar_connected') === '1') {
       params.delete('google_calendar_connected');
       const nextSearch = params.toString();
       const next = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
       window.history.replaceState({}, '', next);
     }
 
-    const shouldLoad =
-      fromCallback || window.localStorage.getItem(GOOGLE_CALENDAR_CONNECTED_FLAG) === '1';
-
-    if (shouldLoad) {
-      void loadGoogleCalendars();
-    } else {
-      setCalendarsLoadState('idle');
-    }
-  }, [loadGoogleCalendars]);
+    void refreshGoogleCalendarFromBackend();
+  }, [refreshGoogleCalendarFromBackend]);
 
   function toggleCalendarSelection(calendarId: string) {
     setSelectedCalendarIds((current) => {
@@ -238,11 +230,25 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           </div>
 
           <div className="df-calendarTopbarRight">
+            {calendarSidebarState === 'ready' && (
+              <span className="df-calendarLegend" style={{ color: '#15803d', marginRight: 12 }}>
+                Google Calendar connected
+              </span>
+            )}
             <button
               type="button"
               className="df-btn df-btnPrimary"
               onClick={handleConnectGoogleCalendarClick}
-              disabled={isConnectingGoogleCalendar}
+              disabled={
+                isConnectingGoogleCalendar ||
+                calendarSidebarState === 'checking' ||
+                calendarSidebarState === 'ready'
+              }
+              style={
+                calendarSidebarState === 'ready'
+                  ? { opacity: 0.55, cursor: 'not-allowed' }
+                  : undefined
+              }
             >
               {isConnectingGoogleCalendar
                 ? 'Connecting...'
@@ -372,29 +378,29 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
               </div>
             </div>
 
-            <div className="df-calendarsList" aria-busy={calendarsLoadState === 'loading'}>
+            <div className="df-calendarsList" aria-busy={calendarSidebarState === 'checking'}>
               <h2>Calendars</h2>
-              {calendarsLoadState === 'idle' && (
+              {calendarSidebarState === 'checking' && (
+                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  Checking Google Calendar connection...
+                </div>
+              )}
+              {calendarSidebarState === 'not_connected' && (
                 <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
                   Connect Google Calendar to load your calendar list.
                 </div>
               )}
-              {calendarsLoadState === 'loading' && (
-                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
-                  Loading calendars...
-                </div>
-              )}
-              {calendarsLoadState === 'error' && (
+              {calendarSidebarState === 'error' && (
                 <div className="df-calendarLegend" style={{ color: '#b91c1c' }} role="alert">
                   {calendarsListError}
                 </div>
               )}
-              {calendarsLoadState === 'ready' && googleCalendars.length === 0 && (
+              {calendarSidebarState === 'ready' && googleCalendars.length === 0 && (
                 <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
                   No calendars returned for this account.
                 </div>
               )}
-              {calendarsLoadState === 'ready' &&
+              {calendarSidebarState === 'ready' &&
                 googleCalendars.map((calendar) => {
                   const calendarId = calendar.id || '';
                   if (!calendarId) return null;
