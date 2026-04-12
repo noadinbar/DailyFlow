@@ -161,16 +161,18 @@ export default function App() {
     <main className="df-page" style={{ position: 'relative' }}>
       {/* Keep Routes mounted during login/calendar hydration so navigate() updates the URL reliably. */}
       <Routes>
-        <Route
-          path="/calendar"
-          element={
-            screen === 'home' && authState.isAuthenticated ? (
-              <HomePlaceholder username={authState.user?.username} onLogout={() => handleLogout()} />
-            ) : (
-              <Navigate to="/" replace />
-            )
-          }
-        />
+      <Route
+        path="/calendar/*"
+        element={
+          isHydratingCalendarRoute ? (
+            <></>
+          ) : screen === 'home' && authState.isAuthenticated ? (
+            <HomePlaceholder username={authState.user?.username} onLogout={() => handleLogout()} />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
+      />
         <Route
           path="*"
           element={
