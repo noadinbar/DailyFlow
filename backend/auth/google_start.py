@@ -5,9 +5,9 @@ from urllib.parse import urlencode
 import boto3
 
 try:
-    from .google_oauth_state import build_oauth_state
+    from .google_oauth_state import build_oauth_state, parse_lambda_query_params
 except ImportError:
-    from google_oauth_state import build_oauth_state
+    from google_oauth_state import build_oauth_state, parse_lambda_query_params
 
 GOOGLE_AUTH_BASE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
@@ -29,19 +29,6 @@ def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
         return sub.strip()
 
     return None
-
-
-def _parse_query(event: Dict[str, Any]) -> Dict[str, str]:
-    qs = event.get("queryStringParameters") or {}
-    if not isinstance(qs, dict):
-        return {}
-    out: Dict[str, str] = {}
-    for key, value in qs.items():
-        if value is None:
-            continue
-        if isinstance(value, str):
-            out[str(key)] = value
-    return out
 
 
 def _cognito_sub_from_access_token(access_token: str) -> Optional[str]:
@@ -87,7 +74,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             _frontend_calendar_url_with_query("?google_oauth_error=start_config"),
         )
 
-    qs = _parse_query(event)
+    qs = parse_lambda_query_params(event)
     access_token = (qs.get("access_token") or "").strip()
 
     user_id = _extract_cognito_sub(event)

@@ -9,10 +9,10 @@ from urllib.request import Request, urlopen
 import boto3
 
 try:
-    from .google_oauth_state import verify_oauth_state
+    from .google_oauth_state import parse_lambda_query_params, verify_oauth_state
 except ImportError:
     # Lambda zip with `lambda_function.py` at root (no package): sibling modules only.
-    from google_oauth_state import verify_oauth_state
+    from google_oauth_state import parse_lambda_query_params, verify_oauth_state
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
@@ -33,19 +33,6 @@ def _redirect(status_code: int, location: str) -> Dict[str, Any]:
         },
         "body": "",
     }
-
-
-def _parse_query(event: Dict[str, Any]) -> Dict[str, str]:
-    qs = event.get("queryStringParameters") or {}
-    if not isinstance(qs, dict):
-        return {}
-    out: Dict[str, str] = {}
-    for key, value in qs.items():
-        if value is None:
-            continue
-        if isinstance(value, str):
-            out[str(key)] = value
-    return out
 
 
 def _iso_utc_now() -> str:
@@ -116,7 +103,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         target = f"{frontend}?google_oauth_error=config"
         return _redirect(302, target)
 
-    params = _parse_query(event)
+    params = parse_lambda_query_params(event)
     if params.get("error"):
         target = f"{frontend}?google_oauth_error=access_denied"
         return _redirect(302, target)

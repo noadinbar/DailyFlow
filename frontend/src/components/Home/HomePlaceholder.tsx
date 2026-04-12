@@ -72,13 +72,10 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
 
         // Full-page navigation only — never use fetch() here (fetch follows redirects and hits Google with CORS).
         // access_token is required so the API can resolve Cognito sub (browser navigation cannot send Authorization).
+        // Do not use a GET <form action="...?access_token=...">: with no fields, browsers drop the action query and
+        // navigate to /auth/google/start? only. Assign the full URL instead.
         const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
-        const form = document.createElement('form');
-        form.method = 'GET';
-        form.action = startUrl;
-        form.style.display = 'none';
-        document.body.appendChild(form);
-        form.submit();
+        window.location.assign(startUrl);
       } catch (e) {
         const anyErr = e as any;
         const message =
