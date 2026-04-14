@@ -24,9 +24,17 @@ Current implemented state:
 - AWS Cognito is already connected in the frontend
 - Sign up and Log in already work
 - A frontend questionnaire screen already exists
-- DynamoDB tables already exist, including Users
-- The project is now entering the Calendar milestone
-- Google Calendar integration setup has started conceptually and should now be implemented incrementally
+- DynamoDB tables already exist, including:
+  - Users
+  - Integrations
+  - BusyBlocks
+- The project is currently inside the Calendar milestone
+- Google Calendar OAuth flow is already implemented
+- Google OAuth start and callback already work
+- Google Calendar list fetch already works
+- Users can already choose which Google calendars to expose
+- Selected Google calendars are already persisted per user
+- The selected calendars are the source of truth for what should be used next
 
 Final product goal:
 The final product should support a full user flow where a user signs in, completes an onboarding questionnaire, connects Google Calendar, chooses which calendars to expose, syncs availability, receives personalized suggestions, and manages their schedule through the platform.
@@ -36,37 +44,36 @@ For now, focus only on the current milestone:
 - onboarding questionnaire refinement if explicitly requested
 - calendar screen
 - Google Calendar connection
-- Google OAuth flow preparation and implementation
-- calendar connection UI states
-- fetching the user calendar list after successful connection
-- allowing the user to choose which Google calendars to expose
-- preparing the availability sync flow
+- Google calendar list UI states
+- selected Google calendars flow
+- BusyBlocks sync design and implementation
 - DailyFlow calendar flow preparation
 
 Calendar milestone product direction:
 - The app should include a Calendar screen
-- This screen should include a Connect Google Calendar entry point
-- After connection, the app should be able to fetch the user's calendar list
-- The user will choose which calendars to expose to the app
-- The system will later use those selected calendars to derive busy blocks
-- Busy blocks should represent occupied time from the selected calendars
-- The sync window should be one month ahead
+- This screen should include a Google Calendar connection flow
+- After connection, the app can fetch the user's Google calendars
+- The user can choose which calendars to expose to the app
+- The system must use only those selected calendars for availability sync
+- Busy blocks must represent occupied time only from the selected calendars
+- Busy blocks must be synced for one month ahead
+- Busy blocks and DailyFlow-created events are different concepts and must remain logically separated
 - The system should later create and use a separate Google calendar named DailyFlow
-- DailyFlow events and busy blocks are different concepts and should remain logically separated
+- BusyBlocks should be persisted in the BusyBlocks DynamoDB table
+- Busy blocks should include source calendar context when needed by product/UI
+- If busy blocks are displayed in UI, they should be able to reflect the source calendar color
 
 Important:
 - Work incrementally and in small steps
-- Prefer building the UI skeleton first, then connecting backend logic, then adding sync logic
-- It is allowed to implement frontend calendar screens and minimal backend support for Google Calendar when explicitly requested
-- It is allowed to implement Google OAuth start and callback flow when explicitly requested
-- It is allowed to prepare or implement the basic calendar list fetch after connection when explicitly requested
+- Prefer doing one scoped step at a time
+- Do not skip ahead to unrelated milestone work
 - Do not implement Meals, Workouts, Stress, Overview, OpenAI, or Apple Watch logic unless explicitly requested
 - Do not invent recommendation logic yet
-- Do not implement advanced scheduling logic yet
-- Do not implement full sync engines, background jobs, or complex automation unless explicitly requested
-- Do not add unnecessary architecture changes
+- Do not implement advanced scheduling logic yet unless explicitly requested
 - Do not rewrite unrelated parts of the app
-- Keep the implementation aligned with the existing project structure and current milestone only
+- Do not add unnecessary architecture changes
+- Keep the implementation aligned with the existing project structure and the current milestone only
+- Prefer the correct long-term project direction over temporary shortcuts that create duplicate work later
 
 Implementation guidance:
 - Keep the code simple and minimal
@@ -74,16 +81,29 @@ Implementation guidance:
 - Use clear and scalable structure
 - Prefer readable components and small focused functions
 - Do not add unnecessary libraries
-- Use English for code, file names, and comments
+- Use English for code, file names, comments, and prompts
 - Reuse the existing project structure as much as possible
 - Only create or update files that are necessary for the requested task
 - If environment variables are needed, clearly list their exact names
 - If backend routes are needed, keep them minimal and focused
 - If placeholder logic is used, make it light and easy to replace later
+- If a change requires AWS updates, state them explicitly and concretely
+- If a change requires Google Cloud / Google OAuth updates, state them explicitly and concretely
 
 Working style:
 - Before generating code, first explain the plan
 - Before generating code, list which files will be created or updated
 - Keep changes scoped to the requested step only
-- Prefer production-oriented structure, but implement only the smallest useful piece each time
+- Prefer production-oriented structure, but implement only the smallest correct piece for the requested step
 - When something is not implemented yet, use a simple placeholder rather than inventing a full system
+- At the end of every response that includes code changes, include a section called:
+  AWS CHANGES REQUIRED
+- In that section, explain exactly what must be changed in AWS because of the code changes you made
+- Do not give generic AWS advice; base it only on your actual code changes
+- If no AWS changes are needed, write exactly:
+  AWS CHANGES REQUIRED: none
+- Also include a section called:
+  GOOGLE CHANGES REQUIRED
+- In that section, explain exactly what must be changed in Google Cloud / Google OAuth because of the code changes you made
+- If no Google changes are needed, write exactly:
+  GOOGLE CHANGES REQUIRED: none

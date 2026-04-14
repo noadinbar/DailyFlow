@@ -501,6 +501,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                     onClick={handleEditCalendarsClick}
                     disabled={isSavingCalendarSelection}
                     aria-label="Edit calendars"
+                    style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
                   >
                     ✏️ Edit
                   </button>
@@ -512,8 +513,9 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                     onClick={() => void handleSaveCalendarSelectionClick()}
                     disabled={isSavingCalendarSelection}
                     aria-label="Save calendars"
+                    style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
                   >
-                    {isSavingCalendarSelection ? 'Saving...' : 'Save'}
+                    {isSavingCalendarSelection ? 'Saving...' : '💾 Save'}
                   </button>
                 )}
               </div>
