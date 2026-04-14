@@ -360,26 +360,6 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                 ? 'Connecting...'
                 : 'Connect Google Calendar'}
             </button>
-            {calendarSidebarState === 'ready' && !isEditingCalendars && (
-              <button
-                type="button"
-                className="df-btn"
-                onClick={handleEditCalendarsClick}
-                disabled={isSavingCalendarSelection}
-              >
-                Edit calendars
-              </button>
-            )}
-            {calendarSidebarState === 'ready' && isEditingCalendars && (
-              <button
-                type="button"
-                className="df-btn"
-                onClick={() => void handleSaveCalendarSelectionClick()}
-                disabled={isSavingCalendarSelection}
-              >
-                {isSavingCalendarSelection ? 'Saving...' : 'Save calendars'}
-              </button>
-            )}
             <button
               type="button"
               className="df-btn"
@@ -505,7 +485,38 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
             </div>
 
             <div className="df-calendarsList" aria-busy={calendarSidebarState === 'checking'}>
-              <h2>Calendars</h2>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                }}
+              >
+                <h2 style={{ margin: 0 }}>Calendars</h2>
+                {calendarSidebarState === 'ready' && !isEditingCalendars && (
+                  <button
+                    type="button"
+                    className="df-btn"
+                    onClick={handleEditCalendarsClick}
+                    disabled={isSavingCalendarSelection}
+                    aria-label="Edit calendars"
+                  >
+                    ✏️ Edit
+                  </button>
+                )}
+                {calendarSidebarState === 'ready' && isEditingCalendars && (
+                  <button
+                    type="button"
+                    className="df-btn"
+                    onClick={() => void handleSaveCalendarSelectionClick()}
+                    disabled={isSavingCalendarSelection}
+                    aria-label="Save calendars"
+                  >
+                    {isSavingCalendarSelection ? 'Saving...' : 'Save'}
+                  </button>
+                )}
+              </div>
               {calendarSidebarState === 'checking' && (
                 <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
                   Checking Google Calendar connection...
