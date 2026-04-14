@@ -33,6 +33,8 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   const [calendarsListError, setCalendarsListError] = React.useState<string>('');
   const [googleCalendars, setGoogleCalendars] = React.useState<GoogleCalendarItem[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
+  const [isEditingCalendars, setIsEditingCalendars] = React.useState<boolean>(false);
+  const [isSavingCalendarSelection, setIsSavingCalendarSelection] = React.useState<boolean>(false);
 
   async function handleLogoutClick() {
     setErrorMessage('');
@@ -91,7 +93,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     })();
   }
 
-  const refreshGoogleCalendarFromBackend = React.useCallback(async () => {
+  const refreshGoogleCalendarFromBackend = React.useCallback(async (enterEditMode: boolean = false) => {
     setCalendarSidebarState('checking');
     setCalendarsListError('');
     setGoogleCalendars([]);
@@ -122,7 +124,11 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
         },
       });
 
-      let payload: { message?: string; calendars?: GoogleCalendarItem[] } = {};
+      let payload: {
+        message?: string;
+        calendars?: GoogleCalendarItem[];
+        selection_configured?: boolean;
+      } = {};
       try {
         payload = (await response.json()) as typeof payload;
       } catch {
@@ -160,6 +166,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       }
 
       const calendars = Array.isArray(payload.calendars) ? payload.calendars : [];
+      const selectionConfigured = payload.selection_configured === true;
       setGoogleCalendars(calendars);
       setSelectedCalendarIds(
         calendars
@@ -167,6 +174,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           .map((calendar) => calendar.id)
           .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
       );
+      setIsEditingCalendars(enterEditMode || !selectionConfigured);
       setCalendarSidebarState('ready');
     } catch (e) {
       const anyErr = e as { message?: string };
@@ -176,6 +184,73 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       setCalendarSidebarState('error');
     }
   }, []);
+
+  async function handleSaveCalendarSelectionClick() {
+    setIsSavingCalendarSelection(true);
+    try {
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const idToken = session.tokens?.idToken?.toString();
+      const token = accessToken || idToken;
+      if (!token) {
+        setCalendarsListError('You need to be signed in to save calendar selection.');
+        setCalendarSidebarState('error');
+        return;
+      }
+
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) {
+        setCalendarsListError('Missing API base URL (VITE_API_BASE_URL).');
+        setCalendarSidebarState('error');
+        return;
+      }
+
+      const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/calendars`;
+      const response = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          selected_calendar_ids: selectedCalendarIds,
+        }),
+      });
+
+      let payload: { message?: string } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
+
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not save calendars (${response.status}).`;
+        setCalendarsListError(message);
+        setCalendarSidebarState('error');
+        return;
+      }
+
+      setIsEditingCalendars(false);
+      setCalendarsListError('');
+      setCalendarSidebarState('ready');
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setCalendarsListError(
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to save calendar selection.'
+      );
+      setCalendarSidebarState('error');
+    } finally {
+      setIsSavingCalendarSelection(false);
+    }
+  }
+
+  function handleEditCalendarsClick() {
+    void refreshGoogleCalendarFromBackend(true);
+  }
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -188,7 +263,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       window.history.replaceState({}, '', next);
     }
 
-    void refreshGoogleCalendarFromBackend();
+    void refreshGoogleCalendarFromBackend(false);
   }, [refreshGoogleCalendarFromBackend]);
 
   function toggleCalendarSelection(calendarId: string) {
@@ -197,6 +272,13 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       return [...current, calendarId];
     });
   }
+
+  const visibleCalendars =
+    calendarSidebarState === 'ready'
+      ? isEditingCalendars
+        ? googleCalendars
+        : googleCalendars.filter((calendar) => selectedCalendarIds.includes(calendar.id || ''))
+      : [];
 
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
@@ -278,6 +360,26 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                 ? 'Connecting...'
                 : 'Connect Google Calendar'}
             </button>
+            {calendarSidebarState === 'ready' && !isEditingCalendars && (
+              <button
+                type="button"
+                className="df-btn"
+                onClick={handleEditCalendarsClick}
+                disabled={isSavingCalendarSelection}
+              >
+                Edit calendars
+              </button>
+            )}
+            {calendarSidebarState === 'ready' && isEditingCalendars && (
+              <button
+                type="button"
+                className="df-btn"
+                onClick={() => void handleSaveCalendarSelectionClick()}
+                disabled={isSavingCalendarSelection}
+              >
+                {isSavingCalendarSelection ? 'Saving...' : 'Save calendars'}
+              </button>
+            )}
             <button
               type="button"
               className="df-btn"
@@ -430,7 +532,15 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                 </div>
               )}
               {calendarSidebarState === 'ready' &&
-                googleCalendars.map((calendar) => {
+                !isEditingCalendars &&
+                googleCalendars.length > 0 &&
+                visibleCalendars.length === 0 && (
+                  <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                    No calendars are currently selected. Use Edit calendars to choose which calendars to show.
+                  </div>
+                )}
+              {calendarSidebarState === 'ready' &&
+                visibleCalendars.map((calendar) => {
                   const calendarId = calendar.id || '';
                   if (!calendarId) return null;
                   const displayName =
@@ -443,6 +553,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                       <input
                         type="checkbox"
                         checked={isSelected}
+                        disabled={!isEditingCalendars}
                         onChange={() => toggleCalendarSelection(calendarId)}
                         aria-label={`Expose calendar ${displayName} to DailyFlow`}
                       />

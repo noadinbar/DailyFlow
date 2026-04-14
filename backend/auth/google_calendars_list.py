@@ -33,6 +33,24 @@ def _json_google_reconnect_required() -> Dict[str, Any]:
     return _json_response(403, {"message": GOOGLE_RECONNECT_MESSAGE})
 
 
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = event.get("body")
+    if body is None:
+        return {}
+    if isinstance(body, dict):
+        return body
+    if isinstance(body, str):
+        raw = body.strip()
+        if not raw:
+            return {}
+        return json.loads(raw)
+    return {}
+
+
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
     request_context = event.get("requestContext") or {}
     authorizer = request_context.get("authorizer") or {}
@@ -171,6 +189,31 @@ def _update_connection_tokens(user_id: str, connection: Dict[str, Any], new_toke
             continue
 
 
+def _update_selected_calendar_ids(user_id: str, selected_calendar_ids: list[str]) -> bool:
+    table = _dynamodb_table()
+    now_iso = _iso_utc_now()
+    candidate_keys = [
+        {"user_id": user_id, "provider": "google"},
+        {"user_id": user_id, "integration_type": "google"},
+        {"user_id": user_id},
+    ]
+    for key in candidate_keys:
+        try:
+            table.update_item(
+                Key=key,
+                UpdateExpression="SET selected_calendar_ids = :selected_calendar_ids, updated_at = :updated_at",
+                ExpressionAttributeValues={
+                    ":selected_calendar_ids": selected_calendar_ids,
+                    ":updated_at": now_iso,
+                },
+                ConditionExpression="attribute_exists(user_id)",
+            )
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_context = event.get("requestContext") or {}
     http = request_context.get("http") or {}
@@ -194,7 +237,39 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not stored:
         return _json_response(404, {"message": "Google Calendar is not connected for this user."})
 
-    _, connection = stored
+    item, connection = stored
+
+    if method == "POST":
+        try:
+            payload = _parse_body(event)
+        except json.JSONDecodeError:
+            return _json_response(400, {"message": "Request body must be valid JSON."})
+
+        selected_raw = payload.get("selected_calendar_ids")
+        if selected_raw is None:
+            return _json_response(400, {"message": "selected_calendar_ids is required."})
+        if not isinstance(selected_raw, list):
+            return _json_response(400, {"message": "selected_calendar_ids must be an array of calendar ids."})
+
+        selected_calendar_ids: list[str] = []
+        for value in selected_raw:
+            if not isinstance(value, str):
+                continue
+            trimmed = value.strip()
+            if trimmed and trimmed not in selected_calendar_ids:
+                selected_calendar_ids.append(trimmed)
+
+        try:
+            updated = _update_selected_calendar_ids(user_id, selected_calendar_ids)
+        except ValueError as err:
+            return _json_response(500, {"message": str(err)})
+        if not updated:
+            return _json_response(404, {"message": "Google Calendar is not connected for this user."})
+        return _json_response(200, {"selected_calendar_ids": selected_calendar_ids})
+
+    if method != "GET":
+        return _json_response(405, {"message": "Method not allowed."})
+
     access_token = connection.get("access_token") or connection.get("accessToken")
     refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
     has_refresh = bool(isinstance(refresh_token, str) and refresh_token.strip())
@@ -242,18 +317,42 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not isinstance(items, list):
         items = []
 
+    selected_ids_raw = connection.get("selected_calendar_ids")
+    if not isinstance(selected_ids_raw, list):
+        selected_ids_raw = item.get("selected_calendar_ids") if isinstance(item, dict) else None
+    selected_id_set = {
+        str(value).strip()
+        for value in (selected_ids_raw or [])
+        if isinstance(value, str) and str(value).strip()
+    }
+    selection_configured = isinstance(selected_ids_raw, list)
+
     calendars = []
     for item in items:
         if not isinstance(item, dict):
             continue
+        calendar_id = item.get("id")
+        if not isinstance(calendar_id, str) or not calendar_id.strip():
+            continue
+        clean_calendar_id = calendar_id.strip()
+        if selection_configured:
+            selected = clean_calendar_id in selected_id_set
+        else:
+            selected = bool(item.get("selected", True))
         calendars.append(
             {
-                "id": item.get("id"),
+                "id": clean_calendar_id,
                 "summary": item.get("summary"),
                 "primary": bool(item.get("primary")),
-                "selected": bool(item.get("selected", True)),
+                "selected": selected,
                 "backgroundColor": item.get("backgroundColor"),
             }
         )
 
-    return _json_response(200, {"calendars": calendars})
+    return _json_response(
+        200,
+        {
+            "calendars": calendars,
+            "selection_configured": selection_configured,
+        },
+    )
