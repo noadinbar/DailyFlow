@@ -24,6 +24,51 @@ type GoogleCalendarItem = {
   backgroundColor?: string;
 };
 
+type BusyBlockItem = {
+  block_key: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  source_calendar_id: string;
+  source_calendar_color?: string;
+};
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function weekDatesFromToday(): Date[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  // Real calendar week: Sunday (0) to Saturday (6), regardless of current day.
+  start.setDate(today.getDate() - today.getDay());
+  const days: Date[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    const next = new Date(start);
+    next.setDate(start.getDate() + i);
+    days.push(next);
+  }
+  return days;
+}
+
+function toIsoDateLocal(value: Date): string {
+  return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+}
+
+function formatDayHeader(value: Date): string {
+  const weekday = value.toLocaleDateString(undefined, { weekday: 'short' });
+  const day = value.getDate();
+  return `${weekday} ${day}`;
+}
+
+function formatTimeRange(startTime: string, endTime: string): string {
+  const start = startTime.slice(0, 5);
+  const end = endTime.slice(0, 5);
+  if (!start || !end) return `${startTime} - ${endTime}`;
+  return `${start} - ${end}`;
+}
+
 export default function HomePlaceholder(props: HomePlaceholderProps) {
   const { username, onLogout } = props;
   const [errorMessage, setErrorMessage] = React.useState<string>('');
@@ -35,6 +80,9 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
   const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
   const [isEditingCalendars, setIsEditingCalendars] = React.useState<boolean>(false);
   const [isSavingCalendarSelection, setIsSavingCalendarSelection] = React.useState<boolean>(false);
+  const [busyBlocks, setBusyBlocks] = React.useState<BusyBlockItem[]>([]);
+  const [isSyncingBusyBlocks, setIsSyncingBusyBlocks] = React.useState<boolean>(false);
+  const [busyBlocksError, setBusyBlocksError] = React.useState<string>('');
 
   async function handleLogoutClick() {
     setErrorMessage('');
@@ -185,6 +233,91 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     }
   }, []);
 
+  const syncAndRefreshBusyBlocks = React.useCallback(async () => {
+    setIsSyncingBusyBlocks(true);
+    setBusyBlocksError('');
+    try {
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const idToken = session.tokens?.idToken?.toString();
+      const token = accessToken || idToken;
+      if (!token) {
+        setBusyBlocksError('You need to be signed in to load busy blocks.');
+        return;
+      }
+
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) {
+        setBusyBlocksError('Missing API base URL (VITE_API_BASE_URL).');
+        return;
+      }
+
+      const apiBase = baseUrl.replace(/\/$/, '');
+      const syncResponse = await fetch(`${apiBase}/calendar/busyblocks/sync`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      let syncPayload: { message?: string } = {};
+      try {
+        syncPayload = (await syncResponse.json()) as typeof syncPayload;
+      } catch {
+        syncPayload = {};
+      }
+      if (!syncResponse.ok) {
+        const message =
+          typeof syncPayload.message === 'string' && syncPayload.message.trim()
+            ? syncPayload.message
+            : `Could not sync busy blocks (${syncResponse.status}).`;
+        setBusyBlocksError(message);
+        return;
+      }
+
+      const response = await fetch(`${apiBase}/calendar/busyblocks`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let payload: { message?: string; busy_blocks?: BusyBlockItem[] } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
+
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not load busy blocks (${response.status}).`;
+        setBusyBlocksError(message);
+        return;
+      }
+
+      const incoming = Array.isArray(payload.busy_blocks) ? payload.busy_blocks : [];
+      const cleaned = incoming.filter(
+        (block): block is BusyBlockItem =>
+          !!block &&
+          typeof block.block_key === 'string' &&
+          typeof block.date === 'string' &&
+          typeof block.start_time === 'string' &&
+          typeof block.end_time === 'string' &&
+          typeof block.source_calendar_id === 'string'
+      );
+      setBusyBlocks(cleaned);
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setBusyBlocksError(
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to sync busy blocks.'
+      );
+    } finally {
+      setIsSyncingBusyBlocks(false);
+    }
+  }, []);
+
   async function handleSaveCalendarSelectionClick() {
     setIsSavingCalendarSelection(true);
     try {
@@ -237,6 +370,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
       setIsEditingCalendars(false);
       setCalendarsListError('');
       setCalendarSidebarState('ready');
+      await syncAndRefreshBusyBlocks();
     } catch (e) {
       const anyErr = e as { message?: string };
       setCalendarsListError(
@@ -264,7 +398,8 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     }
 
     void refreshGoogleCalendarFromBackend(false);
-  }, [refreshGoogleCalendarFromBackend]);
+    void syncAndRefreshBusyBlocks();
+  }, [refreshGoogleCalendarFromBackend, syncAndRefreshBusyBlocks]);
 
   function toggleCalendarSelection(calendarId: string) {
     setSelectedCalendarIds((current) => {
@@ -279,6 +414,35 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
         ? googleCalendars
         : googleCalendars.filter((calendar) => selectedCalendarIds.includes(calendar.id || ''))
       : [];
+
+  const weekDates = React.useMemo(() => weekDatesFromToday(), []);
+  const todayDateKey = React.useMemo(() => toIsoDateLocal(new Date()), []);
+  const calendarNameById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const calendar of googleCalendars) {
+      const id = typeof calendar.id === 'string' ? calendar.id.trim() : '';
+      const name = typeof calendar.summary === 'string' ? calendar.summary.trim() : '';
+      if (id) map.set(id, name || 'Google Calendar');
+    }
+    return map;
+  }, [googleCalendars]);
+  const busyBlocksByDate = React.useMemo(() => {
+    const grouped = new Map<string, BusyBlockItem[]>();
+    for (const block of busyBlocks) {
+      const dateKey = block.date;
+      if (!grouped.has(dateKey)) grouped.set(dateKey, []);
+      grouped.get(dateKey)?.push(block);
+    }
+    for (const [dateKey, blocks] of grouped.entries()) {
+      blocks.sort((a, b) => {
+        if (a.start_time !== b.start_time) return a.start_time.localeCompare(b.start_time);
+        if (a.end_time !== b.end_time) return a.end_time.localeCompare(b.end_time);
+        return a.block_key.localeCompare(b.block_key);
+      });
+      grouped.set(dateKey, blocks);
+    }
+    return grouped;
+  }, [busyBlocks]);
 
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
@@ -316,6 +480,14 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
           <div className="df-calendarTopbarLeft">
             <button type="button" className="df-btn">
               Today
+            </button>
+            <button
+              type="button"
+              className="df-btn"
+              onClick={() => void syncAndRefreshBusyBlocks()}
+              disabled={isSyncingBusyBlocks}
+            >
+              {isSyncingBusyBlocks ? 'Syncing...' : 'Refresh calendar'}
             </button>
             <div className="df-calendarViewSwitch" role="tablist" aria-label="Calendar view">
               <button type="button" className="df-calendarViewBtn df-calendarViewBtnActive">
@@ -376,91 +548,59 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
         <div className="df-calendarBody">
           <section className="df-weekGrid" aria-label="Weekly calendar">
             <div className="df-weekHeader">
-              <div>Mon 15</div>
-              <div>Tue 16</div>
-              <div>Wed 17</div>
-              <div>Thu 18</div>
-              <div>Fri 19</div>
-              <div>Sat 20</div>
-              <div>Sun 21</div>
+              {weekDates.map((day) => (
+                <div
+                  key={toIsoDateLocal(day)}
+                  className={toIsoDateLocal(day) === todayDateKey ? 'df-weekHeaderDayToday' : undefined}
+                >
+                  {formatDayHeader(day)}
+                </div>
+              ))}
             </div>
 
             <div className="df-weekColumns">
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventGreen">
-                  <strong>University Lecture</strong>
-                  <span>10:00 - 12:00</span>
-                </div>
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Study Session</strong>
-                  <span>14:00 - 16:00</span>
-                </div>
-              </div>
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventGreen">
-                  <strong>University Lecture</strong>
-                  <span>09:00 - 11:00</span>
-                </div>
-                <div className="df-eventBlock df-eventGreen">
-                  <strong>University Lecture</strong>
-                  <span>12:00 - 14:00</span>
-                </div>
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Study Session</strong>
-                  <span>15:00 - 16:00</span>
-                </div>
-              </div>
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventBlue">
-                  <strong>Work</strong>
-                  <span>09:00 - 14:00</span>
-                </div>
-              </div>
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventGreen">
-                  <strong>University Lecture</strong>
-                  <span>10:00 - 12:00</span>
-                </div>
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Study Session</strong>
-                  <span>13:00 - 15:00</span>
-                </div>
-              </div>
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventBlue">
-                  <strong>Work</strong>
-                  <span>09:00 - 14:00</span>
-                </div>
-                <div className="df-eventBlock df-eventGreen">
-                  <strong>University Lecture</strong>
-                  <span>15:00 - 16:00</span>
-                </div>
-              </div>
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>45 min workout</strong>
-                  <span>10:00 - 11:15</span>
-                </div>
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Study Session</strong>
-                  <span>14:00 - 16:00</span>
-                </div>
-              </div>
-              <div className="df-weekColumn">
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Meditation</strong>
-                  <span>09:00 - 09:30</span>
-                </div>
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Meal prep</strong>
-                  <span>11:00 - 13:00</span>
-                </div>
-                <div className="df-eventBlock df-eventPurple">
-                  <strong>Study Session</strong>
-                  <span>15:00 - 17:00</span>
-                </div>
-              </div>
+              {weekDates.map((day) => {
+                const dayKey = toIsoDateLocal(day);
+                const dayBlocks = busyBlocksByDate.get(dayKey) || [];
+                return (
+                  <div className="df-weekColumn" key={dayKey}>
+                    {dayBlocks.map((block) => (
+                      <div
+                        key={block.block_key}
+                        className="df-eventBlock"
+                        style={{
+                          background: `${block.source_calendar_color || '#3b82f6'}22`,
+                          border: `1px solid ${block.source_calendar_color || '#3b82f6'}`,
+                        }}
+                      >
+                        <strong>{calendarNameById.get(block.source_calendar_id) || 'Google Calendar'}</strong>
+                        <span>{formatTimeRange(block.start_time, block.end_time)}</span>
+                      </div>
+                    ))}
+                    {dayBlocks.length === 0 && (
+                      <div className="df-weekColumnEmpty">
+                        No busy blocks
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+            {isSyncingBusyBlocks && (
+              <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#6b7280' }}>
+                Syncing busy blocks...
+              </div>
+            )}
+            {!isSyncingBusyBlocks && busyBlocksError && (
+              <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#b91c1c' }} role="alert">
+                {busyBlocksError}
+              </div>
+            )}
+            {!isSyncingBusyBlocks && !busyBlocksError && busyBlocks.length === 0 && (
+              <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#6b7280' }}>
+                No busy blocks yet. Run BusyBlocks sync to populate this calendar.
+              </div>
+            )}
           </section>
 
           <aside className="df-calendarSidebar" aria-label="Calendar details">
