@@ -96,6 +96,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "scope": GOOGLE_CALENDAR_SCOPE,
             "access_type": "offline",
             "include_granted_scopes": "true",
+            "prompt": "consent",
             "state": state,
         }
     )

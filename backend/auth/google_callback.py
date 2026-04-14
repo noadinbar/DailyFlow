@@ -76,21 +76,42 @@ def _put_google_tokens(user_id: str, token_payload: Dict[str, Any]) -> None:
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
     now_iso = _iso_utc_now()
 
-    item: Dict[str, Any] = {
-        "user_id": user_id,
-        "provider": "google",
-        "access_token": access_token,
-        "accessToken": access_token,
-        "token_expires_at": expires_at,
-        "updated_at": now_iso,
-    }
-    if isinstance(refresh_token, str) and refresh_token:
-        item["refresh_token"] = refresh_token
-        item["refreshToken"] = refresh_token
-
     dynamodb = boto3.resource("dynamodb", region_name=region) if region else boto3.resource("dynamodb")
     table = dynamodb.Table(table_name)
-    table.put_item(Item=item)
+
+    key = {"user_id": user_id}
+    if isinstance(refresh_token, str) and refresh_token:
+        table.update_item(
+            Key=key,
+            UpdateExpression=(
+                "SET access_token = :access_token, accessToken = :access_token, "
+                "token_expires_at = :token_expires_at, "
+                "refresh_token = :refresh_token, refreshToken = :refresh_token, "
+                "updated_at = :updated_at"
+            ),
+            ExpressionAttributeValues={
+                ":access_token": access_token,
+                ":token_expires_at": expires_at,
+                ":refresh_token": refresh_token,
+                ":updated_at": now_iso,
+            },
+        )
+        return
+
+    # Preserve an existing refresh token when Google omits refresh_token.
+    table.update_item(
+        Key=key,
+        UpdateExpression=(
+            "SET access_token = :access_token, accessToken = :access_token, "
+            "token_expires_at = :token_expires_at, "
+            "updated_at = :updated_at"
+        ),
+        ExpressionAttributeValues={
+            ":access_token": access_token,
+            ":token_expires_at": expires_at,
+            ":updated_at": now_iso,
+        },
+    )
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

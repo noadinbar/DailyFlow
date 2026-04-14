@@ -81,23 +81,14 @@ def _extract_google_connection(item: Dict[str, Any]) -> Dict[str, Any]:
 
 def _fetch_google_connection(user_id: str) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
     table = _dynamodb_table("INTEGRATIONS_TABLE")
-    candidate_keys = [
-        {"user_id": user_id, "provider": "google"},
-        {"user_id": user_id, "integration_type": "google"},
-        {"user_id": user_id},
-    ]
-    for key in candidate_keys:
-        try:
-            response = table.get_item(Key=key)
-        except Exception:
-            continue
-        item = response.get("Item")
-        if not item:
-            continue
-        connection = _extract_google_connection(item)
-        access_token = connection.get("access_token") or connection.get("accessToken")
-        if access_token:
-            return item, connection
+    response = table.get_item(Key={"user_id": user_id})
+    item = response.get("Item")
+    if not item:
+        return None
+    connection = _extract_google_connection(item)
+    access_token = connection.get("access_token") or connection.get("accessToken")
+    if access_token:
+        return item, connection
     return None
 
 
@@ -110,53 +101,33 @@ def _update_connection_tokens(user_id: str, connection: Dict[str, Any], new_toke
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
 
     table = _dynamodb_table("INTEGRATIONS_TABLE")
-    candidate_keys = [
-        {"user_id": user_id, "provider": "google"},
-        {"user_id": user_id, "integration_type": "google"},
-        {"user_id": user_id},
-    ]
-    for key in candidate_keys:
-        try:
-            table.update_item(
-                Key=key,
-                UpdateExpression=(
-                    "SET access_token = :access_token, accessToken = :access_token, "
-                    "token_expires_at = :token_expires_at"
-                ),
-                ExpressionAttributeValues={
-                    ":access_token": access_token,
-                    ":token_expires_at": expires_at,
-                },
-            )
-            connection["access_token"] = access_token
-            connection["accessToken"] = access_token
-            connection["token_expires_at"] = expires_at
-            return
-        except Exception:
-            continue
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression=(
+            "SET access_token = :access_token, accessToken = :access_token, "
+            "token_expires_at = :token_expires_at"
+        ),
+        ExpressionAttributeValues={
+            ":access_token": access_token,
+            ":token_expires_at": expires_at,
+        },
+    )
+    connection["access_token"] = access_token
+    connection["accessToken"] = access_token
+    connection["token_expires_at"] = expires_at
 
 
 def _update_last_busy_sync_at(user_id: str, synced_at: str) -> None:
     table = _dynamodb_table("INTEGRATIONS_TABLE")
-    candidate_keys = [
-        {"user_id": user_id, "provider": "google"},
-        {"user_id": user_id, "integration_type": "google"},
-        {"user_id": user_id},
-    ]
-    for key in candidate_keys:
-        try:
-            table.update_item(
-                Key=key,
-                UpdateExpression="SET last_busy_sync_at = :last_busy_sync_at, updated_at = :updated_at",
-                ExpressionAttributeValues={
-                    ":last_busy_sync_at": synced_at,
-                    ":updated_at": synced_at,
-                },
-                ConditionExpression="attribute_exists(user_id)",
-            )
-            return
-        except Exception:
-            continue
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET last_busy_sync_at = :last_busy_sync_at, updated_at = :updated_at",
+        ExpressionAttributeValues={
+            ":last_busy_sync_at": synced_at,
+            ":updated_at": synced_at,
+        },
+        ConditionExpression="attribute_exists(user_id)",
+    )
 
 
 def _google_get_json(url: str, access_token: str) -> Dict[str, Any]:
