@@ -1,5 +1,6 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import ProfileSettingsModal from './ProfileSettingsModal';
 
 type HomeScreenProps = {
   username?: string;
@@ -106,6 +107,8 @@ function isBusySyncFresh(lastBusySyncAt: string | undefined): boolean {
 export default function HomeScreen(props: HomeScreenProps) {
   const { username, onLogout } = props;
   const [errorMessage, setErrorMessage] = React.useState<string>('');
+  const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
+  const [displayName, setDisplayName] = React.useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
   const [calendarSidebarState, setCalendarSidebarState] = React.useState<CalendarSidebarState>('checking');
@@ -145,6 +148,131 @@ export default function HomeScreen(props: HomeScreenProps) {
       console.error(e);
     } finally {
       setIsLoggingOut(false);
+    }
+  }
+
+  async function getAuthToken(): Promise<string> {
+    const session = await fetchAuthSession();
+    const accessToken = session.tokens?.accessToken?.toString();
+    const idToken = session.tokens?.idToken?.toString();
+    const token = accessToken || idToken;
+    if (!token) throw new Error('You need to be signed in.');
+    return token;
+  }
+
+  async function loadProfileDisplayName(): Promise<string> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    let payload: { display_name?: string; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not load profile (${response.status}).`;
+      throw new Error(message);
+    }
+    const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
+    if (name) setDisplayName(name);
+    return name;
+  }
+
+  async function saveProfileDisplayName(nextName: string): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ display_name: nextName }),
+    });
+    let payload: { display_name?: string; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not save profile (${response.status}).`;
+      throw new Error(message);
+    }
+    const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
+    setDisplayName(name);
+  }
+
+  async function requestProfileImageUploadUrl(args: { contentType: string }): Promise<{
+    uploadUrl: string;
+    objectKey: string;
+  }> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile/image/upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ content_type: args.contentType }),
+    });
+    let payload: { upload_url?: string; object_key?: string; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not create upload URL (${response.status}).`;
+      throw new Error(message);
+    }
+    const uploadUrl = typeof payload.upload_url === 'string' ? payload.upload_url : '';
+    const objectKey = typeof payload.object_key === 'string' ? payload.object_key : '';
+    if (!uploadUrl || !objectKey) throw new Error('Upload URL response is missing required fields.');
+    return { uploadUrl, objectKey };
+  }
+
+  async function saveProfileImageKey(objectKey: string): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ profile_image_key: objectKey }),
+    });
+    let payload: { message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not save profile (${response.status}).`;
+      throw new Error(message);
     }
   }
 
@@ -682,16 +810,28 @@ export default function HomeScreen(props: HomeScreenProps) {
     return baseDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   }, [viewMode, selectedDate, weekStartDate, miniCalendarMonthDate]);
 
+  const effectiveName = (displayName || username || 'Noa Levi').trim();
+
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
       <aside className="df-calendarLeftNav">
         <div className="df-calendarBrand">DailyFlow</div>
         <div className="df-calendarProfile">
-          <div className="df-calendarProfileAvatar">{(username || 'N').slice(0, 2).toUpperCase()}</div>
+          <div className="df-calendarProfileAvatar">{(effectiveName || 'N').slice(0, 2).toUpperCase()}</div>
           <div>
-            <div className="df-calendarProfileName">{username || 'Noa Levi'}</div>
+            <div className="df-calendarProfileName">{effectiveName}</div>
             <div className="df-calendarProfileHint">Plan your week</div>
           </div>
+          <button
+            type="button"
+            className="df-iconBtn"
+            onClick={() => setIsProfileSettingsOpen(true)}
+            aria-label="Open profile settings"
+            title="Settings"
+            style={{ marginInlineStart: 'auto' }}
+          >
+            ⚙️
+          </button>
         </div>
 
         <nav className="df-calendarMenu" aria-label="Main sections">
@@ -1082,6 +1222,16 @@ export default function HomeScreen(props: HomeScreenProps) {
           </aside>
         </div>
       </div>
+
+      <ProfileSettingsModal
+        isOpen={isProfileSettingsOpen}
+        initialName={effectiveName}
+        onLoadDisplayName={loadProfileDisplayName}
+        onSaveDisplayName={saveProfileDisplayName}
+        onRequestProfileImageUploadUrl={requestProfileImageUploadUrl}
+        onSaveProfileImageKey={saveProfileImageKey}
+        onClose={() => setIsProfileSettingsOpen(false)}
+      />
     </section>
   );
 }
