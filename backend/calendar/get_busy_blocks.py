@@ -1,7 +1,8 @@
 import json
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -12,6 +13,8 @@ _CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
     "Access-Control-Allow-Methods": "OPTIONS,GET",
 }
+
+APP_TIMEZONE = ZoneInfo("Asia/Jerusalem")
 
 
 def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,8 +103,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         return _json_response(500, {"message": "Unexpected error while loading busy blocks."})
 
-    today = date.today().isoformat()
-    max_date = (date.today() + timedelta(days=30)).isoformat()
+    today_local = datetime.now(APP_TIMEZONE).date()
+    today = today_local.isoformat()
+    max_date = (today_local + timedelta(days=30)).isoformat()
 
     busy_blocks: List[Dict[str, str]] = []
     for item in items:
@@ -135,6 +139,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "busy_blocks": busy_blocks,
             "window_start_date": today,
             "window_end_date": max_date,
-            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "updated_at": datetime.now(APP_TIMEZONE).isoformat(),
         },
     )

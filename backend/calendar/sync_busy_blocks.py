@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -23,6 +24,8 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_RECONNECT_MESSAGE = "Google connection expired, reconnect required"
 
 SYNC_WINDOW_DAYS = 30
+APP_TIMEZONE_ID = "Asia/Jerusalem"
+APP_TIMEZONE = ZoneInfo(APP_TIMEZONE_ID)
 
 _CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -206,6 +209,7 @@ def _build_events_url(calendar_id: str, time_min: str, time_max: str, page_token
         "orderBy": "startTime",
         "timeMin": time_min,
         "timeMax": time_max,
+        "timeZone": APP_TIMEZONE_ID,
         "fields": "items(id,recurringEventId,status,transparency,start,end),nextPageToken",
     }
     if page_token:
@@ -236,31 +240,31 @@ def _parse_google_event_datetime(event_time: Dict[str, Any]) -> datetime:
         value = event_time.get("dateTime", "").strip()
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
+            parsed = parsed.replace(tzinfo=APP_TIMEZONE)
+        return parsed.astimezone(APP_TIMEZONE)
     if isinstance(event_time.get("date"), str) and event_time.get("date", "").strip():
         value = date.fromisoformat(event_time.get("date", "").strip())
-        return datetime.combine(value, time(0, 0, 0), tzinfo=timezone.utc)
+        return datetime.combine(value, time(0, 0, 0), tzinfo=APP_TIMEZONE)
     raise ValueError("Google event time has no date/dateTime.")
 
 
-def _daily_segments(start_utc: datetime, end_utc: datetime) -> Iterable[Tuple[datetime, datetime]]:
-    if end_utc <= start_utc:
+def _daily_segments(start_local: datetime, end_local: datetime) -> Iterable[Tuple[datetime, datetime]]:
+    if end_local <= start_local:
         return []
 
-    current_start = start_utc
-    while current_start.date() < end_utc.date():
+    current_start = start_local
+    while current_start.date() < end_local.date():
         next_midnight = datetime.combine(
             current_start.date() + timedelta(days=1),
             time(0, 0, 0),
-            tzinfo=timezone.utc,
+            tzinfo=APP_TIMEZONE,
         )
         end_of_day = next_midnight - timedelta(seconds=1)
         yield current_start, end_of_day
         current_start = next_midnight
 
-    if end_utc > current_start:
-        yield current_start, end_utc
+    if end_local > current_start:
+        yield current_start, end_local
 
 
 def _safe_id_fragment(value: str) -> str:
@@ -452,12 +456,12 @@ def _list_busy_blocks_from_selected_calendars(
     user_id: str,
     connection: Dict[str, Any],
     selected_calendar_ids: List[str],
-    now_utc: datetime,
+    now_local: datetime,
 ) -> List[BusyBlock]:
-    one_month_later = now_utc + timedelta(days=SYNC_WINDOW_DAYS)
-    time_min = now_utc.isoformat().replace("+00:00", "Z")
-    time_max = one_month_later.isoformat().replace("+00:00", "Z")
-    now_iso = now_utc.isoformat().replace("+00:00", "Z")
+    one_month_later = now_local + timedelta(days=SYNC_WINDOW_DAYS)
+    time_min = now_local.isoformat()
+    time_max = one_month_later.isoformat()
+    now_iso = now_local.isoformat()
 
     calendar_list_payload = _google_get_json_with_refresh(
         user_id=user_id,
@@ -574,9 +578,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     if not selected_calendar_ids:
         _assert_supported_busyblocks_schema()
-        now_utc = datetime.now(timezone.utc)
-        window_start_date = now_utc.date().isoformat()
-        window_end_date = (now_utc + timedelta(days=SYNC_WINDOW_DAYS)).date().isoformat()
+        now_local = datetime.now(APP_TIMEZONE)
+        window_start_date = now_local.date().isoformat()
+        window_end_date = (now_local + timedelta(days=SYNC_WINDOW_DAYS)).date().isoformat()
         deleted_count = _delete_busy_blocks_not_in_desired_set(
             user_id=user_id,
             desired_block_keys=set(),
@@ -598,14 +602,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     try:
         _assert_supported_busyblocks_schema()
-        now_utc = datetime.now(timezone.utc)
-        window_start_date = now_utc.date().isoformat()
-        window_end_date = (now_utc + timedelta(days=SYNC_WINDOW_DAYS)).date().isoformat()
+        now_local = datetime.now(APP_TIMEZONE)
+        window_start_date = now_local.date().isoformat()
+        window_end_date = (now_local + timedelta(days=SYNC_WINDOW_DAYS)).date().isoformat()
         busy_blocks = _list_busy_blocks_from_selected_calendars(
             user_id=user_id,
             connection=connection,
             selected_calendar_ids=selected_calendar_ids,
-            now_utc=now_utc,
+            now_local=now_local,
         )
         desired_ids: Set[str] = set()
         for block in busy_blocks:

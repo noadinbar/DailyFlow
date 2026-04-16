@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict
+from zoneinfo import ZoneInfo
+
+APP_TIMEZONE = ZoneInfo("Asia/Jerusalem")
 
 
 def _normalize_color(color: str) -> str:
@@ -19,12 +22,12 @@ def _require_non_empty(value: str, field_name: str) -> str:
     return clean
 
 
-def _to_utc(iso_datetime: str, field_name: str) -> datetime:
+def _to_app_timezone(iso_datetime: str, field_name: str) -> datetime:
     clean = _require_non_empty(iso_datetime, field_name)
     parsed = datetime.fromisoformat(clean.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=APP_TIMEZONE)
+    return parsed.astimezone(APP_TIMEZONE)
 
 
 @dataclass(frozen=True)
@@ -67,19 +70,19 @@ def build_busy_block(
     This does not write to DynamoDB; it only defines and validates the model shape
     so the sync flow can persist records consistently in a later step.
     """
-    start_utc = _to_utc(google_event_start_iso, "google_event_start_iso")
-    end_utc = _to_utc(google_event_end_iso, "google_event_end_iso")
-    if end_utc <= start_utc:
+    start_local = _to_app_timezone(google_event_start_iso, "google_event_start_iso")
+    end_local = _to_app_timezone(google_event_end_iso, "google_event_end_iso")
+    if end_local <= start_local:
         raise ValueError("google_event_end_iso must be after google_event_start_iso.")
 
-    updated_utc = _to_utc(updated_at_iso, "updated_at_iso")
+    updated_local = _to_app_timezone(updated_at_iso, "updated_at_iso")
 
     return BusyBlock(
         user_id=_require_non_empty(user_id, "user_id"),
-        date=start_utc.date().isoformat(),
-        start_time=start_utc.time().replace(microsecond=0).isoformat(),
-        end_time=end_utc.time().replace(microsecond=0).isoformat(),
-        updated_at=updated_utc.isoformat().replace("+00:00", "Z"),
+        date=start_local.date().isoformat(),
+        start_time=start_local.time().replace(microsecond=0).isoformat(),
+        end_time=end_local.time().replace(microsecond=0).isoformat(),
+        updated_at=updated_local.isoformat(),
         source_calendar_id=_require_non_empty(source_calendar_id, "source_calendar_id"),
         source_calendar_color=_normalize_color(source_calendar_color),
         source_event_id=_require_non_empty(source_event_id, "source_event_id"),
