@@ -2,7 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import AuthScreen from './components/Auth/AuthScreen';
 import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
-import HomePlaceholder from './components/Home/HomePlaceholder';
+import HomeScreen from './components/Home/HomeScreen';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
 import { fetchOnboardingCompleted, signOutCurrentUser } from './services/auth/cognitoPlaceholders';
 import { configureAmplify } from './services/auth/amplifyConfig';
@@ -167,7 +167,7 @@ export default function App() {
           isHydratingCalendarRoute ? (
             <></>
           ) : screen === 'home' && authState.isAuthenticated ? (
-            <HomePlaceholder username={authState.user?.username} onLogout={() => handleLogout()} />
+            <HomeScreen username={authState.user?.username} onLogout={() => handleLogout()} />
           ) : (
             <Navigate to="/" replace />
           )

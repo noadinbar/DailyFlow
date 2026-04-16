@@ -40,6 +40,7 @@ class BusyBlock:
     source_calendar_id: str
     source_calendar_color: str
     source_event_id: str
+    source_event_title: str
 
     def to_item(self) -> Dict[str, str]:
         return {
@@ -51,6 +52,7 @@ class BusyBlock:
             "source_calendar_id": self.source_calendar_id,
             "source_calendar_color": self.source_calendar_color,
             "source_event_id": self.source_event_id,
+            "source_event_title": self.source_event_title,
         }
 
 
@@ -58,6 +60,7 @@ def build_busy_block(
     *,
     user_id: str,
     source_event_id: str,
+    source_event_title: str,
     source_calendar_id: str,
     source_calendar_color: str,
     google_event_start_iso: str,
@@ -86,6 +89,7 @@ def build_busy_block(
         source_calendar_id=_require_non_empty(source_calendar_id, "source_calendar_id"),
         source_calendar_color=_normalize_color(source_calendar_color),
         source_event_id=_require_non_empty(source_event_id, "source_event_id"),
+        source_event_title=_require_non_empty(source_event_title, "source_event_title"),
     )
 
 
@@ -102,4 +106,5 @@ def busy_block_from_item(item: Dict[str, Any]) -> BusyBlock:
         ),
         source_calendar_color=_normalize_color(str(item.get("source_calendar_color", ""))),
         source_event_id=_require_non_empty(str(item.get("source_event_id", "")), "source_event_id"),
+        source_event_title=_require_non_empty(str(item.get("source_event_title", "")), "source_event_title"),
     )

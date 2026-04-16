@@ -127,6 +127,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "end_time": end_time,
                 "source_calendar_id": source_calendar_id,
                 "source_calendar_color": _safe_str(item.get("source_calendar_color")) or "#3b82f6",
+                "source_event_title": _safe_str(item.get("source_event_title")) or "Busy",
                 "updated_at": _safe_str(item.get("updated_at")),
             }
         )

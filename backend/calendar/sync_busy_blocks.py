@@ -210,7 +210,7 @@ def _build_events_url(calendar_id: str, time_min: str, time_max: str, page_token
         "timeMin": time_min,
         "timeMax": time_max,
         "timeZone": APP_TIMEZONE_ID,
-        "fields": "items(id,recurringEventId,status,transparency,start,end),nextPageToken",
+        "fields": "items(id,summary,recurringEventId,status,transparency,start,end),nextPageToken",
     }
     if page_token:
         params["pageToken"] = page_token
@@ -496,6 +496,9 @@ def _list_busy_blocks_from_selected_calendars(
                 event_id = event.get("id")
                 if not isinstance(event_id, str) or not event_id.strip():
                     continue
+                event_title = event.get("summary")
+                if not isinstance(event_title, str) or not event_title.strip():
+                    event_title = "Busy"
                 start_raw = event.get("start")
                 end_raw = event.get("end")
                 if not isinstance(start_raw, dict) or not isinstance(end_raw, dict):
@@ -521,6 +524,7 @@ def _list_busy_blocks_from_selected_calendars(
                     block = build_busy_block(
                         user_id=user_id,
                         source_event_id=segment_source_event_id,
+                        source_event_title=event_title.strip(),
                         source_calendar_id=calendar_id,
                         source_calendar_color=color_map.get(calendar_id, ""),
                         google_event_start_iso=segment_start.isoformat().replace("+00:00", "Z"),

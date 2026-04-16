@@ -1,7 +1,7 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
-type HomePlaceholderProps = {
+type HomeScreenProps = {
   username?: string;
   onLogout?: () => Promise<void>;
 };
@@ -31,6 +31,7 @@ type BusyBlockItem = {
   end_time: string;
   source_calendar_id: string;
   source_calendar_color?: string;
+  source_event_title?: string;
 };
 
 function pad2(value: number): string {
@@ -69,7 +70,7 @@ function formatTimeRange(startTime: string, endTime: string): string {
   return `${start} - ${end}`;
 }
 
-export default function HomePlaceholder(props: HomePlaceholderProps) {
+export default function HomeScreen(props: HomeScreenProps) {
   const { username, onLogout } = props;
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
@@ -573,7 +574,7 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
                           border: `1px solid ${block.source_calendar_color || '#3b82f6'}`,
                         }}
                       >
-                        <strong>{calendarNameById.get(block.source_calendar_id) || 'Google Calendar'}</strong>
+                        <strong>{block.source_event_title?.trim() || 'Busy'}</strong>
                         <span>{formatTimeRange(block.start_time, block.end_time)}</span>
                       </div>
                     ))}
@@ -726,4 +727,3 @@ export default function HomePlaceholder(props: HomePlaceholderProps) {
     </section>
   );
 }
-
