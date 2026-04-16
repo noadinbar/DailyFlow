@@ -52,6 +52,15 @@ def _busyblocks_table():
     return dynamodb.Table(table_name)
 
 
+def _integrations_table():
+    region = os.getenv("AWS_REGION")
+    table_name = os.getenv("INTEGRATIONS_TABLE")
+    if not table_name:
+        raise ValueError("Missing INTEGRATIONS_TABLE env var.")
+    dynamodb = boto3.resource("dynamodb", region_name=region) if region else boto3.resource("dynamodb")
+    return dynamodb.Table(table_name)
+
+
 def _safe_str(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
@@ -79,6 +88,15 @@ def _query_user_busy_blocks(user_id: str) -> List[Dict[str, Any]]:
     return items
 
 
+def _get_last_busy_sync_at(user_id: str) -> str:
+    table = _integrations_table()
+    response = table.get_item(Key={"user_id": user_id})
+    item = response.get("Item") if isinstance(response, dict) else None
+    if not isinstance(item, dict):
+        return ""
+    return _safe_str(item.get("last_busy_sync_at"))
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_context = event.get("requestContext") or {}
     http = request_context.get("http") or {}
@@ -98,6 +116,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     try:
         items = _query_user_busy_blocks(user_id)
+        last_busy_sync_at = _get_last_busy_sync_at(user_id)
     except ValueError as err:
         return _json_response(500, {"message": str(err)})
     except Exception:
@@ -144,6 +163,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "busy_blocks": busy_blocks,
             "window_start_date": window_start_date,
             "window_end_date": max_date,
+            "last_busy_sync_at": last_busy_sync_at,
             "updated_at": datetime.now(APP_TIMEZONE).isoformat(),
         },
     )

@@ -40,6 +40,8 @@ type BusyBlocksWindow = {
 };
 
 type CalendarViewMode = 'day' | 'week' | 'month';
+const BUSY_BLOCKS_SYNC_FRESHNESS_MS = 60 * 60 * 1000;
+let isAutoBusyBlocksSyncInFlight = false;
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -92,6 +94,13 @@ function monthStart(value: Date): Date {
 function monthGridStart(value: Date): Date {
   const start = monthStart(value);
   return new Date(start.getFullYear(), start.getMonth(), 1 - start.getDay());
+}
+
+function isBusySyncFresh(lastBusySyncAt: string | undefined): boolean {
+  if (typeof lastBusySyncAt !== 'string' || !lastBusySyncAt.trim()) return false;
+  const syncTimeMs = Date.parse(lastBusySyncAt);
+  if (!Number.isFinite(syncTimeMs)) return false;
+  return Date.now() - syncTimeMs < BUSY_BLOCKS_SYNC_FRESHNESS_MS;
 }
 
 export default function HomeScreen(props: HomeScreenProps) {
@@ -367,6 +376,87 @@ export default function HomeScreen(props: HomeScreenProps) {
     }
   }, []);
 
+  const refreshBusyBlocksOnly = React.useCallback(async () => {
+    setBusyBlocksError('');
+    try {
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const idToken = session.tokens?.idToken?.toString();
+      const token = accessToken || idToken;
+      if (!token) {
+        setBusyBlocksError('You need to be signed in to load busy blocks.');
+        return { lastBusySyncAt: '' };
+      }
+
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) {
+        setBusyBlocksError('Missing API base URL (VITE_API_BASE_URL).');
+        return { lastBusySyncAt: '' };
+      }
+
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/calendar/busyblocks`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let payload: {
+        message?: string;
+        busy_blocks?: BusyBlockItem[];
+        window_start_date?: string;
+        window_end_date?: string;
+        last_busy_sync_at?: string;
+      } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
+
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not load busy blocks (${response.status}).`;
+        setBusyBlocksError(message);
+        return { lastBusySyncAt: '' };
+      }
+
+      const incoming = Array.isArray(payload.busy_blocks) ? payload.busy_blocks : [];
+      const cleaned = incoming.filter(
+        (block): block is BusyBlockItem =>
+          !!block &&
+          typeof block.block_key === 'string' &&
+          typeof block.date === 'string' &&
+          typeof block.start_time === 'string' &&
+          typeof block.end_time === 'string' &&
+          typeof block.source_calendar_id === 'string'
+      );
+      setBusyBlocks(cleaned);
+
+      const startDate =
+        typeof payload.window_start_date === 'string' ? payload.window_start_date.trim() : '';
+      const endDate = typeof payload.window_end_date === 'string' ? payload.window_end_date.trim() : '';
+      if (startDate && endDate) {
+        setBusyBlocksWindow({ startDate, endDate });
+      } else {
+        setBusyBlocksWindow(null);
+      }
+
+      return {
+        lastBusySyncAt:
+          typeof payload.last_busy_sync_at === 'string' ? payload.last_busy_sync_at.trim() : '',
+      };
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setBusyBlocksError(
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to load busy blocks.'
+      );
+      return { lastBusySyncAt: '' };
+    }
+  }, []);
+
   async function handleSaveCalendarSelectionClick() {
     setIsSavingCalendarSelection(true);
     try {
@@ -447,8 +537,18 @@ export default function HomeScreen(props: HomeScreenProps) {
     }
 
     void refreshGoogleCalendarFromBackend(false);
-    void syncAndRefreshBusyBlocks();
-  }, [refreshGoogleCalendarFromBackend, syncAndRefreshBusyBlocks]);
+    void (async () => {
+      const { lastBusySyncAt } = await refreshBusyBlocksOnly();
+      if (!isBusySyncFresh(lastBusySyncAt) && !isAutoBusyBlocksSyncInFlight) {
+        isAutoBusyBlocksSyncInFlight = true;
+        try {
+          await syncAndRefreshBusyBlocks();
+        } finally {
+          isAutoBusyBlocksSyncInFlight = false;
+        }
+      }
+    })();
+  }, [refreshGoogleCalendarFromBackend, refreshBusyBlocksOnly, syncAndRefreshBusyBlocks]);
 
   function toggleCalendarSelection(calendarId: string) {
     setSelectedCalendarIds((current) => {
@@ -492,8 +592,6 @@ export default function HomeScreen(props: HomeScreenProps) {
     }
     return grouped;
   }, [busyBlocks]);
-  const windowStartDate = busyBlocksWindow?.startDate || null;
-  const windowEndDate = busyBlocksWindow?.endDate || null;
   const miniCalendarMonthLabel = React.useMemo(
     () => miniCalendarMonthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
     [miniCalendarMonthDate]
