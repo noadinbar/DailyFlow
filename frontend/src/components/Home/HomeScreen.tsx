@@ -494,10 +494,14 @@ export default function HomeScreen(props: HomeScreenProps) {
   }, [busyBlocks]);
   const windowStartDate = busyBlocksWindow?.startDate || null;
   const windowEndDate = busyBlocksWindow?.endDate || null;
+  const currentWeekStartIso = React.useMemo(() => toIsoDateLocal(startOfWeek(new Date())), []);
+  const effectiveWeekStartBoundary = React.useMemo(() => {
+    if (!windowStartDate) return currentWeekStartIso;
+    return windowStartDate < currentWeekStartIso ? windowStartDate : currentWeekStartIso;
+  }, [windowStartDate, currentWeekStartIso]);
   const canGoToPreviousWeek = React.useMemo(() => {
-    if (!windowStartDate) return true;
-    return toIsoDateLocal(shiftWeekDate(weekStartDate, -1)) >= windowStartDate;
-  }, [weekStartDate, windowStartDate]);
+    return toIsoDateLocal(shiftWeekDate(weekStartDate, -1)) >= effectiveWeekStartBoundary;
+  }, [weekStartDate, effectiveWeekStartBoundary]);
   const canGoToNextWeek = React.useMemo(() => {
     if (!windowEndDate) return true;
     const nextWeekStart = shiftWeekDate(weekStartDate, 1);
@@ -700,16 +704,6 @@ export default function HomeScreen(props: HomeScreenProps) {
           </div>
 
           <div className="df-calendarTopbarRight">
-            {calendarSidebarState === 'ready' && (
-              <span className="df-calendarLegend" style={{ color: '#15803d', marginRight: 12 }}>
-                Google Calendar connected
-              </span>
-            )}
-            {calendarSidebarState === 'reconnect_required' && (
-              <span className="df-calendarLegend" style={{ color: '#b45309', marginRight: 12 }}>
-                {GOOGLE_RECONNECT_MESSAGE}
-              </span>
-            )}
             <button
               type="button"
               className="df-btn df-btnPrimary"
@@ -845,11 +839,6 @@ export default function HomeScreen(props: HomeScreenProps) {
                     );
                   })}
                 </div>
-              </div>
-            )}
-            {isSyncingBusyBlocks && (
-              <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#6b7280' }}>
-                Syncing busy blocks...
               </div>
             )}
             {!isSyncingBusyBlocks && busyBlocksError && (
