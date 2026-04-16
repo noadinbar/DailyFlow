@@ -486,8 +486,13 @@ body {
   min-height: 520px;
   border-right: 1px dashed #eef2f7;
   padding-right: 8px;
+}
+
+.df-weekColumnEvents {
+  position: relative;
   background-image: linear-gradient(to bottom, rgba(241, 245, 249, 0.45) 1px, transparent 1px);
   background-size: 100% 44px;
+  border-radius: 8px;
 }
 
 .df-eventBlock {
@@ -507,6 +512,13 @@ body {
 
 .df-eventBlock span {
   color: #4b5563;
+}
+
+.df-eventBlockTimed {
+  position: absolute;
+  inset-inline: 0;
+  margin-bottom: 0;
+  overflow: hidden;
 }
 
 .df-weekColumnEmpty {

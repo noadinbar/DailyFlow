@@ -62,6 +62,11 @@ Calendar milestone product direction:
 - BusyBlocks should be persisted in the BusyBlocks DynamoDB table
 - Busy blocks should include source calendar context when needed by product/UI
 - If busy blocks are displayed in UI, they should be able to reflect the source calendar color
+- Busy blocks should be fetched and available for a rolling one-month window
+- The Calendar screen should support navigation between weeks within the fetched window
+- The week view should render timed events according to their actual start and end times
+- Timed events should be vertically positioned by start time and sized by duration, similar to Google Calendar week view
+- Calendar rendering should remain compatible with the existing Hebrew / RTL layout
 
 Important:
 - Work incrementally and in small steps
@@ -74,6 +79,8 @@ Important:
 - Do not add unnecessary architecture changes
 - Keep the implementation aligned with the existing project structure and the current milestone only
 - Prefer the correct long-term project direction over temporary shortcuts that create duplicate work later
+- For calendar UI work, preserve the existing weekly structure and improve behavior incrementally
+- Do not replace the current calendar screen with a new calendar library unless explicitly requested
 
 Implementation guidance:
 - Keep the code simple and minimal
