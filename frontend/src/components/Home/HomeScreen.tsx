@@ -494,21 +494,6 @@ export default function HomeScreen(props: HomeScreenProps) {
   }, [busyBlocks]);
   const windowStartDate = busyBlocksWindow?.startDate || null;
   const windowEndDate = busyBlocksWindow?.endDate || null;
-  const currentWeekStartIso = React.useMemo(() => toIsoDateLocal(startOfWeek(new Date())), []);
-  const effectiveWeekStartBoundary = React.useMemo(() => {
-    if (!windowStartDate) return currentWeekStartIso;
-    return windowStartDate < currentWeekStartIso ? windowStartDate : currentWeekStartIso;
-  }, [windowStartDate, currentWeekStartIso]);
-  const canGoToPreviousWeek = React.useMemo(() => {
-    return toIsoDateLocal(shiftWeekDate(weekStartDate, -1)) >= effectiveWeekStartBoundary;
-  }, [weekStartDate, effectiveWeekStartBoundary]);
-  const canGoToNextWeek = React.useMemo(() => {
-    if (!windowEndDate) return true;
-    const nextWeekStart = shiftWeekDate(weekStartDate, 1);
-    const nextWeekEnd = shiftWeekDate(weekStartDate, 1);
-    nextWeekEnd.setDate(nextWeekEnd.getDate() + 6);
-    return toIsoDateLocal(nextWeekStart) <= windowEndDate || toIsoDateLocal(nextWeekEnd) <= windowEndDate;
-  }, [weekStartDate, windowEndDate]);
   const miniCalendarMonthLabel = React.useMemo(
     () => miniCalendarMonthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
     [miniCalendarMonthDate]
@@ -594,21 +579,10 @@ export default function HomeScreen(props: HomeScreenProps) {
     setMiniCalendarMonthDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1));
   }
 
-  const canGoToPreviousDay = React.useMemo(() => {
-    if (!windowStartDate) return true;
-    const previousDay = new Date(selectedDate);
-    previousDay.setDate(previousDay.getDate() - 1);
-    return toIsoDateLocal(previousDay) >= windowStartDate;
-  }, [selectedDate, windowStartDate]);
-  const canGoToNextDay = React.useMemo(() => {
-    if (!windowEndDate) return true;
-    const nextDay = new Date(selectedDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-    return toIsoDateLocal(nextDay) <= windowEndDate;
-  }, [selectedDate, windowEndDate]);
-  const canGoPreviousPeriod =
-    viewMode === 'day' ? canGoToPreviousDay : viewMode === 'week' ? canGoToPreviousWeek : true;
-  const canGoNextPeriod = viewMode === 'day' ? canGoToNextDay : viewMode === 'week' ? canGoToNextWeek : true;
+  const visibleMonthLabel = React.useMemo(() => {
+    const baseDate = viewMode === 'day' ? selectedDate : viewMode === 'week' ? weekStartDate : miniCalendarMonthDate;
+    return baseDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }, [viewMode, selectedDate, weekStartDate, miniCalendarMonthDate]);
 
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
@@ -656,7 +630,6 @@ export default function HomeScreen(props: HomeScreenProps) {
               type="button"
               className="df-btn"
               onClick={handlePrevPeriod}
-              disabled={!canGoPreviousPeriod}
               aria-label="Previous period"
             >
               ◀
@@ -665,7 +638,6 @@ export default function HomeScreen(props: HomeScreenProps) {
               type="button"
               className="df-btn"
               onClick={handleNextPeriod}
-              disabled={!canGoNextPeriod}
               aria-label="Next period"
             >
               ▶
@@ -701,6 +673,9 @@ export default function HomeScreen(props: HomeScreenProps) {
                 Month
               </button>
             </div>
+            <span className="df-calendarLegend" style={{ marginBottom: 0 }}>
+              {visibleMonthLabel}
+            </span>
           </div>
 
           <div className="df-calendarTopbarRight">
