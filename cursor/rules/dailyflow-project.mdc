@@ -67,6 +67,13 @@ Calendar milestone product direction:
 - The week view should render timed events according to their actual start and end times
 - Timed events should be vertically positioned by start time and sized by duration, similar to Google Calendar week view
 - Calendar rendering should remain compatible with the existing Hebrew / RTL layout
+- The week view busy-block presentation should remain in the original simple block style unless explicitly requested otherwise
+- Days without busy blocks should remain empty and should not display a "No busy blocks" placeholder
+- The right-side mini calendar should be dynamic, reflect the current real month and day, and support clicking a date to jump to that date's week
+- Users should be able to navigate to weeks even when no synced busy blocks exist for that week
+- BusyBlocks history should remain available after the first sync, so past synced weeks can still be viewed later
+- The top date strip should avoid duplicating date information that is already shown elsewhere in the week UI
+- The calendar should support dynamic DAY / WEEK / MONTH views while preserving the current project structure
 
 Important:
 - Work incrementally and in small steps

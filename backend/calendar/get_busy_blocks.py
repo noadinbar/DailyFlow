@@ -108,9 +108,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     max_date = (today_local + timedelta(days=30)).isoformat()
 
     busy_blocks: List[Dict[str, str]] = []
+    min_busy_block_date: Optional[str] = None
     for item in items:
         block_date = _safe_str(item.get("date"))
-        if not block_date or block_date < today or block_date > max_date:
+        if not block_date or block_date > max_date:
             continue
 
         start_time = _safe_str(item.get("start_time"))
@@ -118,6 +119,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         source_calendar_id = _safe_str(item.get("source_calendar_id"))
         if not start_time or not end_time or not source_calendar_id:
             continue
+        if min_busy_block_date is None or block_date < min_busy_block_date:
+            min_busy_block_date = block_date
 
         busy_blocks.append(
             {
@@ -133,12 +136,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
 
     busy_blocks.sort(key=lambda block: (block["date"], block["start_time"], block["end_time"], block["block_key"]))
+    window_start_date = min_busy_block_date or today
 
     return _json_response(
         200,
         {
             "busy_blocks": busy_blocks,
-            "window_start_date": today,
+            "window_start_date": window_start_date,
             "window_end_date": max_date,
             "updated_at": datetime.now(APP_TIMEZONE).isoformat(),
         },

@@ -39,15 +39,7 @@ type BusyBlocksWindow = {
   endDate: string;
 };
 
-type TimedWeekEvent = {
-  block: BusyBlockItem;
-  top: number;
-  height: number;
-};
-
-const HOUR_HEIGHT_PX = 44;
-const DAY_HEIGHT_PX = HOUR_HEIGHT_PX * 24;
-const MIN_EVENT_HEIGHT_PX = 16;
+type CalendarViewMode = 'day' | 'week' | 'month';
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -68,18 +60,6 @@ function formatTimeRange(startTime: string, endTime: string): string {
   const end = endTime.slice(0, 5);
   if (!start || !end) return `${startTime} - ${endTime}`;
   return `${start} - ${end}`;
-}
-
-function parseTimeToMinutes(value: string): number | null {
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  if (!trimmed) return null;
-  const parts = trimmed.split(':');
-  if (parts.length < 2) return null;
-  const hours = Number(parts[0]);
-  const minutes = Number(parts[1]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
 }
 
 function startOfWeek(value: Date): Date {
@@ -105,20 +85,13 @@ function shiftWeekDate(baseDate: Date, deltaWeeks: number): Date {
   return next;
 }
 
-function mapBlockToTimedWeekEvent(block: BusyBlockItem): TimedWeekEvent | null {
-  const startMinutes = parseTimeToMinutes(block.start_time);
-  const endMinutes = parseTimeToMinutes(block.end_time);
-  if (startMinutes === null || endMinutes === null) return null;
-  if (endMinutes <= startMinutes) return null;
-  const boundedStart = Math.max(0, Math.min(startMinutes, 24 * 60));
-  const boundedEnd = Math.max(0, Math.min(endMinutes, 24 * 60));
-  if (boundedEnd <= boundedStart) return null;
-  const durationMinutes = boundedEnd - boundedStart;
-  return {
-    block,
-    top: (boundedStart / 60) * HOUR_HEIGHT_PX,
-    height: Math.max(MIN_EVENT_HEIGHT_PX, (durationMinutes / 60) * HOUR_HEIGHT_PX),
-  };
+function monthStart(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), 1);
+}
+
+function monthGridStart(value: Date): Date {
+  const start = monthStart(value);
+  return new Date(start.getFullYear(), start.getMonth(), 1 - start.getDay());
 }
 
 export default function HomeScreen(props: HomeScreenProps) {
@@ -136,7 +109,16 @@ export default function HomeScreen(props: HomeScreenProps) {
   const [isSyncingBusyBlocks, setIsSyncingBusyBlocks] = React.useState<boolean>(false);
   const [busyBlocksError, setBusyBlocksError] = React.useState<string>('');
   const [busyBlocksWindow, setBusyBlocksWindow] = React.useState<BusyBlocksWindow | null>(null);
+  const [viewMode, setViewMode] = React.useState<CalendarViewMode>('week');
+  const [selectedDate, setSelectedDate] = React.useState<Date>(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  });
   const [weekStartDate, setWeekStartDate] = React.useState<Date>(() => startOfWeek(new Date()));
+  const [miniCalendarMonthDate, setMiniCalendarMonthDate] = React.useState<Date>(() =>
+    monthStart(new Date())
+  );
 
   async function handleLogoutClick() {
     setErrorMessage('');
@@ -510,23 +492,6 @@ export default function HomeScreen(props: HomeScreenProps) {
     }
     return grouped;
   }, [busyBlocks]);
-  const timedWeekEventsByDate = React.useMemo(() => {
-    const grouped = new Map<string, TimedWeekEvent[]>();
-    for (const day of weekDates) {
-      const dayKey = toIsoDateLocal(day);
-      const dayBlocks = busyBlocksByDate.get(dayKey) || [];
-      const timedEvents = dayBlocks
-        .map((block) => mapBlockToTimedWeekEvent(block))
-        .filter((event): event is TimedWeekEvent => event !== null)
-        .sort((a, b) => {
-          if (a.top !== b.top) return a.top - b.top;
-          if (a.height !== b.height) return a.height - b.height;
-          return a.block.block_key.localeCompare(b.block.block_key);
-        });
-      grouped.set(dayKey, timedEvents);
-    }
-    return grouped;
-  }, [busyBlocksByDate, weekDates]);
   const windowStartDate = busyBlocksWindow?.startDate || null;
   const windowEndDate = busyBlocksWindow?.endDate || null;
   const canGoToPreviousWeek = React.useMemo(() => {
@@ -540,14 +505,106 @@ export default function HomeScreen(props: HomeScreenProps) {
     nextWeekEnd.setDate(nextWeekEnd.getDate() + 6);
     return toIsoDateLocal(nextWeekStart) <= windowEndDate || toIsoDateLocal(nextWeekEnd) <= windowEndDate;
   }, [weekStartDate, windowEndDate]);
-  const weekRangeLabel = React.useMemo(() => {
-    const firstDay = weekDates[0];
-    const lastDay = weekDates[6];
-    if (!firstDay || !lastDay) return '';
-    const firstLabel = firstDay.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const lastLabel = lastDay.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    return `${firstLabel} - ${lastLabel}`;
-  }, [weekDates]);
+  const miniCalendarMonthLabel = React.useMemo(
+    () => miniCalendarMonthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+    [miniCalendarMonthDate]
+  );
+  const miniCalendarDays = React.useMemo(() => {
+    const start = monthGridStart(miniCalendarMonthDate);
+    const items: { date: Date; inCurrentMonth: boolean }[] = [];
+    for (let i = 0; i < 42; i += 1) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      items.push({ date: day, inCurrentMonth: day.getMonth() === miniCalendarMonthDate.getMonth() });
+    }
+    return items;
+  }, [miniCalendarMonthDate]);
+  const todayIso = todayDateKey;
+  const selectedDateIso = React.useMemo(() => toIsoDateLocal(selectedDate), [selectedDate]);
+  const dayBlocks = busyBlocksByDate.get(selectedDateIso) || [];
+  const monthViewDays = React.useMemo(() => {
+    const start = monthGridStart(miniCalendarMonthDate);
+    const items: { date: Date; inCurrentMonth: boolean; blocks: BusyBlockItem[] }[] = [];
+    for (let i = 0; i < 42; i += 1) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      const dayIso = toIsoDateLocal(day);
+      items.push({
+        date: day,
+        inCurrentMonth: day.getMonth() === miniCalendarMonthDate.getMonth(),
+        blocks: busyBlocksByDate.get(dayIso) || [],
+      });
+    }
+    return items;
+  }, [miniCalendarMonthDate, busyBlocksByDate]);
+
+  function moveSelectedDateByDays(deltaDays: number) {
+    setSelectedDate((current) => {
+      const next = new Date(current);
+      next.setDate(next.getDate() + deltaDays);
+      return next;
+    });
+  }
+
+  function handleMiniCalendarDateClick(clickedDate: Date) {
+    const monthDate = monthStart(clickedDate);
+    if (
+      monthDate.getFullYear() !== miniCalendarMonthDate.getFullYear() ||
+      monthDate.getMonth() !== miniCalendarMonthDate.getMonth()
+    ) {
+      setMiniCalendarMonthDate(monthDate);
+    }
+    setSelectedDate(clickedDate);
+    setWeekStartDate(startOfWeek(clickedDate));
+  }
+
+  function handleGoToday() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    setSelectedDate(today);
+    setWeekStartDate(startOfWeek(today));
+    setMiniCalendarMonthDate(monthStart(today));
+  }
+
+  function handlePrevPeriod() {
+    if (viewMode === 'day') {
+      moveSelectedDateByDays(-1);
+      return;
+    }
+    if (viewMode === 'week') {
+      setWeekStartDate((current) => shiftWeekDate(current, -1));
+      return;
+    }
+    setMiniCalendarMonthDate((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1));
+  }
+
+  function handleNextPeriod() {
+    if (viewMode === 'day') {
+      moveSelectedDateByDays(1);
+      return;
+    }
+    if (viewMode === 'week') {
+      setWeekStartDate((current) => shiftWeekDate(current, 1));
+      return;
+    }
+    setMiniCalendarMonthDate((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1));
+  }
+
+  const canGoToPreviousDay = React.useMemo(() => {
+    if (!windowStartDate) return true;
+    const previousDay = new Date(selectedDate);
+    previousDay.setDate(previousDay.getDate() - 1);
+    return toIsoDateLocal(previousDay) >= windowStartDate;
+  }, [selectedDate, windowStartDate]);
+  const canGoToNextDay = React.useMemo(() => {
+    if (!windowEndDate) return true;
+    const nextDay = new Date(selectedDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    return toIsoDateLocal(nextDay) <= windowEndDate;
+  }, [selectedDate, windowEndDate]);
+  const canGoPreviousPeriod =
+    viewMode === 'day' ? canGoToPreviousDay : viewMode === 'week' ? canGoToPreviousWeek : true;
+  const canGoNextPeriod = viewMode === 'day' ? canGoToNextDay : viewMode === 'week' ? canGoToNextWeek : true;
 
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
@@ -586,7 +643,7 @@ export default function HomeScreen(props: HomeScreenProps) {
             <button
               type="button"
               className="df-btn"
-              onClick={() => setWeekStartDate(startOfWeek(new Date()))}
+              onClick={handleGoToday}
               aria-label="Current week"
             >
               Today
@@ -594,18 +651,18 @@ export default function HomeScreen(props: HomeScreenProps) {
             <button
               type="button"
               className="df-btn"
-              onClick={() => setWeekStartDate((current) => shiftWeekDate(current, -1))}
-              disabled={!canGoToPreviousWeek}
-              aria-label="Previous week"
+              onClick={handlePrevPeriod}
+              disabled={!canGoPreviousPeriod}
+              aria-label="Previous period"
             >
               ◀
             </button>
             <button
               type="button"
               className="df-btn"
-              onClick={() => setWeekStartDate((current) => shiftWeekDate(current, 1))}
-              disabled={!canGoToNextWeek}
-              aria-label="Next week"
+              onClick={handleNextPeriod}
+              disabled={!canGoNextPeriod}
+              aria-label="Next period"
             >
               ▶
             </button>
@@ -618,19 +675,28 @@ export default function HomeScreen(props: HomeScreenProps) {
               {isSyncingBusyBlocks ? 'Syncing...' : 'Refresh calendar'}
             </button>
             <div className="df-calendarViewSwitch" role="tablist" aria-label="Calendar view">
-              <button type="button" className="df-calendarViewBtn df-calendarViewBtnActive">
+              <button
+                type="button"
+                className={`df-calendarViewBtn${viewMode === 'day' ? ' df-calendarViewBtnActive' : ''}`}
+                onClick={() => setViewMode('day')}
+              >
                 Day
               </button>
-              <button type="button" className="df-calendarViewBtn">
+              <button
+                type="button"
+                className={`df-calendarViewBtn${viewMode === 'week' ? ' df-calendarViewBtnActive' : ''}`}
+                onClick={() => setViewMode('week')}
+              >
                 Week
               </button>
-              <button type="button" className="df-calendarViewBtn">
+              <button
+                type="button"
+                className={`df-calendarViewBtn${viewMode === 'month' ? ' df-calendarViewBtnActive' : ''}`}
+                onClick={() => setViewMode('month')}
+              >
                 Month
               </button>
             </div>
-            <span className="df-calendarLegend" style={{ marginBottom: 0 }}>
-              {weekRangeLabel}
-            </span>
           </div>
 
           <div className="df-calendarTopbarRight">
@@ -677,50 +743,110 @@ export default function HomeScreen(props: HomeScreenProps) {
         {errorMessage && <div className="df-errorText">{errorMessage}</div>}
 
         <div className="df-calendarBody">
-          <section className="df-weekGrid" aria-label="Weekly calendar">
-            <div className="df-weekHeader">
-              {weekDates.map((day) => (
-                <div
-                  key={toIsoDateLocal(day)}
-                  className={toIsoDateLocal(day) === todayDateKey ? 'df-weekHeaderDayToday' : undefined}
-                >
-                  {formatDayHeader(day)}
-                </div>
-              ))}
-            </div>
-
-            <div className="df-weekColumns">
-              {weekDates.map((day) => {
-                const dayKey = toIsoDateLocal(day);
-                const dayEvents = timedWeekEventsByDate.get(dayKey) || [];
-                return (
-                  <div className="df-weekColumn" key={dayKey}>
-                    <div className="df-weekColumnEvents" style={{ minHeight: DAY_HEIGHT_PX }}>
-                      {dayEvents.map(({ block, top, height }) => (
-                        <div
-                          key={block.block_key}
-                          className="df-eventBlock df-eventBlockTimed"
-                          style={{
-                            top,
-                            height,
-                            background: `${block.source_calendar_color || '#3b82f6'}22`,
-                            border: `1px solid ${block.source_calendar_color || '#3b82f6'}`,
-                          }}
-                        >
-                          <strong>{block.source_event_title?.trim() || 'Busy'}</strong>
-                          <span>{formatTimeRange(block.start_time, block.end_time)}</span>
-                        </div>
-                      ))}
+          <section className="df-weekGrid" aria-label="Calendar view">
+            {viewMode === 'week' && (
+              <>
+                <div className="df-weekHeader">
+                  {weekDates.map((day) => (
+                    <div
+                      key={toIsoDateLocal(day)}
+                      className={toIsoDateLocal(day) === todayDateKey ? 'df-weekHeaderDayToday' : undefined}
+                    >
+                      {formatDayHeader(day)}
                     </div>
-                    {dayEvents.length === 0 && (
-                      <div className="df-weekColumnEmpty">
-                        No busy blocks
+                  ))}
+                </div>
+
+                <div className="df-weekColumns">
+                  {weekDates.map((day) => {
+                    const dayKey = toIsoDateLocal(day);
+                    const weekDayBlocks = busyBlocksByDate.get(dayKey) || [];
+                    return (
+                      <div className="df-weekColumn" key={dayKey}>
+                        {weekDayBlocks.map((block) => (
+                          <div
+                            key={block.block_key}
+                            className="df-eventBlock"
+                            style={{
+                              background: `${block.source_calendar_color || '#3b82f6'}22`,
+                              border: `1px solid ${block.source_calendar_color || '#3b82f6'}`,
+                            }}
+                          >
+                            <strong>{block.source_event_title?.trim() || 'Busy'}</strong>
+                            <span>{formatTimeRange(block.start_time, block.end_time)}</span>
+                          </div>
+                        ))}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            {viewMode === 'day' && (
+              <div className="df-dayView">
+                <div className="df-dayViewHeader">
+                  {selectedDate.toLocaleDateString(undefined, {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </div>
+                <div className="df-dayViewBody">
+                  {dayBlocks.map((block) => (
+                    <div
+                      key={block.block_key}
+                      className="df-eventBlock"
+                      style={{
+                        background: `${block.source_calendar_color || '#3b82f6'}22`,
+                        border: `1px solid ${block.source_calendar_color || '#3b82f6'}`,
+                      }}
+                    >
+                      <strong>{block.source_event_title?.trim() || 'Busy'}</strong>
+                      <span>{formatTimeRange(block.start_time, block.end_time)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {viewMode === 'month' && (
+              <div className="df-monthView">
+                <div className="df-weekHeader">
+                  <div>S</div>
+                  <div>M</div>
+                  <div>T</div>
+                  <div>W</div>
+                  <div>T</div>
+                  <div>F</div>
+                  <div>S</div>
+                </div>
+                <div className="df-monthGrid">
+                  {monthViewDays.map(({ date, inCurrentMonth, blocks }) => {
+                    const dateIso = toIsoDateLocal(date);
+                    return (
+                      <button
+                        type="button"
+                        key={dateIso}
+                        className={`df-monthCell${inCurrentMonth ? '' : ' df-monthCellMuted'}${dateIso === todayIso ? ' df-monthCellToday' : ''}`}
+                        onClick={() => {
+                          setSelectedDate(date);
+                          setWeekStartDate(startOfWeek(date));
+                          setViewMode('day');
+                        }}
+                        aria-label={`Open day ${date.toLocaleDateString()}`}
+                      >
+                        <span className="df-monthCellDate">{date.getDate()}</span>
+                        {blocks.slice(0, 2).map((block) => (
+                          <span key={block.block_key} className="df-monthCellEvent">
+                            {block.start_time.slice(0, 5)} {block.source_event_title?.trim() || 'Busy'}
+                          </span>
+                        ))}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {isSyncingBusyBlocks && (
               <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#6b7280' }}>
                 Syncing busy blocks...
@@ -740,7 +866,35 @@ export default function HomeScreen(props: HomeScreenProps) {
 
           <aside className="df-calendarSidebar" aria-label="Calendar details">
             <div className="df-miniCalendar">
-              <div className="df-miniCalendarHeader">January 2026</div>
+              <div className="df-miniCalendarHeaderRow">
+                <button
+                  type="button"
+                  className="df-btn"
+                  onClick={() =>
+                    setMiniCalendarMonthDate(
+                      (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1)
+                    )
+                  }
+                  aria-label="Previous month"
+                  style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
+                >
+                  ◀
+                </button>
+                <div className="df-miniCalendarHeader">{miniCalendarMonthLabel}</div>
+                <button
+                  type="button"
+                  className="df-btn"
+                  onClick={() =>
+                    setMiniCalendarMonthDate(
+                      (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1)
+                    )
+                  }
+                  aria-label="Next month"
+                  style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
+                >
+                  ▶
+                </button>
+              </div>
               <div className="df-miniCalendarGrid">
                 <span>S</span>
                 <span>M</span>
@@ -749,13 +903,21 @@ export default function HomeScreen(props: HomeScreenProps) {
                 <span>T</span>
                 <span>F</span>
                 <span>S</span>
-                <span className="df-miniCalendarDay">10</span>
-                <span className="df-miniCalendarDay">11</span>
-                <span className="df-miniCalendarDay">12</span>
-                <span className="df-miniCalendarDay">13</span>
-                <span className="df-miniCalendarDay">14</span>
-                <span className="df-miniCalendarDay df-miniCalendarDayActive">15</span>
-                <span className="df-miniCalendarDay">16</span>
+                {miniCalendarDays.map(({ date, inCurrentMonth }) => {
+                  const dateIso = toIsoDateLocal(date);
+                  const isToday = dateIso === todayIso;
+                  return (
+                    <button
+                      key={dateIso}
+                      type="button"
+                      className={`df-miniCalendarDayButton${isToday ? ' df-miniCalendarDayActive' : ''}${!inCurrentMonth ? ' df-miniCalendarDayMuted' : ''}`}
+                      onClick={() => handleMiniCalendarDateClick(date)}
+                      aria-label={`Open week of ${date.toLocaleDateString()}`}
+                    >
+                      {date.getDate()}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

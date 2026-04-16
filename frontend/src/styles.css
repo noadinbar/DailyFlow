@@ -452,6 +452,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: auto;
 }
 
 .df-weekHeader {
@@ -482,17 +483,82 @@ body {
   overflow: auto;
 }
 
+.df-dayView {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.df-dayViewHeader {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--df-border);
+  font-weight: 700;
+  color: #374151;
+}
+
+.df-dayViewBody {
+  padding: 10px;
+}
+
+.df-monthView {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.df-monthGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(110px, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.df-monthCell {
+  border: 1px solid #eef2f7;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  padding: 8px;
+  min-height: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.df-monthCellDate {
+  font-weight: 700;
+  font-size: 12px;
+  color: #374151;
+}
+
+.df-monthCellEvent {
+  font-size: 11px;
+  color: #4b5563;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.df-monthCellMuted {
+  background: #fafafa;
+}
+
+.df-monthCellMuted .df-monthCellDate {
+  color: #9ca3af;
+}
+
+.df-monthCellToday {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 1px #bfdbfe inset;
+}
+
 .df-weekColumn {
   min-height: 520px;
   border-right: 1px dashed #eef2f7;
   padding-right: 8px;
-}
-
-.df-weekColumnEvents {
-  position: relative;
   background-image: linear-gradient(to bottom, rgba(241, 245, 249, 0.45) 1px, transparent 1px);
   background-size: 100% 44px;
-  border-radius: 8px;
 }
 
 .df-eventBlock {
@@ -512,13 +578,6 @@ body {
 
 .df-eventBlock span {
   color: #4b5563;
-}
-
-.df-eventBlockTimed {
-  position: absolute;
-  inset-inline: 0;
-  margin-bottom: 0;
-  overflow: hidden;
 }
 
 .df-weekColumnEmpty {
@@ -568,6 +627,18 @@ body {
   margin-bottom: 8px;
 }
 
+.df-miniCalendarHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.df-miniCalendarHeaderRow .df-miniCalendarHeader {
+  margin-bottom: 0;
+}
+
 .df-miniCalendarGrid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -587,10 +658,24 @@ body {
   padding: 4px 0;
 }
 
+.df-miniCalendarDayButton {
+  border: 1px solid #f1f5f9;
+  border-radius: 6px;
+  color: #374151;
+  padding: 4px 0;
+  background: #fff;
+  cursor: pointer;
+  font-size: 11px;
+}
+
 .df-miniCalendarDayActive {
   background: #2563eb;
   color: #fff;
   border-color: #1d4ed8;
+}
+
+.df-miniCalendarDayMuted {
+  color: #9ca3af;
 }
 
 .df-calendarsList {
