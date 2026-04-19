@@ -1,11 +1,28 @@
 import React from 'react';
 
+// Matches backend/profile/profile_image_upload_url.py allowed types.
+const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const PROFILE_IMAGE_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+function validateProfileImageFile(file: File): string | null {
+  const type = (file.type || '').toLowerCase().trim();
+  if (!type || !PROFILE_IMAGE_ALLOWED_TYPES.has(type)) {
+    return 'Please choose a JPEG, PNG, WebP, or GIF image.';
+  }
+  if (file.size > PROFILE_IMAGE_MAX_BYTES) {
+    return `Image must be ${PROFILE_IMAGE_MAX_BYTES / (1024 * 1024)} MB or smaller.`;
+  }
+  return null;
+}
+
 type SettingsTab = 'profile' | 'preferences';
 
 type ProfileSettingsModalProps = {
   isOpen: boolean;
   initialName: string;
-  onLoadDisplayName?: () => Promise<string>;
+  /** Presigned GET URL from GET /profile; updates when parent loads profile. */
+  savedProfileImageUrl?: string;
+  onLoadProfile?: () => Promise<{ displayName: string; profileImageUrl: string }>;
   onSaveDisplayName?: (nextName: string) => Promise<void>;
   onRequestProfileImageUploadUrl?: (args: { contentType: string }) => Promise<{
     uploadUrl: string;
@@ -19,8 +36,9 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
   const {
     isOpen,
     initialName,
+    savedProfileImageUrl = '',
     onClose,
-    onLoadDisplayName,
+    onLoadProfile,
     onSaveDisplayName,
     onRequestProfileImageUploadUrl,
     onSaveProfileImageKey,
@@ -31,35 +49,36 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
   const [localImageUrl, setLocalImageUrl] = React.useState<string>('');
   const [selectedImageFile, setSelectedImageFile] = React.useState<File | null>(null);
   const [isLoadingName, setIsLoadingName] = React.useState<boolean>(false);
-  const [isSavingName, setIsSavingName] = React.useState<boolean>(false);
+  const [isSavingProfile, setIsSavingProfile] = React.useState<boolean>(false);
   const [saveError, setSaveError] = React.useState<string>('');
-  const [isUploadingImage, setIsUploadingImage] = React.useState<boolean>(false);
-  const [imageUploadError, setImageUploadError] = React.useState<string>('');
-  const [imageUploadStatus, setImageUploadStatus] = React.useState<string>('');
+  const [saveSuccess, setSaveSuccess] = React.useState<string>('');
+  const [imagePickError, setImagePickError] = React.useState<string>('');
 
   const fileInputId = React.useId();
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     if (!isOpen) return;
     setActiveTab('profile');
     setName(initialName);
     setSaveError('');
+    setSaveSuccess('');
     setSelectedImageFile(null);
-    setImageUploadError('');
-    setImageUploadStatus('');
+    setImagePickError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, [isOpen, initialName]);
 
   React.useEffect(() => {
     if (!isOpen) return;
-    if (!onLoadDisplayName) return;
+    if (!onLoadProfile) return;
 
     let cancelled = false;
     setIsLoadingName(true);
     void (async () => {
       try {
-        const loaded = await onLoadDisplayName();
+        const loaded = await onLoadProfile();
         if (cancelled) return;
-        const clean = typeof loaded === 'string' ? loaded.trim() : '';
+        const clean = typeof loaded.displayName === 'string' ? loaded.displayName.trim() : '';
         if (clean) setName(clean);
       } finally {
         if (!cancelled) setIsLoadingName(false);
@@ -69,7 +88,7 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, onLoadDisplayName]);
+  }, [isOpen, onLoadProfile]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -79,6 +98,12 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
+
+  React.useEffect(() => {
+    if (!saveSuccess) return;
+    const t = window.setTimeout(() => setSaveSuccess(''), 4500);
+    return () => window.clearTimeout(t);
+  }, [saveSuccess]);
 
   React.useEffect(() => {
     return () => {
@@ -94,54 +119,61 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const validationError = validateProfileImageFile(file);
+    if (validationError) {
+      setImagePickError(validationError);
+      e.target.value = '';
+      return;
+    }
+
+    setImagePickError('');
     if (localImageUrl) URL.revokeObjectURL(localImageUrl);
     setLocalImageUrl(URL.createObjectURL(file));
     setSelectedImageFile(file);
-    setImageUploadError('');
-    setImageUploadStatus('');
+    setSaveSuccess('');
   }
 
-  async function handleSaveClick() {
+  async function handleSaveChangesClick() {
     if (!onSaveDisplayName) return;
     setSaveError('');
-    setIsSavingName(true);
+    setSaveSuccess('');
+    setImagePickError('');
+    setIsSavingProfile(true);
     try {
       await onSaveDisplayName(name);
-    } catch (e) {
-      const anyErr = e as { message?: string };
-      setSaveError(typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to save name.');
-    } finally {
-      setIsSavingName(false);
-    }
-  }
 
-  async function handleUploadImageClick() {
-    if (!selectedImageFile) return;
-    if (!onRequestProfileImageUploadUrl || !onSaveProfileImageKey) return;
+      if (selectedImageFile && onRequestProfileImageUploadUrl && onSaveProfileImageKey) {
+        const validationError = validateProfileImageFile(selectedImageFile);
+        if (validationError) {
+          setImagePickError(validationError);
+          return;
+        }
 
-    setIsUploadingImage(true);
-    setImageUploadError('');
-    setImageUploadStatus('');
-    try {
-      const contentType = selectedImageFile.type || 'application/octet-stream';
-      const { uploadUrl, objectKey } = await onRequestProfileImageUploadUrl({ contentType });
+        const contentType = selectedImageFile.type;
+        const { uploadUrl, objectKey } = await onRequestProfileImageUploadUrl({ contentType });
 
-      const putResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': contentType },
-        body: selectedImageFile,
-      });
-      if (!putResponse.ok) {
-        throw new Error(`Upload failed (${putResponse.status}).`);
+        const putResponse = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': contentType },
+          body: selectedImageFile,
+        });
+        if (!putResponse.ok) {
+          throw new Error(`Upload failed (${putResponse.status}).`);
+        }
+
+        await onSaveProfileImageKey(objectKey);
+        setSelectedImageFile(null);
+        if (localImageUrl) URL.revokeObjectURL(localImageUrl);
+        setLocalImageUrl('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
 
-      await onSaveProfileImageKey(objectKey);
-      setImageUploadStatus('Image uploaded (not displayed from S3 yet).');
+      setSaveSuccess('Changes saved.');
     } catch (e) {
       const anyErr = e as { message?: string };
-      setImageUploadError(typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to upload image.');
+      setSaveError(typeof anyErr?.message === 'string' ? anyErr.message : 'Could not save changes.');
     } finally {
-      setIsUploadingImage(false);
+      setIsSavingProfile(false);
     }
   }
 
@@ -190,7 +222,14 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                 <div className="df-settingsRow">
                   <div className="df-settingsAvatarPreview" aria-label="Profile image preview">
                     {localImageUrl ? (
-                      <img src={localImageUrl} alt="Selected profile" className="df-settingsAvatarImg" />
+                      <img src={localImageUrl} alt="Preview" className="df-settingsAvatarImg" />
+                    ) : savedProfileImageUrl ? (
+                      <img
+                        key={savedProfileImageUrl}
+                        src={savedProfileImageUrl}
+                        alt=""
+                        className="df-settingsAvatarImg"
+                      />
                     ) : (
                       <span className="df-settingsAvatarInitial" aria-hidden>
                         {(name || 'U').trim().slice(0, 1).toUpperCase()}
@@ -206,46 +245,43 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                       <input
                         className="df-input"
                         value={name}
-                        onChange={(e) => setName(e.target.value)}
+                        onChange={(e) => {
+                          setName(e.target.value);
+                          setSaveSuccess('');
+                        }}
                         placeholder="Your name"
                         autoComplete="name"
+                        disabled={isLoadingName || isSavingProfile}
                       />
                     </label>
                     {isLoadingName && (
                       <div className="df-settingsHint" role="status">
-                        Loading name...
+                        Loading profile...
                       </div>
                     )}
 
                     <div className="df-settingsFileRow">
                       <input
+                        ref={fileInputRef}
                         id={fileInputId}
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
                         onChange={handleImageFileChange}
                         className="df-settingsFileInput"
+                        disabled={isSavingProfile}
                       />
-                      <label htmlFor={fileInputId} className="df-btn" style={{ width: 'fit-content' }}>
+                      <label
+                        htmlFor={fileInputId}
+                        className="df-btn"
+                        style={{ width: 'fit-content', opacity: isSavingProfile ? 0.55 : 1 }}
+                      >
                         Choose image
                       </label>
-                      <button
-                        type="button"
-                        className="df-btn"
-                        onClick={() => void handleUploadImageClick()}
-                        disabled={!selectedImageFile || !onRequestProfileImageUploadUrl || !onSaveProfileImageKey || isUploadingImage}
-                      >
-                        {isUploadingImage ? 'Uploading...' : 'Upload'}
-                      </button>
-                      <span className="df-settingsHint">Upload foundation only (no public URLs yet)</span>
+                      <span className="df-settingsHint">JPEG, PNG, WebP, or GIF · max 5 MB</span>
                     </div>
-                    {imageUploadStatus && (
-                      <div className="df-successText" role="status" style={{ marginTop: 0 }}>
-                        {imageUploadStatus}
-                      </div>
-                    )}
-                    {imageUploadError && (
+                    {imagePickError && (
                       <div className="df-errorText" role="alert" style={{ marginTop: 0 }}>
-                        {imageUploadError}
+                        {imagePickError}
                       </div>
                     )}
 
@@ -253,11 +289,16 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                       <button
                         type="button"
                         className="df-btn df-btnPrimary"
-                        onClick={() => void handleSaveClick()}
-                        disabled={!onSaveDisplayName || isSavingName}
+                        onClick={() => void handleSaveChangesClick()}
+                        disabled={!onSaveDisplayName || isLoadingName || isSavingProfile}
                       >
-                        {isSavingName ? 'Saving...' : 'Save'}
+                        {isSavingProfile ? 'Saving...' : 'Save changes'}
                       </button>
+                      {saveSuccess && (
+                        <div className="df-successText" role="status" style={{ marginTop: 0 }}>
+                          {saveSuccess}
+                        </div>
+                      )}
                       {saveError && (
                         <div className="df-errorText" role="alert" style={{ marginTop: 0 }}>
                           {saveError}

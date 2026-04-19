@@ -17,6 +17,7 @@ _ALLOWED_IMAGE_CONTENT_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "image/heic": ".HEIC",
 }
 
 

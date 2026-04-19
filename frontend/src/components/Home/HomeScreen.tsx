@@ -109,6 +109,7 @@ export default function HomeScreen(props: HomeScreenProps) {
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [displayName, setDisplayName] = React.useState<string>('');
+  const [profileImageUrl, setProfileImageUrl] = React.useState<string>('');
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
   const [calendarSidebarState, setCalendarSidebarState] = React.useState<CalendarSidebarState>('checking');
@@ -160,7 +161,7 @@ export default function HomeScreen(props: HomeScreenProps) {
     return token;
   }
 
-  async function loadProfileDisplayName(): Promise<string> {
+  async function loadProfile(): Promise<{ displayName: string; profileImageUrl: string }> {
     const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
     if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
@@ -168,7 +169,7 @@ export default function HomeScreen(props: HomeScreenProps) {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     });
-    let payload: { display_name?: string; message?: string } = {};
+    let payload: { display_name?: string; profile_image_url?: string; message?: string } = {};
     try {
       payload = (await response.json()) as typeof payload;
     } catch {
@@ -182,8 +183,10 @@ export default function HomeScreen(props: HomeScreenProps) {
       throw new Error(message);
     }
     const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
+    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
     if (name) setDisplayName(name);
-    return name;
+    setProfileImageUrl(imageUrl);
+    return { displayName: name, profileImageUrl: imageUrl };
   }
 
   async function saveProfileDisplayName(nextName: string): Promise<void> {
@@ -198,7 +201,7 @@ export default function HomeScreen(props: HomeScreenProps) {
       },
       body: JSON.stringify({ display_name: nextName }),
     });
-    let payload: { display_name?: string; message?: string } = {};
+    let payload: { display_name?: string; profile_image_url?: string; message?: string } = {};
     try {
       payload = (await response.json()) as typeof payload;
     } catch {
@@ -213,6 +216,8 @@ export default function HomeScreen(props: HomeScreenProps) {
     }
     const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
     setDisplayName(name);
+    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
+    if (imageUrl) setProfileImageUrl(imageUrl);
   }
 
   async function requestProfileImageUploadUrl(args: { contentType: string }): Promise<{
@@ -261,7 +266,7 @@ export default function HomeScreen(props: HomeScreenProps) {
       },
       body: JSON.stringify({ profile_image_key: objectKey }),
     });
-    let payload: { message?: string } = {};
+    let payload: { profile_image_url?: string; message?: string } = {};
     try {
       payload = (await response.json()) as typeof payload;
     } catch {
@@ -274,6 +279,8 @@ export default function HomeScreen(props: HomeScreenProps) {
           : `Could not save profile (${response.status}).`;
       throw new Error(message);
     }
+    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
+    if (imageUrl) setProfileImageUrl(imageUrl);
   }
 
   function handleConnectGoogleCalendarClick() {
@@ -654,6 +661,16 @@ export default function HomeScreen(props: HomeScreenProps) {
   }
 
   React.useEffect(() => {
+    void (async () => {
+      try {
+        await loadProfile();
+      } catch {
+        // Keep initials / empty name when profile cannot be loaded.
+      }
+    })();
+  }, []);
+
+  React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const params = new URLSearchParams(window.location.search);
@@ -817,7 +834,18 @@ export default function HomeScreen(props: HomeScreenProps) {
       <aside className="df-calendarLeftNav">
         <div className="df-calendarBrand">DailyFlow</div>
         <div className="df-calendarProfile">
-          <div className="df-calendarProfileAvatar">{(effectiveName || 'N').slice(0, 2).toUpperCase()}</div>
+          <div className="df-calendarProfileAvatar">
+            {profileImageUrl ? (
+              <img
+                key={profileImageUrl}
+                src={profileImageUrl}
+                alt=""
+                className="df-calendarProfileAvatarImg"
+              />
+            ) : (
+              (effectiveName || 'N').slice(0, 2).toUpperCase()
+            )}
+          </div>
           <div>
             <div className="df-calendarProfileName">{effectiveName}</div>
             <div className="df-calendarProfileHint">Plan your week</div>
@@ -1226,7 +1254,8 @@ export default function HomeScreen(props: HomeScreenProps) {
       <ProfileSettingsModal
         isOpen={isProfileSettingsOpen}
         initialName={effectiveName}
-        onLoadDisplayName={loadProfileDisplayName}
+        savedProfileImageUrl={profileImageUrl}
+        onLoadProfile={loadProfile}
         onSaveDisplayName={saveProfileDisplayName}
         onRequestProfileImageUploadUrl={requestProfileImageUploadUrl}
         onSaveProfileImageKey={saveProfileImageKey}

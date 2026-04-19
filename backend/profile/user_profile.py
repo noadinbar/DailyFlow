@@ -70,6 +70,43 @@ def _expected_profile_image_prefix(user_id: str) -> str:
     return f"users/{user_id}/profile-image/"
 
 
+def _s3_client():
+    region = os.getenv("AWS_REGION")
+    return boto3.client("s3", region_name=region) if region else boto3.client("s3")
+
+
+def _profile_image_display_ttl_seconds() -> int:
+    raw = os.getenv("PROFILE_IMAGE_DISPLAY_URL_TTL_SECONDS", "") or os.getenv(
+        "PROFILE_IMAGE_UPLOAD_URL_TTL_SECONDS", "900"
+    )
+    try:
+        ttl = int(raw)
+    except ValueError:
+        ttl = 900
+    return ttl if ttl > 0 else 900
+
+
+def _presigned_get_url(*, bucket: str, object_key: str) -> str:
+    s3 = _s3_client()
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": object_key},
+        ExpiresIn=_profile_image_display_ttl_seconds(),
+    )
+
+
+def _profile_image_url_for_key(user_id: str, object_key: str) -> Optional[str]:
+    if not object_key.strip():
+        return None
+    bucket = os.getenv("PROFILE_IMAGES_BUCKET", "").strip()
+    if not bucket:
+        return None
+    expected_prefix = _expected_profile_image_prefix(user_id)
+    if not object_key.startswith(expected_prefix):
+        return None
+    return _presigned_get_url(bucket=bucket, object_key=object_key)
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_context = event.get("requestContext") or {}
     http = request_context.get("http") or {}
@@ -92,7 +129,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         item = response.get("Item") or {}
         display_name = item.get("display_name")
         clean = display_name.strip() if isinstance(display_name, str) else ""
-        return _json_response(200, {"user_id": user_id, "display_name": clean})
+        body: Dict[str, Any] = {"user_id": user_id, "display_name": clean}
+        raw_key = item.get("profile_image_key")
+        if isinstance(raw_key, str) and raw_key.strip():
+            key_clean = raw_key.strip()
+            url = _profile_image_url_for_key(user_id, key_clean)
+            if url:
+                body["profile_image_url"] = url
+                body["profile_image_url_expires_in_seconds"] = _profile_image_display_ttl_seconds()
+        return _json_response(200, body)
 
     if method != "PATCH":
         return _json_response(405, {"message": "Method not allowed."})
@@ -165,13 +210,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         ExpressionAttributeValues=expr_values,
     )
 
-    return _json_response(
-        200,
-        {
-            "user_id": user_id,
-            **({"display_name": clean_name} if isinstance(clean_name, str) else {}),
-            **({"profile_image_key": clean_key} if isinstance(clean_key, str) else {}),
-            "updated_at": now_iso,
-        },
-    )
+    response_body: Dict[str, Any] = {
+        "user_id": user_id,
+        **({"display_name": clean_name} if isinstance(clean_name, str) else {}),
+        **({"profile_image_key": clean_key} if isinstance(clean_key, str) else {}),
+        "updated_at": now_iso,
+    }
+    if isinstance(clean_key, str) and clean_key.strip():
+        url = _profile_image_url_for_key(user_id, clean_key.strip())
+        if url:
+            response_body["profile_image_url"] = url
+            response_body["profile_image_url_expires_in_seconds"] = _profile_image_display_ttl_seconds()
+
+    return _json_response(200, response_body)
 
