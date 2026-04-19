@@ -13,14 +13,19 @@ import {
   WORKOUT_TIME_OPTIONS,
   WORKOUT_TYPE_OPTIONS,
   buildQuestionnairePatchPayload,
-  coerceExclusiveMultiSelect,
   questionnaireFromApi,
+  toggleExclusiveNoneMulti,
   validateQuestionnaireFormComplete,
 } from './questionnairePreferences';
 
 // Matches backend/profile/profile_image_upload_url.py allowed types.
 const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const PROFILE_IMAGE_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+function togglePlainMulti(current: string[], id: string): string[] {
+  if (current.includes(id)) return current.filter((x) => x !== id);
+  return [...current, id];
+}
 
 function validateProfileImageFile(file: File): string | null {
   const type = (file.type || '').toLowerCase().trim();
@@ -76,7 +81,8 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
   const [name, setName] = React.useState<string>(initialName);
   const [localImageUrl, setLocalImageUrl] = React.useState<string>('');
   const [selectedImageFile, setSelectedImageFile] = React.useState<File | null>(null);
-  const [isLoadingName, setIsLoadingName] = React.useState<boolean>(false);
+  /** Background refresh from GET /profile — never blocks interaction. */
+  const [isRefreshingProfile, setIsRefreshingProfile] = React.useState<boolean>(false);
   const [isSavingProfile, setIsSavingProfile] = React.useState<boolean>(false);
   const [saveError, setSaveError] = React.useState<string>('');
   const [saveSuccess, setSaveSuccess] = React.useState<string>('');
@@ -108,7 +114,7 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
     if (!onLoadProfile) return;
 
     let cancelled = false;
-    setIsLoadingName(true);
+    setIsRefreshingProfile(true);
     void (async () => {
       try {
         const loaded = await onLoadProfile();
@@ -119,7 +125,7 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
           setQForm(questionnaireFromApi(loaded.questionnaire));
         }
       } finally {
-        if (!cancelled) setIsLoadingName(false);
+        if (!cancelled) setIsRefreshingProfile(false);
       }
     })();
 
@@ -295,6 +301,11 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
           </nav>
 
           <section className="df-settingsContent" aria-label="Settings content">
+            {isRefreshingProfile && (
+              <div className="df-settingsHint" aria-live="polite" style={{ marginTop: 0 }}>
+                Refreshing profile…
+              </div>
+            )}
             {activeTab === 'profile' && (
               <div className="df-settingsSection">
                 <div className="df-settingsRow">
@@ -329,14 +340,9 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                         }}
                         placeholder="Your name"
                         autoComplete="name"
-                        disabled={isLoadingName || isSavingProfile}
+                        disabled={isSavingProfile}
                       />
                     </label>
-                    {isLoadingName && (
-                      <div className="df-settingsHint" role="status">
-                        Loading profile...
-                      </div>
-                    )}
 
                     <div className="df-settingsFileRow">
                       <input
@@ -368,7 +374,7 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                         type="button"
                         className="df-btn df-btnPrimary"
                         onClick={() => void handleSaveChangesClick()}
-                        disabled={!onSaveDisplayName || isLoadingName || isSavingProfile}
+                        disabled={!onSaveDisplayName || isSavingProfile}
                       >
                         {isSavingProfile ? 'Saving...' : 'Save changes'}
                       </button>
@@ -391,108 +397,155 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
             {activeTab === 'preferences' && (
               <div className="df-settingsSection df-preferencesSection">
                 <p className="df-settingsHint" style={{ marginTop: 0 }}>
-                  Your onboarding answers. For multi-select fields, use Ctrl/Cmd or Shift to choose
-                  several options.
+                  Your onboarding answers. Single-choice fields allow one option; multi-select fields
+                  allow several (see hints for exclusive options).
                 </p>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Age range</span>
-                  <select
-                    className="df-input"
-                    value={qForm.age_range}
-                    onChange={(e) =>
-                      setQForm((f) => ({ ...f, age_range: e.target.value }))
-                    }
-                    disabled={isSavingPreferences}
-                  >
-                    <option value="">Select…</option>
-                    {AGE_RANGE_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Age range">
+                    {AGE_RANGE_OPTIONS.map((o) => {
+                      const active = qForm.age_range === o.id;
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="settings-q-age-range"
+                            value={o.id}
+                            checked={active}
+                            onChange={() => setQForm((f) => ({ ...f, age_range: o.id }))}
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Daily routine</span>
-                  <select
-                    className="df-input"
-                    value={qForm.status_daily_routine}
-                    onChange={(e) =>
-                      setQForm((f) => ({ ...f, status_daily_routine: e.target.value }))
-                    }
-                    disabled={isSavingPreferences}
-                  >
-                    <option value="">Select…</option>
-                    {STATUS_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Daily routine">
+                    {STATUS_OPTIONS.map((o) => {
+                      const active = qForm.status_daily_routine === o.id;
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="settings-q-status"
+                            value={o.id}
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({ ...f, status_daily_routine: o.id }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Main goal</span>
-                  <select
-                    className="df-input"
-                    value={qForm.main_goal}
-                    onChange={(e) => setQForm((f) => ({ ...f, main_goal: e.target.value }))}
-                    disabled={isSavingPreferences}
-                  >
-                    <option value="">Select…</option>
-                    {MAIN_GOAL_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Main goal">
+                    {MAIN_GOAL_OPTIONS.map((o) => {
+                      const active = qForm.main_goal === o.id;
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="settings-q-main-goal"
+                            value={o.id}
+                            checked={active}
+                            onChange={() => setQForm((f) => ({ ...f, main_goal: o.id }))}
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Fitness level</span>
-                  <select
-                    className="df-input"
-                    value={qForm.fitness_level}
-                    onChange={(e) =>
-                      setQForm((f) => ({ ...f, fitness_level: e.target.value }))
-                    }
-                    disabled={isSavingPreferences}
-                  >
-                    <option value="">Select…</option>
-                    {FITNESS_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Fitness level">
+                    {FITNESS_OPTIONS.map((o) => {
+                      const active = qForm.fitness_level === o.id;
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="settings-q-fitness"
+                            value={o.id}
+                            checked={active}
+                            onChange={() => setQForm((f) => ({ ...f, fitness_level: o.id }))}
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Activity considerations</span>
                   <span className="df-settingsHint" style={{ display: 'block', marginBottom: 6 }}>
                     &quot;None&quot; cannot combine with other options.
                   </span>
-                  <select
-                    multiple
-                    className="df-input df-selectMulti"
-                    size={Math.min(6, ACTIVITY_OPTIONS.length)}
-                    value={qForm.activity_considerations}
-                    onChange={(e) => {
-                      const raw = Array.from(e.target.selectedOptions).map((o) => o.value);
-                      const next = coerceExclusiveMultiSelect(raw, 'none');
-                      setQForm((f) => ({ ...f, activity_considerations: next }));
-                    }}
-                    disabled={isSavingPreferences}
+                  <div
+                    className="df-prefOptionsWrap"
+                    role="group"
+                    aria-label="Activity considerations"
                   >
-                    {ACTIVITY_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {ACTIVITY_OPTIONS.map((o) => {
+                      const active = qForm.activity_considerations.includes(o.id);
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({
+                                ...f,
+                                activity_considerations: toggleExclusiveNoneMulti<string>(
+                                  f.activity_considerations,
+                                  o.id,
+                                  'none'
+                                ),
+                              }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 <label className="df-field">
                   <span className="df-fieldLabel">Workouts per week</span>
@@ -511,114 +564,185 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                   />
                 </label>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Preferred workout times</span>
                   <span className="df-settingsHint" style={{ display: 'block', marginBottom: 6 }}>
                     &quot;Any time&quot; cannot combine with other times.
                   </span>
-                  <select
-                    multiple
-                    className="df-input df-selectMulti"
-                    size={Math.min(5, WORKOUT_TIME_OPTIONS.length)}
-                    value={qForm.preferred_workout_times}
-                    onChange={(e) => {
-                      const raw = Array.from(e.target.selectedOptions).map((o) => o.value);
-                      const next = coerceExclusiveMultiSelect(raw, 'any_time');
-                      setQForm((f) => ({ ...f, preferred_workout_times: next }));
-                    }}
-                    disabled={isSavingPreferences}
+                  <div
+                    className="df-prefOptionsWrap"
+                    role="group"
+                    aria-label="Preferred workout times"
                   >
-                    {WORKOUT_TIME_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {WORKOUT_TIME_OPTIONS.map((o) => {
+                      const active = qForm.preferred_workout_times.includes(o.id);
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({
+                                ...f,
+                                preferred_workout_times: toggleExclusiveNoneMulti<string>(
+                                  f.preferred_workout_times,
+                                  o.id,
+                                  'any_time'
+                                ),
+                              }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Preferred workout types</span>
-                  <select
-                    multiple
-                    className="df-input df-selectMulti"
-                    size={Math.min(6, WORKOUT_TYPE_OPTIONS.length)}
-                    value={qForm.preferred_workout_types}
-                    onChange={(e) => {
-                      const raw = Array.from(e.target.selectedOptions).map((o) => o.value);
-                      setQForm((f) => ({ ...f, preferred_workout_types: raw }));
-                    }}
-                    disabled={isSavingPreferences}
+                  <div
+                    className="df-prefOptionsWrap"
+                    role="group"
+                    aria-label="Preferred workout types"
                   >
-                    {WORKOUT_TYPE_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {WORKOUT_TYPE_OPTIONS.map((o) => {
+                      const active = qForm.preferred_workout_types.includes(o.id);
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({
+                                ...f,
+                                preferred_workout_types: togglePlainMulti(
+                                  f.preferred_workout_types,
+                                  o.id
+                                ),
+                              }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Dietary preferences</span>
                   <span className="df-settingsHint" style={{ display: 'block', marginBottom: 6 }}>
                     &quot;No preferences&quot; cannot combine with other options.
                   </span>
-                  <select
-                    multiple
-                    className="df-input df-selectMulti"
-                    size={Math.min(7, DIETARY_OPTIONS.length)}
-                    value={qForm.dietary_preferences}
-                    onChange={(e) => {
-                      const raw = Array.from(e.target.selectedOptions).map((o) => o.value);
-                      const next = coerceExclusiveMultiSelect(raw, 'no_preferences');
-                      setQForm((f) => ({ ...f, dietary_preferences: next }));
-                    }}
-                    disabled={isSavingPreferences}
+                  <div
+                    className="df-prefOptionsWrap"
+                    role="group"
+                    aria-label="Dietary preferences"
                   >
-                    {DIETARY_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {DIETARY_OPTIONS.map((o) => {
+                      const active = qForm.dietary_preferences.includes(o.id);
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({
+                                ...f,
+                                dietary_preferences: toggleExclusiveNoneMulti<string>(
+                                  f.dietary_preferences,
+                                  o.id,
+                                  'no_preferences'
+                                ),
+                              }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Break &amp; meditation</span>
-                  <select
-                    className="df-input"
-                    value={qForm.break_meditation_interest}
-                    onChange={(e) =>
-                      setQForm((f) => ({ ...f, break_meditation_interest: e.target.value }))
-                    }
-                    disabled={isSavingPreferences}
+                  <div
+                    className="df-prefOptionsWrap"
+                    role="radiogroup"
+                    aria-label="Break and meditation"
                   >
-                    <option value="">Select…</option>
-                    {BREAK_MEDITATION_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {BREAK_MEDITATION_OPTIONS.map((o) => {
+                      const active = qForm.break_meditation_interest === o.id;
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="settings-q-break-meditation"
+                            value={o.id}
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({ ...f, break_meditation_interest: o.id }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="df-field">
+                <div className="df-field">
                   <span className="df-fieldLabel">Auto-schedule to calendar</span>
-                  <select
-                    className="df-input"
-                    value={qForm.auto_schedule_to_calendar}
-                    onChange={(e) =>
-                      setQForm((f) => ({ ...f, auto_schedule_to_calendar: e.target.value }))
-                    }
-                    disabled={isSavingPreferences}
+                  <div
+                    className="df-prefOptionsWrap"
+                    role="radiogroup"
+                    aria-label="Auto-schedule to calendar"
                   >
-                    <option value="">Select…</option>
-                    {AUTO_SCHEDULE_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {AUTO_SCHEDULE_OPTIONS.map((o) => {
+                      const active = qForm.auto_schedule_to_calendar === o.id;
+                      return (
+                        <label
+                          key={o.id}
+                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="settings-q-auto-schedule"
+                            value={o.id}
+                            checked={active}
+                            onChange={() =>
+                              setQForm((f) => ({ ...f, auto_schedule_to_calendar: o.id }))
+                            }
+                            disabled={isSavingPreferences}
+                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                          />
+                          <div className="df-optionBtnTitle">{o.label}</div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 <div className="df-settingsActionsRow">
                   <button

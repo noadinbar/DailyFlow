@@ -154,6 +154,25 @@ body {
   font-size: 12px;
 }
 
+/* Settings → Preferences: wrapping option tiles (compact wizard-style controls) */
+.df-prefOptionsWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.df-prefOption {
+  flex: 1 1 128px;
+  min-width: min(120px, 100%);
+  max-width: 100%;
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.df-prefOption .df-optionBtnTitle {
+  font-size: 13px;
+}
+
 .df-field {
   display: flex;
   flex-direction: column;
