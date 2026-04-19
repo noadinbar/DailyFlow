@@ -4,7 +4,53 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import { configureAmplify } from '../../services/auth/amplifyConfig';
 import { setOnboardingCompletedTrue } from '../../services/auth/cognitoPlaceholders';
 
-type Gender = 'male' | 'female' | 'non_binary' | 'prefer_not_to_say' | '';
+type AgeRange =
+  | 'under_18'
+  | 'age_18_24'
+  | 'age_25_34'
+  | 'age_35_44'
+  | 'age_45_plus'
+  | '';
+
+type StatusDailyRoutine =
+  | 'student'
+  | 'full_time_job'
+  | 'part_time_job'
+  | 'shift_worker'
+  | 'currently_not_working'
+  | '';
+
+type MainGoal =
+  | 'improve_fitness'
+  | 'lose_weight'
+  | 'build_strength'
+  | 'reduce_stress'
+  | 'improve_energy'
+  | 'maintain_routine'
+  | '';
+
+type FitnessLevel = 'beginner' | 'intermediate' | 'advanced' | '';
+
+type ActivityConsideration =
+  | 'knee_sensitivity'
+  | 'back_sensitivity'
+  | 'avoid_high_intensity'
+  | 'avoid_high_heart_rate'
+  | 'prefer_low_impact'
+  | 'none';
+
+type PreferredWorkoutTime = 'morning' | 'noon' | 'afternoon' | 'evening' | 'any_time';
+
+type PreferredWorkoutType =
+  | 'walking'
+  | 'gym'
+  | 'strength'
+  | 'yoga'
+  | 'pilates'
+  | 'running'
+  | 'stretching'
+  | 'home_workouts';
+
 type DietaryPreference =
   | 'vegan'
   | 'vegetarian'
@@ -12,11 +58,18 @@ type DietaryPreference =
   | 'keto'
   | 'lactose_intolerant'
   | 'kosher'
-  | 'no_preferences'
-  | '';
-type PreferredWorkoutTime = 'morning' | 'noon' | 'afternoon' | 'evening' | 'any_time';
+  | 'no_preferences';
 
-const TOTAL_STEPS = 4;
+type BreakMeditationInterest =
+  | 'break_suggestions'
+  | 'meditation_suggestions'
+  | 'both'
+  | 'not_interested'
+  | '';
+
+type AutoScheduleToCalendar = 'yes' | 'no' | 'ask_me_first' | '';
+
+const TOTAL_STEPS = 11;
 
 function formatStepText(stepIndex1Based: number, totalSteps: number) {
   return `Step ${stepIndex1Based} of ${totalSteps}`;
@@ -27,41 +80,107 @@ type OnboardingQuestionnaireWizardProps = {
   onUnauthorized?: () => void;
 };
 
+/** Parses the workouts-per-week field: required non-negative integer only (rejects 3.7, etc.). */
+function parseNonNegativeIntegerInput(raw: string): number | null {
+  if (raw.trim() === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
+  return n;
+}
+
+function toggleExclusiveNoneMulti<T extends string>(
+  current: T[],
+  id: T,
+  exclusiveValue: T
+): T[] {
+  if (id === exclusiveValue) {
+    return current.includes(exclusiveValue) ? [] : [exclusiveValue];
+  }
+  const without = current.filter((x) => x !== exclusiveValue);
+  if (without.includes(id)) return without.filter((x) => x !== id);
+  return [...without, id];
+}
+
 export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionnaireWizardProps) {
   const { onSubmittedSuccess, onUnauthorized } = props;
 
-  const [stepIndex, setStepIndex] = useState<number>(0); // 0..TOTAL_STEPS-1
+  const [stepIndex, setStepIndex] = useState<number>(0);
 
-  const [gender, setGender] = useState<Gender>('');
-  const [dietaryPreference, setDietaryPreference] = useState<DietaryPreference>('');
+  const [ageRange, setAgeRange] = useState<AgeRange>('');
+  const [statusDailyRoutine, setStatusDailyRoutine] = useState<StatusDailyRoutine>('');
+  const [mainGoal, setMainGoal] = useState<MainGoal>('');
+  const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>('');
+  const [activityConsiderations, setActivityConsiderations] = useState<ActivityConsideration[]>([]);
   const [workoutsPerWeek, setWorkoutsPerWeek] = useState<string>('');
   const [preferredWorkoutTimes, setPreferredWorkoutTimes] = useState<PreferredWorkoutTime[]>([]);
+  const [preferredWorkoutTypes, setPreferredWorkoutTypes] = useState<PreferredWorkoutType[]>([]);
+  const [dietaryPreferences, setDietaryPreferences] = useState<DietaryPreference[]>([]);
+  const [breakMeditationInterest, setBreakMeditationInterest] = useState<BreakMeditationInterest>('');
+  const [autoScheduleToCalendar, setAutoScheduleToCalendar] = useState<AutoScheduleToCalendar>('');
 
   const stepIndex1Based = stepIndex + 1;
 
   const collectedData = useMemo(
     () => ({
-      gender,
-      dietaryPreference,
-      workoutsPerWeek: workoutsPerWeek.trim() === '' ? null : Number(workoutsPerWeek),
-      preferredWorkoutTimes,
+      age_range: ageRange,
+      status_daily_routine: statusDailyRoutine,
+      main_goal: mainGoal,
+      fitness_level: fitnessLevel,
+      activity_considerations: activityConsiderations,
+      workouts_per_week: parseNonNegativeIntegerInput(workoutsPerWeek),
+      preferred_workout_times: preferredWorkoutTimes,
+      preferred_workout_types: preferredWorkoutTypes,
+      dietary_preferences: dietaryPreferences,
+      break_meditation_interest: breakMeditationInterest,
+      auto_schedule_to_calendar: autoScheduleToCalendar,
     }),
-    [dietaryPreference, gender, preferredWorkoutTimes, workoutsPerWeek]
+    [
+      activityConsiderations,
+      ageRange,
+      autoScheduleToCalendar,
+      breakMeditationInterest,
+      dietaryPreferences,
+      fitnessLevel,
+      mainGoal,
+      preferredWorkoutTimes,
+      preferredWorkoutTypes,
+      statusDailyRoutine,
+      workoutsPerWeek,
+    ]
   );
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submissionError, setSubmissionError] = useState<string>('');
 
   const isNextDisabled = useMemo(() => {
-    if (stepIndex === 0) return gender === '';
-    if (stepIndex === 1) return dietaryPreference === '';
-    if (stepIndex === 2) return workoutsPerWeek.trim() === '' || Number.isNaN(Number(workoutsPerWeek));
-    if (stepIndex === 3) return preferredWorkoutTimes.length === 0;
+    if (stepIndex === 0) return ageRange === '';
+    if (stepIndex === 1) return statusDailyRoutine === '';
+    if (stepIndex === 2) return mainGoal === '';
+    if (stepIndex === 3) return fitnessLevel === '';
+    if (stepIndex === 4) return activityConsiderations.length === 0;
+    if (stepIndex === 5) return parseNonNegativeIntegerInput(workoutsPerWeek) === null;
+    if (stepIndex === 6) return preferredWorkoutTimes.length === 0;
+    if (stepIndex === 7) return preferredWorkoutTypes.length === 0;
+    if (stepIndex === 8) return dietaryPreferences.length === 0;
+    if (stepIndex === 9) return breakMeditationInterest === '';
+    if (stepIndex === 10) return autoScheduleToCalendar === '';
     return true;
-  }, [dietaryPreference, gender, preferredWorkoutTimes.length, stepIndex, workoutsPerWeek]);
+  }, [
+    activityConsiderations.length,
+    ageRange,
+    autoScheduleToCalendar,
+    breakMeditationInterest,
+    dietaryPreferences.length,
+    fitnessLevel,
+    mainGoal,
+    preferredWorkoutTimes.length,
+    preferredWorkoutTypes.length,
+    statusDailyRoutine,
+    stepIndex,
+    workoutsPerWeek,
+  ]);
 
   useEffect(() => {
-    // Protect the questionnaire screen entry: require a valid authenticated session.
     void (async () => {
       try {
         configureAmplify();
@@ -92,10 +211,27 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
   }
 
   function togglePreferredWorkoutTime(time: PreferredWorkoutTime) {
-    setPreferredWorkoutTimes((current) => {
-      const exists = current.includes(time);
-      if (exists) return current.filter((t) => t !== time);
-      return [...current, time];
+    setPreferredWorkoutTimes((current) =>
+      toggleExclusiveNoneMulti(current, time, 'any_time')
+    );
+  }
+
+  function toggleDietaryPreference(pref: DietaryPreference) {
+    setDietaryPreferences((current) =>
+      toggleExclusiveNoneMulti(current, pref, 'no_preferences')
+    );
+  }
+
+  function toggleActivityConsideration(item: ActivityConsideration) {
+    setActivityConsiderations((current) =>
+      toggleExclusiveNoneMulti(current, item, 'none')
+    );
+  }
+
+  function togglePreferredWorkoutType(t: PreferredWorkoutType) {
+    setPreferredWorkoutTypes((current) => {
+      if (current.includes(t)) return current.filter((x) => x !== t);
+      return [...current, t];
     });
   }
 
@@ -126,13 +262,19 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
         const endpointUrl = `${baseUrl.replace(/\/$/, '')}/onboarding/questionnaire`;
 
         const requestBody: Record<string, unknown> = {
-          gender: collectedData.gender,
-          dietary_preferences: collectedData.dietaryPreference,
-          workouts_per_week: collectedData.workoutsPerWeek,
-          preferred_workout_times: collectedData.preferredWorkoutTimes,
+          age_range: collectedData.age_range,
+          status_daily_routine: collectedData.status_daily_routine,
+          main_goal: collectedData.main_goal,
+          fitness_level: collectedData.fitness_level,
+          activity_considerations: collectedData.activity_considerations,
+          workouts_per_week: collectedData.workouts_per_week,
+          preferred_workout_times: collectedData.preferred_workout_times,
+          preferred_workout_types: collectedData.preferred_workout_types,
+          dietary_preferences: collectedData.dietary_preferences,
+          break_meditation_interest: collectedData.break_meditation_interest,
+          auto_schedule_to_calendar: collectedData.auto_schedule_to_calendar,
         };
 
-        // Avoid sending null/undefined values.
         for (const key of Object.keys(requestBody)) {
           if (requestBody[key] === null || requestBody[key] === undefined) {
             delete requestBody[key];
@@ -183,15 +325,12 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
           console.debug(
             '[DailyFlow][Questionnaire] Save succeeded, updating Cognito custom:onboardingCompleted'
           );
-          // Mark onboarding as completed in Cognito only after questionnaire save succeeds.
           await setOnboardingCompletedTrue();
           console.debug('[DailyFlow][Questionnaire] Cognito onboardingCompleted updated successfully');
 
           console.debug('[DailyFlow][Questionnaire] Navigating to next screen now');
           onSubmittedSuccess?.();
         } catch (err) {
-          // Questionnaire already succeeded, but onboarding flag update failed.
-          // Keep the user in place and show an error so they can retry later.
           setSubmissionError(
             'Questionnaire saved, but failed to update onboarding status. Please try again.'
           );
@@ -226,19 +365,19 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       </div>
 
       {stepIndex === 0 && (
-        <div className="df-question" role="group" aria-label="Gender question">
-          <div className="df-questionLabel">1. Gender</div>
-
+        <div className="df-question" role="group" aria-label="Age range question">
+          <div className="df-questionLabel">1. Age range</div>
           <div className="df-optionsGrid">
             {(
               [
-                { id: 'male' as const, title: 'Male', hint: 'I identify as male' },
-                { id: 'female' as const, title: 'Female', hint: 'I identify as female' },
-                { id: 'non_binary' as const, title: 'Non-binary', hint: 'I identify as non-binary' },
-                { id: 'prefer_not_to_say' as const, title: 'Prefer not to say', hint: 'I prefer not to answer' },
+                { id: 'under_18' as const, title: 'Under 18', hint: '' },
+                { id: 'age_18_24' as const, title: 'Ages 18–24', hint: '' },
+                { id: 'age_25_34' as const, title: 'Ages 25–34', hint: '' },
+                { id: 'age_35_44' as const, title: 'Ages 35–44', hint: '' },
+                { id: 'age_45_plus' as const, title: 'Ages 45+', hint: '' },
               ] as const
             ).map((option) => {
-              const active = gender === option.id;
+              const active = ageRange === option.id;
               return (
                 <label
                   key={option.id}
@@ -246,14 +385,14 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                 >
                   <input
                     type="radio"
-                    name="gender"
+                    name="ageRange"
                     value={option.id}
                     checked={active}
-                    onChange={() => setGender(option.id)}
+                    onChange={() => setAgeRange(option.id)}
                     style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>
-                  <div className="df-optionBtnHint">{option.hint}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
                 </label>
               );
             })}
@@ -262,34 +401,19 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       )}
 
       {stepIndex === 1 && (
-        <div className="df-question" role="group" aria-label="Dietary preferences question">
-          <div className="df-questionLabel">2. Dietary preferences</div>
-
+        <div className="df-question" role="group" aria-label="Daily routine status question">
+          <div className="df-questionLabel">2. What best describes your daily routine?</div>
           <div className="df-optionsGrid">
             {(
               [
-                { id: 'vegan' as const, title: 'Vegan', hint: 'I follow a vegan diet' },
-                {
-                  id: 'vegetarian' as const,
-                  title: 'Vegeterian',
-                  hint: 'I follow a vegetarian diet',
-                },
-                { id: 'gluten_free' as const, title: 'Gluten-free', hint: 'I avoid gluten' },
-                { id: 'keto' as const, title: 'Keto', hint: 'I follow a keto diet' },
-                {
-                  id: 'lactose_intolerant' as const,
-                  title: 'Lactose intolerent',
-                  hint: 'I avoid lactose/dairy',
-                },
-                { id: 'kosher' as const, title: 'Kosher', hint: 'I follow kosher guidelines' },
-                {
-                  id: 'no_preferences' as const,
-                  title: 'I dont have any preferences',
-                  hint: 'No specific dietary preferences',
-                },
+                { id: 'student' as const, title: 'Student', hint: '' },
+                { id: 'full_time_job' as const, title: 'Full-time job', hint: '' },
+                { id: 'part_time_job' as const, title: 'Part-time job', hint: '' },
+                { id: 'shift_worker' as const, title: 'Shift worker', hint: '' },
+                { id: 'currently_not_working' as const, title: 'Not currently working', hint: '' },
               ] as const
             ).map((option) => {
-              const active = dietaryPreference === option.id;
+              const active = statusDailyRoutine === option.id;
               return (
                 <label
                   key={option.id}
@@ -297,14 +421,14 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                 >
                   <input
                     type="radio"
-                    name="dietaryPreference"
+                    name="statusDailyRoutine"
                     value={option.id}
                     checked={active}
-                    onChange={() => setDietaryPreference(option.id)}
+                    onChange={() => setStatusDailyRoutine(option.id)}
                     style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>
-                  <div className="df-optionBtnHint">{option.hint}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
                 </label>
               );
             })}
@@ -313,9 +437,119 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       )}
 
       {stepIndex === 2 && (
-        <div className="df-question" role="group" aria-label="Workouts per week question">
-          <div className="df-questionLabel">3. Desired number of workouts per week</div>
+        <div className="df-question" role="group" aria-label="Main goal question">
+          <div className="df-questionLabel">3. Main goal</div>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'improve_fitness' as const, title: 'Improve fitness', hint: '' },
+                { id: 'lose_weight' as const, title: 'Lose weight', hint: '' },
+                { id: 'build_strength' as const, title: 'Build strength', hint: '' },
+                { id: 'reduce_stress' as const, title: 'Reduce stress', hint: '' },
+                { id: 'improve_energy' as const, title: 'Improve energy', hint: '' },
+                { id: 'maintain_routine' as const, title: 'Maintain routine', hint: '' },
+              ] as const
+            ).map((option) => {
+              const active = mainGoal === option.id;
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="mainGoal"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => setMainGoal(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
+      {stepIndex === 3 && (
+        <div className="df-question" role="group" aria-label="Fitness level question">
+          <div className="df-questionLabel">4. Fitness level</div>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'beginner' as const, title: 'Beginner', hint: '' },
+                { id: 'intermediate' as const, title: 'Intermediate', hint: '' },
+                { id: 'advanced' as const, title: 'Advanced', hint: '' },
+              ] as const
+            ).map((option) => {
+              const active = fitnessLevel === option.id;
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="fitnessLevel"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => setFitnessLevel(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {stepIndex === 4 && (
+        <div className="df-question" role="group" aria-label="Activity considerations question">
+          <div className="df-questionLabel">5. Activity considerations</div>
+          <p className="df-subtitle" style={{ marginTop: 0, marginBottom: 12 }}>
+            Select all that apply. &quot;None&quot; clears your other selections.
+          </p>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'knee_sensitivity' as const, title: 'Knee sensitivity', hint: '' },
+                { id: 'back_sensitivity' as const, title: 'Back sensitivity', hint: '' },
+                { id: 'avoid_high_intensity' as const, title: 'Avoid high intensity', hint: '' },
+                { id: 'avoid_high_heart_rate' as const, title: 'Avoid high heart rate', hint: '' },
+                { id: 'prefer_low_impact' as const, title: 'Prefer low impact', hint: '' },
+                { id: 'none' as const, title: 'None', hint: 'No specific considerations' },
+              ] as const
+            ).map((option) => {
+              const active = activityConsiderations.includes(option.id);
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    name="activityConsiderations"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => toggleActivityConsideration(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {stepIndex === 5 && (
+        <div className="df-question" role="group" aria-label="Workouts per week question">
+          <div className="df-questionLabel">6. Desired number of workouts per week</div>
           <div className="df-field">
             <label>
               <div className="df-progressStepText" style={{ marginBottom: 8 }}>
@@ -335,10 +569,12 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
         </div>
       )}
 
-      {stepIndex === 3 && (
+      {stepIndex === 6 && (
         <div className="df-question" role="group" aria-label="Preferred workout times question">
-          <div className="df-questionLabel">4. Preferred workout times</div>
-
+          <div className="df-questionLabel">7. Preferred workout times</div>
+          <p className="df-subtitle" style={{ marginTop: 0, marginBottom: 12 }}>
+            &quot;Any time&quot; clears your other time selections.
+          </p>
           <div className="df-optionsGrid">
             {(
               [
@@ -346,7 +582,7 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                 { id: 'noon' as const, title: 'Noon', hint: 'Lunch-time workouts' },
                 { id: 'afternoon' as const, title: 'Afternoon', hint: 'Afternoon workouts' },
                 { id: 'evening' as const, title: 'Evening', hint: 'Evening workouts' },
-                { id: 'any_time' as const, title: 'Any time, I dont mind', hint: 'No preference' },
+                { id: 'any_time' as const, title: 'Any time', hint: 'No specific preference' },
               ] as const
             ).map((option) => {
               const active = preferredWorkoutTimes.includes(option.id);
@@ -361,6 +597,163 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                     value={option.id}
                     checked={active}
                     onChange={() => togglePreferredWorkoutTime(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  <div className="df-optionBtnHint">{option.hint}</div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {stepIndex === 7 && (
+        <div className="df-question" role="group" aria-label="Preferred workout types question">
+          <div className="df-questionLabel">8. Preferred workout types</div>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'walking' as const, title: 'Walking', hint: '' },
+                { id: 'gym' as const, title: 'Gym', hint: '' },
+                { id: 'strength' as const, title: 'Strength', hint: '' },
+                { id: 'yoga' as const, title: 'Yoga', hint: '' },
+                { id: 'pilates' as const, title: 'Pilates', hint: '' },
+                { id: 'running' as const, title: 'Running', hint: '' },
+                { id: 'stretching' as const, title: 'Stretching', hint: '' },
+                { id: 'home_workouts' as const, title: 'Home workouts', hint: '' },
+              ] as const
+            ).map((option) => {
+              const active = preferredWorkoutTypes.includes(option.id);
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    name="preferredWorkoutTypes"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => togglePreferredWorkoutType(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {stepIndex === 8 && (
+        <div className="df-question" role="group" aria-label="Dietary preferences question">
+          <div className="df-questionLabel">9. Dietary preferences</div>
+          <p className="df-subtitle" style={{ marginTop: 0, marginBottom: 12 }}>
+            Select all that apply. &quot;No preferences&quot; clears other selections.
+          </p>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'vegan' as const, title: 'Vegan', hint: 'I follow a vegan diet' },
+                { id: 'vegetarian' as const, title: 'Vegetarian', hint: 'I follow a vegetarian diet' },
+                { id: 'gluten_free' as const, title: 'Gluten-free', hint: 'I avoid gluten' },
+                { id: 'keto' as const, title: 'Keto', hint: 'I follow a keto diet' },
+                {
+                  id: 'lactose_intolerant' as const,
+                  title: 'Lactose intolerant',
+                  hint: 'I avoid lactose/dairy',
+                },
+                { id: 'kosher' as const, title: 'Kosher', hint: 'I follow kosher guidelines' },
+                {
+                  id: 'no_preferences' as const,
+                  title: 'No preferences',
+                  hint: 'No specific dietary preferences',
+                },
+              ] as const
+            ).map((option) => {
+              const active = dietaryPreferences.includes(option.id);
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    name="dietaryPreferences"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => toggleDietaryPreference(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  <div className="df-optionBtnHint">{option.hint}</div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {stepIndex === 9 && (
+        <div className="df-question" role="group" aria-label="Break and meditation interest question">
+          <div className="df-questionLabel">10. Break and meditation suggestions</div>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'break_suggestions' as const, title: 'Break suggestions', hint: '' },
+                { id: 'meditation_suggestions' as const, title: 'Meditation suggestions', hint: '' },
+                { id: 'both' as const, title: 'Both', hint: '' },
+                { id: 'not_interested' as const, title: 'Not interested', hint: '' },
+              ] as const
+            ).map((option) => {
+              const active = breakMeditationInterest === option.id;
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="breakMeditationInterest"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => setBreakMeditationInterest(option.id)}
+                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                  />
+                  <div className="df-optionBtnTitle">{option.title}</div>
+                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {stepIndex === 10 && (
+        <div className="df-question" role="group" aria-label="Auto schedule to calendar question">
+          <div className="df-questionLabel">11. Add workouts to your calendar automatically?</div>
+          <div className="df-optionsGrid">
+            {(
+              [
+                { id: 'yes' as const, title: 'Yes', hint: 'Schedule automatically' },
+                { id: 'no' as const, title: 'No', hint: 'Do not add to calendar' },
+                { id: 'ask_me_first' as const, title: 'Ask me first', hint: 'Confirm before scheduling' },
+              ] as const
+            ).map((option) => {
+              const active = autoScheduleToCalendar === option.id;
+              return (
+                <label
+                  key={option.id}
+                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="autoScheduleToCalendar"
+                    value={option.id}
+                    checked={active}
+                    onChange={() => setAutoScheduleToCalendar(option.id)}
                     style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>
@@ -396,4 +789,3 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
     </section>
   );
 }
-

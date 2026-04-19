@@ -62,6 +62,7 @@ The final product should support a full user flow where a user signs in, complet
 Current milestone scope:
 For now, focus only on the currently active scoped work:
 - onboarding questionnaire refinement if explicitly requested
+- preferences editing foundation if explicitly requested
 - calendar screen
 - Google Calendar connection
 - Google calendar list UI states
@@ -71,6 +72,7 @@ For now, focus only on the currently active scoped work:
 - profile settings UI shell if explicitly requested
 - profile editing foundation if explicitly requested
 - S3-based profile image storage foundation if explicitly requested
+- OpenAI integration only after the onboarding data structure becomes stable and only if explicitly requested
 
 Calendar milestone product direction:
 - The app should include a Calendar screen
@@ -160,8 +162,3 @@ Working style:
 - Do not give generic AWS advice; base it only on your actual code changes
 - If no AWS changes are needed, write exactly:
   AWS CHANGES REQUIRED: none
-- Also include a section called:
-  GOOGLE CHANGES REQUIRED
-- In that section, explain exactly what must be changed in Google Cloud / Google OAuth because of the code changes you made
-- If no Google changes are needed, write exactly:
-  GOOGLE CHANGES REQUIRED: none
