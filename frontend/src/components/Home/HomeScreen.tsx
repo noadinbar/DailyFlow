@@ -110,6 +110,9 @@ export default function HomeScreen(props: HomeScreenProps) {
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [displayName, setDisplayName] = React.useState<string>('');
   const [profileImageUrl, setProfileImageUrl] = React.useState<string>('');
+  const [savedQuestionnaire, setSavedQuestionnaire] = React.useState<Record<string, unknown> | null>(
+    null
+  );
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
   const [calendarSidebarState, setCalendarSidebarState] = React.useState<CalendarSidebarState>('checking');
@@ -161,7 +164,11 @@ export default function HomeScreen(props: HomeScreenProps) {
     return token;
   }
 
-  async function loadProfile(): Promise<{ displayName: string; profileImageUrl: string }> {
+  async function loadProfile(): Promise<{
+    displayName: string;
+    profileImageUrl: string;
+    questionnaire: Record<string, unknown> | null;
+  }> {
     const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
     if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
@@ -169,7 +176,12 @@ export default function HomeScreen(props: HomeScreenProps) {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     });
-    let payload: { display_name?: string; profile_image_url?: string; message?: string } = {};
+    let payload: {
+      display_name?: string;
+      profile_image_url?: string;
+      questionnaire?: Record<string, unknown>;
+      message?: string;
+    } = {};
     try {
       payload = (await response.json()) as typeof payload;
     } catch {
@@ -186,7 +198,12 @@ export default function HomeScreen(props: HomeScreenProps) {
     const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
     if (name) setDisplayName(name);
     setProfileImageUrl(imageUrl);
-    return { displayName: name, profileImageUrl: imageUrl };
+    const q =
+      payload.questionnaire && typeof payload.questionnaire === 'object' && !Array.isArray(payload.questionnaire)
+        ? payload.questionnaire
+        : null;
+    setSavedQuestionnaire(q);
+    return { displayName: name, profileImageUrl: imageUrl, questionnaire: q };
   }
 
   async function saveProfileDisplayName(nextName: string): Promise<void> {
@@ -218,6 +235,40 @@ export default function HomeScreen(props: HomeScreenProps) {
     setDisplayName(name);
     const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
     if (imageUrl) setProfileImageUrl(imageUrl);
+  }
+
+  async function saveQuestionnairePreferences(patch: Record<string, unknown>): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(patch),
+    });
+    let payload: { questionnaire?: Record<string, unknown>; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not save preferences (${response.status}).`;
+      throw new Error(message);
+    }
+    if (
+      payload.questionnaire &&
+      typeof payload.questionnaire === 'object' &&
+      !Array.isArray(payload.questionnaire)
+    ) {
+      setSavedQuestionnaire(payload.questionnaire);
+    }
   }
 
   async function requestProfileImageUploadUrl(args: { contentType: string }): Promise<{
@@ -1255,10 +1306,12 @@ export default function HomeScreen(props: HomeScreenProps) {
         isOpen={isProfileSettingsOpen}
         initialName={effectiveName}
         savedProfileImageUrl={profileImageUrl}
+        savedQuestionnaire={savedQuestionnaire}
         onLoadProfile={loadProfile}
         onSaveDisplayName={saveProfileDisplayName}
         onRequestProfileImageUploadUrl={requestProfileImageUploadUrl}
         onSaveProfileImageKey={saveProfileImageKey}
+        onSaveQuestionnaire={saveQuestionnairePreferences}
         onClose={() => setIsProfileSettingsOpen(false)}
       />
     </section>

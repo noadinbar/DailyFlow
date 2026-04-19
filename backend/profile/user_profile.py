@@ -1,9 +1,22 @@
 import json
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import boto3
+
+_Q_DIR = str(Path(__file__).resolve().parent.parent / "questionnaire")
+if _Q_DIR not in sys.path:
+    sys.path.insert(0, _Q_DIR)
+
+from shared_fields import (  # noqa: E402
+    QUESTIONNAIRE_KEYS,
+    normalize_workouts_per_week_for_storage,
+    questionnaire_from_user_item,
+    validate_questionnaire_payload,
+)
 
 _CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -137,6 +150,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if url:
                 body["profile_image_url"] = url
                 body["profile_image_url_expires_in_seconds"] = _profile_image_display_ttl_seconds()
+        q = questionnaire_from_user_item(item)
+        if q:
+            body["questionnaire"] = q
         return _json_response(200, body)
 
     if method != "PATCH":
@@ -148,6 +164,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _json_response(400, {"message": "Request body must be valid JSON."})
 
     now_iso = _iso_utc_now()
+
+    # Questionnaire keys are partially updatable: only attributes present in the body are SET;
+    # omitted questionnaire fields are left unchanged (not cleared) on the user item.
+    questionnaire_payload = {k: v for k, v in payload.items() if k in QUESTIONNAIRE_KEYS}
+    if questionnaire_payload:
+        err = validate_questionnaire_payload(questionnaire_payload)
+        if err:
+            return _json_response(400, {"message": err})
 
     updates: Dict[str, str] = {}
     removes: list[str] = []
@@ -191,6 +215,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     else:
         clean_key = None
 
+    for key in questionnaire_payload:
+        value = questionnaire_payload.get(key)
+        if value is None:
+            continue
+        token = f":{key}"
+        if key == "workouts_per_week":
+            try:
+                value = normalize_workouts_per_week_for_storage(value)
+            except ValueError:
+                return _json_response(400, {"message": "workouts_per_week is invalid."})
+        updates[key] = token
+        expr_values[token] = value
+
     if not updates and not removes:
         return _json_response(400, {"message": "At least one updatable field is required."})
 
@@ -222,5 +259,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             response_body["profile_image_url"] = url
             response_body["profile_image_url_expires_in_seconds"] = _profile_image_display_ttl_seconds()
 
-    return _json_response(200, response_body)
+    if questionnaire_payload:
+        saved_q: Dict[str, Any] = {}
+        for k, v in questionnaire_payload.items():
+            if k == "workouts_per_week":
+                try:
+                    saved_q[k] = normalize_workouts_per_week_for_storage(v)
+                except ValueError:
+                    saved_q[k] = v
+            else:
+                saved_q[k] = v
+        response_body["questionnaire"] = saved_q
 
+    return _json_response(200, response_body)
