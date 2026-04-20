@@ -94,9 +94,20 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
   const fileInputId = React.useId();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const onLoadProfileRef = React.useRef<typeof onLoadProfile>(onLoadProfile);
+  const hasLoadedProfileForOpenRef = React.useRef<boolean>(false);
+  const hasInitializedQuestionnaireRef = React.useRef<boolean>(false);
 
   React.useEffect(() => {
-    if (!isOpen) return;
+    onLoadProfileRef.current = onLoadProfile;
+  }, [onLoadProfile]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      hasLoadedProfileForOpenRef.current = false;
+      hasInitializedQuestionnaireRef.current = false;
+      return;
+    }
     setActiveTab('profile');
     setName(initialName);
     setSaveError('');
@@ -111,18 +122,22 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
   React.useEffect(() => {
     if (!isOpen) return;
-    if (!onLoadProfile) return;
+    if (hasLoadedProfileForOpenRef.current) return;
+    const loadProfile = onLoadProfileRef.current;
+    if (!loadProfile) return;
 
     let cancelled = false;
+    hasLoadedProfileForOpenRef.current = true;
     setIsRefreshingProfile(true);
     void (async () => {
       try {
-        const loaded = await onLoadProfile();
+        const loaded = await loadProfile();
         if (cancelled) return;
         const clean = typeof loaded.displayName === 'string' ? loaded.displayName.trim() : '';
         if (clean) setName(clean);
         if (loaded.questionnaire != null) {
           setQForm(questionnaireFromApi(loaded.questionnaire));
+          hasInitializedQuestionnaireRef.current = true;
         }
       } finally {
         if (!cancelled) setIsRefreshingProfile(false);
@@ -132,12 +147,14 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, onLoadProfile]);
+  }, [isOpen]);
 
   React.useEffect(() => {
     if (!isOpen) return;
+    if (hasInitializedQuestionnaireRef.current) return;
     if (savedQuestionnaire != null) {
       setQForm(questionnaireFromApi(savedQuestionnaire));
+      hasInitializedQuestionnaireRef.current = true;
     }
   }, [isOpen, savedQuestionnaire]);
 
