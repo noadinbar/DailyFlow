@@ -96,6 +96,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
     questionnaire_payload = {k: v for k, v in payload.items() if k in QUESTIONNAIRE_KEYS}
+    missing_keys = sorted(k for k in QUESTIONNAIRE_KEYS if k not in questionnaire_payload)
+    if missing_keys:
+        return {
+            "statusCode": 400,
+            "headers": dict(_CORS_HEADERS),
+            "body": json.dumps(
+                {
+                    "message": "Onboarding questionnaire requires all fields.",
+                    "missing_fields": missing_keys,
+                }
+            ),
+        }
 
     err = validate_questionnaire_payload(questionnaire_payload)
     if err:
