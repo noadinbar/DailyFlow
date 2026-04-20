@@ -132,8 +132,6 @@ def validate_questionnaire_payload(payload: Dict[str, Any]) -> Optional[str]:
     """Validate only keys present in payload (partial updates allowed)."""
     str_fields: Dict[str, Tuple[str, Set[str]]] = {
         "age_range": ("age_range", _ALLOWED_AGE_RANGE),
-        "status_daily_routine": ("status_daily_routine", _ALLOWED_STATUS_DAILY_ROUTINE),
-        "main_goal": ("main_goal", _ALLOWED_MAIN_GOAL),
         "fitness_level": ("fitness_level", _ALLOWED_FITNESS_LEVEL),
         "break_meditation_interest": ("break_meditation_interest", _ALLOWED_BREAK_MEDITATION),
         "auto_schedule_to_calendar": ("auto_schedule_to_calendar", _ALLOWED_AUTO_SCHEDULE),
@@ -157,6 +155,28 @@ def validate_questionnaire_payload(payload: Dict[str, Any]) -> Optional[str]:
             return "activity_considerations contains invalid values."
         if "none" in lst and len(lst) > 1:
             return "activity_considerations: when none is selected, it must be the only selection."
+
+    if "status_daily_routine" in payload:
+        lst, err = as_str_list(payload.get("status_daily_routine"), "status_daily_routine")
+        if err:
+            return err
+        assert lst is not None
+        if not lst:
+            return "status_daily_routine cannot be empty."
+        bad = [x for x in lst if x not in _ALLOWED_STATUS_DAILY_ROUTINE]
+        if bad:
+            return "status_daily_routine contains invalid values."
+
+    if "main_goal" in payload:
+        lst, err = as_str_list(payload.get("main_goal"), "main_goal")
+        if err:
+            return err
+        assert lst is not None
+        if not lst:
+            return "main_goal cannot be empty."
+        bad = [x for x in lst if x not in _ALLOWED_MAIN_GOAL]
+        if bad:
+            return "main_goal contains invalid values."
 
     if "preferred_workout_times" in payload:
         lst, err = as_str_list(payload.get("preferred_workout_times"), "preferred_workout_times")
@@ -230,23 +250,14 @@ def dynamodb_value_to_json(value: Any) -> Any:
 
 _MULTI_LEGACY_KEYS = frozenset(
     {
+        "status_daily_routine",
+        "main_goal",
         "activity_considerations",
         "preferred_workout_times",
         "preferred_workout_types",
         "dietary_preferences",
     }
 )
-
-
-def _scalar_status_or_goal(raw: Any) -> Any:
-    """GET /profile: status_daily_routine and main_goal are single string scalars."""
-    if isinstance(raw, str) and raw.strip():
-        return raw.strip()
-    if isinstance(raw, list) and raw:
-        first = raw[0]
-        if isinstance(first, str) and first.strip():
-            return first.strip()
-    return None
 
 
 def questionnaire_from_user_item(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -256,11 +267,6 @@ def questionnaire_from_user_item(item: Dict[str, Any]) -> Dict[str, Any]:
         if k not in item:
             continue
         raw = item[k]
-        if k in ("status_daily_routine", "main_goal"):
-            s = _scalar_status_or_goal(raw)
-            if s is not None:
-                q[k] = s
-            continue
         if k in _MULTI_LEGACY_KEYS and isinstance(raw, str):
             q[k] = [raw]
             continue

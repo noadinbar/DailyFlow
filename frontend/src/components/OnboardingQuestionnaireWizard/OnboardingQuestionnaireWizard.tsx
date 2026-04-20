@@ -17,8 +17,7 @@ type StatusDailyRoutine =
   | 'full_time_job'
   | 'part_time_job'
   | 'shift_worker'
-  | 'currently_not_working'
-  | '';
+  | 'currently_not_working';
 
 type MainGoal =
   | 'improve_fitness'
@@ -26,8 +25,7 @@ type MainGoal =
   | 'build_strength'
   | 'reduce_stress'
   | 'improve_energy'
-  | 'maintain_routine'
-  | '';
+  | 'maintain_routine';
 
 type FitnessLevel = 'beginner' | 'intermediate' | 'advanced' | '';
 
@@ -107,8 +105,8 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
   const [stepIndex, setStepIndex] = useState<number>(0);
 
   const [ageRange, setAgeRange] = useState<AgeRange>('');
-  const [statusDailyRoutine, setStatusDailyRoutine] = useState<StatusDailyRoutine>('');
-  const [mainGoal, setMainGoal] = useState<MainGoal>('');
+  const [statusDailyRoutine, setStatusDailyRoutine] = useState<StatusDailyRoutine[]>([]);
+  const [mainGoal, setMainGoal] = useState<MainGoal[]>([]);
   const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>('');
   const [activityConsiderations, setActivityConsiderations] = useState<ActivityConsideration[]>([]);
   const [workoutsPerWeek, setWorkoutsPerWeek] = useState<string>('');
@@ -154,8 +152,8 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
 
   const isNextDisabled = useMemo(() => {
     if (stepIndex === 0) return ageRange === '';
-    if (stepIndex === 1) return statusDailyRoutine === '';
-    if (stepIndex === 2) return mainGoal === '';
+    if (stepIndex === 1) return statusDailyRoutine.length === 0;
+    if (stepIndex === 2) return mainGoal.length === 0;
     if (stepIndex === 3) return fitnessLevel === '';
     if (stepIndex === 4) return activityConsiderations.length === 0;
     if (stepIndex === 5) return parseNonNegativeIntegerInput(workoutsPerWeek) === null;
@@ -172,13 +170,27 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
     breakMeditationInterest,
     dietaryPreferences.length,
     fitnessLevel,
-    mainGoal,
+    mainGoal.length,
     preferredWorkoutTimes.length,
     preferredWorkoutTypes.length,
-    statusDailyRoutine,
+    statusDailyRoutine.length,
     stepIndex,
     workoutsPerWeek,
   ]);
+
+  function toggleStatusDailyRoutine(option: StatusDailyRoutine) {
+    setStatusDailyRoutine((current) => {
+      if (current.includes(option)) return current.filter((x) => x !== option);
+      return [...current, option];
+    });
+  }
+
+  function toggleMainGoal(option: MainGoal) {
+    setMainGoal((current) => {
+      if (current.includes(option)) return current.filter((x) => x !== option);
+      return [...current, option];
+    });
+  }
 
   useEffect(() => {
     void (async () => {
@@ -403,6 +415,9 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       {stepIndex === 1 && (
         <div className="df-question" role="group" aria-label="Daily routine status question">
           <div className="df-questionLabel">2. What best describes your daily routine?</div>
+          <p className="df-subtitle" style={{ marginTop: 0, marginBottom: 12 }}>
+            Select all that apply.
+          </p>
           <div className="df-optionsGrid">
             {(
               [
@@ -413,18 +428,18 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                 { id: 'currently_not_working' as const, title: 'Not currently working', hint: '' },
               ] as const
             ).map((option) => {
-              const active = statusDailyRoutine === option.id;
+              const active = statusDailyRoutine.includes(option.id);
               return (
                 <label
                   key={option.id}
                   className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
                 >
                   <input
-                    type="radio"
+                    type="checkbox"
                     name="statusDailyRoutine"
                     value={option.id}
                     checked={active}
-                    onChange={() => setStatusDailyRoutine(option.id)}
+                    onChange={() => toggleStatusDailyRoutine(option.id)}
                     style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>
@@ -439,6 +454,9 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       {stepIndex === 2 && (
         <div className="df-question" role="group" aria-label="Main goal question">
           <div className="df-questionLabel">3. Main goal</div>
+          <p className="df-subtitle" style={{ marginTop: 0, marginBottom: 12 }}>
+            Select all that apply.
+          </p>
           <div className="df-optionsGrid">
             {(
               [
@@ -450,18 +468,18 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                 { id: 'maintain_routine' as const, title: 'Maintain routine', hint: '' },
               ] as const
             ).map((option) => {
-              const active = mainGoal === option.id;
+              const active = mainGoal.includes(option.id);
               return (
                 <label
                   key={option.id}
                   className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
                 >
                   <input
-                    type="radio"
+                    type="checkbox"
                     name="mainGoal"
                     value={option.id}
                     checked={active}
-                    onChange={() => setMainGoal(option.id)}
+                    onChange={() => toggleMainGoal(option.id)}
                     style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>

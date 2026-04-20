@@ -2,8 +2,8 @@
 
 export type QuestionnaireForm = {
   age_range: string;
-  status_daily_routine: string;
-  main_goal: string;
+  status_daily_routine: string[];
+  main_goal: string[];
   fitness_level: string;
   activity_considerations: string[];
   workouts_per_week: string;
@@ -16,8 +16,8 @@ export type QuestionnaireForm = {
 
 export const EMPTY_QUESTIONNAIRE: QuestionnaireForm = {
   age_range: '',
-  status_daily_routine: '',
-  main_goal: '',
+  status_daily_routine: [],
+  main_goal: [],
   fitness_level: '',
   activity_considerations: [],
   workouts_per_week: '',
@@ -116,13 +116,6 @@ function asStringArray(v: unknown): string[] {
   return [];
 }
 
-/** GET /profile uses scalars for status_daily_routine and main_goal; tolerate legacy arrays. */
-function scalarFromApi(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'string') return v[0];
-  return '';
-}
-
 export function questionnaireFromApi(raw: unknown): QuestionnaireForm {
   if (!raw || typeof raw !== 'object') return { ...EMPTY_QUESTIONNAIRE };
   const o = raw as Record<string, unknown>;
@@ -134,8 +127,8 @@ export function questionnaireFromApi(raw: unknown): QuestionnaireForm {
         : '';
   return {
     age_range: typeof o.age_range === 'string' ? o.age_range : '',
-    status_daily_routine: scalarFromApi(o.status_daily_routine),
-    main_goal: scalarFromApi(o.main_goal),
+    status_daily_routine: asStringArray(o.status_daily_routine),
+    main_goal: asStringArray(o.main_goal),
     fitness_level: typeof o.fitness_level === 'string' ? o.fitness_level : '',
     activity_considerations: asStringArray(o.activity_considerations),
     workouts_per_week: workouts,
@@ -179,8 +172,8 @@ export function parseNonNegativeIntegerInput(raw: string): number | null {
 export function buildQuestionnairePatchPayload(form: QuestionnaireForm): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (form.age_range) out.age_range = form.age_range;
-  if (form.status_daily_routine) out.status_daily_routine = form.status_daily_routine;
-  if (form.main_goal) out.main_goal = form.main_goal;
+  if (form.status_daily_routine.length > 0) out.status_daily_routine = form.status_daily_routine;
+  if (form.main_goal.length > 0) out.main_goal = form.main_goal;
   if (form.fitness_level) out.fitness_level = form.fitness_level;
   if (form.activity_considerations.length > 0) {
     out.activity_considerations = form.activity_considerations;
@@ -201,8 +194,8 @@ export function buildQuestionnairePatchPayload(form: QuestionnaireForm): Record<
 
 export function validateQuestionnaireFormComplete(form: QuestionnaireForm): boolean {
   if (!form.age_range) return false;
-  if (!form.status_daily_routine) return false;
-  if (!form.main_goal) return false;
+  if (form.status_daily_routine.length === 0) return false;
+  if (form.main_goal.length === 0) return false;
   if (!form.fitness_level) return false;
   if (form.activity_considerations.length === 0) return false;
   if (parseNonNegativeIntegerInput(form.workouts_per_week) === null) return false;

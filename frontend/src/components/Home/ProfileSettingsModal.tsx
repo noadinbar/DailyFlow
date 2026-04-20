@@ -446,21 +446,22 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
                 <div className="df-field">
                   <span className="df-fieldLabel">Daily routine</span>
-                  <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Daily routine">
+                  <div className="df-prefOptionsWrap" role="group" aria-label="Daily routine">
                     {STATUS_OPTIONS.map((o) => {
-                      const active = qForm.status_daily_routine === o.id;
+                      const active = qForm.status_daily_routine.includes(o.id);
                       return (
                         <label
                           key={o.id}
                           className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
                         >
                           <input
-                            type="radio"
-                            name="settings-q-status"
-                            value={o.id}
+                            type="checkbox"
                             checked={active}
                             onChange={() =>
-                              setQForm((f) => ({ ...f, status_daily_routine: o.id }))
+                              setQForm((f) => ({
+                                ...f,
+                                status_daily_routine: togglePlainMulti(f.status_daily_routine, o.id),
+                              }))
                             }
                             disabled={isSavingPreferences}
                             style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
@@ -474,20 +475,23 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
                 <div className="df-field">
                   <span className="df-fieldLabel">Main goal</span>
-                  <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Main goal">
+                  <div className="df-prefOptionsWrap" role="group" aria-label="Main goal">
                     {MAIN_GOAL_OPTIONS.map((o) => {
-                      const active = qForm.main_goal === o.id;
+                      const active = qForm.main_goal.includes(o.id);
                       return (
                         <label
                           key={o.id}
                           className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
                         >
                           <input
-                            type="radio"
-                            name="settings-q-main-goal"
-                            value={o.id}
+                            type="checkbox"
                             checked={active}
-                            onChange={() => setQForm((f) => ({ ...f, main_goal: o.id }))}
+                            onChange={() =>
+                              setQForm((f) => ({
+                                ...f,
+                                main_goal: togglePlainMulti(f.main_goal, o.id),
+                              }))
+                            }
                             disabled={isSavingPreferences}
                             style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
                           />
