@@ -110,7 +110,9 @@ export default function App() {
   }, [location.pathname, navigate]);
 
   React.useEffect(() => {
-    if (screen === 'home' && authState.isAuthenticated && location.pathname !== '/calendar') {
+    const normalizedPath = normalizePathname(location.pathname);
+    const isAllowedHomePath = normalizedPath === '/calendar' || normalizedPath === '/workouts';
+    if (screen === 'home' && authState.isAuthenticated && !isAllowedHomePath) {
       navigate('/calendar', { replace: true });
     }
   }, [screen, authState.isAuthenticated, location.pathname, navigate]);
