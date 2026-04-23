@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-
 import AuthScreen from './components/Auth/AuthScreen';
 import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
 import HomeScreen from './components/Home/HomeScreen';
+import WorkoutsScreen from './components/Workouts/WorkoutsScreen';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
 import { fetchOnboardingCompleted, signOutCurrentUser } from './services/auth/cognitoPlaceholders';
 import { configureAmplify } from './services/auth/amplifyConfig';
@@ -28,7 +29,8 @@ function normalizePathname(pathname: string): string {
 
 function shouldStartHydratingCalendar(): boolean {
   if (typeof window === 'undefined') return false;
-  return normalizePathname(window.location.pathname) === '/calendar';
+  const current = normalizePathname(window.location.pathname);
+  return current === '/calendar' || current === '/workouts';
 }
 
 export default function App() {
@@ -46,7 +48,8 @@ export default function App() {
   });
 
   React.useEffect(() => {
-    if (normalizePathname(location.pathname) !== '/calendar') {
+    const normalizedPath = normalizePathname(location.pathname);
+    if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts') {
       setIsHydratingCalendarRoute(false);
       return;
     }
@@ -168,6 +171,18 @@ export default function App() {
             <></>
           ) : screen === 'home' && authState.isAuthenticated ? (
             <HomeScreen username={authState.user?.username} onLogout={() => handleLogout()} />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
+      />
+      <Route
+        path="/workouts/*"
+        element={
+          isHydratingCalendarRoute ? (
+            <></>
+          ) : screen === 'home' && authState.isAuthenticated ? (
+            <WorkoutsScreen username={authState.user?.username} />
           ) : (
             <Navigate to="/" replace />
           )

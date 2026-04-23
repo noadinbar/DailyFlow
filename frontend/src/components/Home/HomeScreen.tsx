@@ -1,5 +1,6 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { useLocation, useNavigate } from 'react-router-dom';
 import ProfileSettingsModal from './ProfileSettingsModal';
 
 type HomeScreenProps = {
@@ -106,6 +107,8 @@ function isBusySyncFresh(lastBusySyncAt: string | undefined): boolean {
 
 export default function HomeScreen(props: HomeScreenProps) {
   const { username, onLogout } = props;
+  const navigate = useNavigate();
+  const location = useLocation();
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [displayName, setDisplayName] = React.useState<string>('');
@@ -879,6 +882,7 @@ export default function HomeScreen(props: HomeScreenProps) {
   }, [viewMode, selectedDate, weekStartDate, miniCalendarMonthDate]);
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
+  const isCalendarRoute = location.pathname.startsWith('/calendar');
 
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
@@ -914,13 +918,17 @@ export default function HomeScreen(props: HomeScreenProps) {
         </div>
 
         <nav className="df-calendarMenu" aria-label="Main sections">
-          <button type="button" className="df-calendarMenuItem df-calendarMenuItemActive">
+          <button
+            type="button"
+            className={`df-calendarMenuItem${isCalendarRoute ? ' df-calendarMenuItemActive' : ''}`}
+            onClick={() => navigate('/calendar')}
+          >
             Calendar
           </button>
           <button type="button" className="df-calendarMenuItem" disabled>
             Meals & Grocery
           </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
+          <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/workouts')}>
             Workouts
           </button>
           <button type="button" className="df-calendarMenuItem" disabled>

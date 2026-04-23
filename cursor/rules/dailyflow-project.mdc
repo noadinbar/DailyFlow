@@ -123,6 +123,21 @@ Profile/settings product direction:
 - Profile image upload should be implemented incrementally and should not skip directly to unrelated profile features
 - When profile image upload is implemented, prefer minimal and secure architecture aligned with the existing project structure
 
+Workouts / AI product direction:
+- Workouts work is now in scope when explicitly requested
+- The Workouts screen should be implemented incrementally, starting from the real screen structure and UI, not from a temporary test page
+- Prefer building the Workouts screen in a way that will later connect directly to the real workout suggestions flow
+- Do not build temporary AI/testing routes that will be thrown away later
+- When workout suggestion generation is implemented, prefer a real product route aligned with the Workouts screen and the existing project architecture
+- Workout suggestions should later be based on the user's saved preferences and available free time
+- The long-term flow should stay aligned with the shared Generate & Schedule flow in the design: select period -> load preferences and availability -> generate workout suggestions -> store suggestions -> optionally create DailyFlow calendar events after user acceptance
+- Keep Workouts implementation incremental:
+  1. screen UI
+  2. real backend suggestions route
+  3. OpenAI integration
+  4. acceptance / scheduling flow
+- Do not implement unrelated Meals, Stress, Overview, or Apple Watch logic as part of Workouts work unless explicitly requested
+
 Important:
 - Work incrementally and in small steps
 - Prefer doing one scoped step at a time

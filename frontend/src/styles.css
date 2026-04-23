@@ -954,6 +954,193 @@ select.df-input {
   flex-wrap: wrap;
 }
 
+.df-workoutsPage {
+  min-height: 92vh;
+}
+
+.df-workoutsContent {
+  padding: 18px 16px 22px;
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+}
+
+.df-workoutsSection {
+  display: grid;
+  gap: 12px;
+}
+
+.df-workoutsSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.df-workoutsTitle {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.df-workoutsGoal {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.df-workoutWeekGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(100px, 1fr));
+  gap: 10px;
+}
+
+.df-workoutDayCard {
+  border: 1px solid var(--df-border);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+  min-height: 170px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.df-workoutDay {
+  margin: 0;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.df-workoutRestDay {
+  color: #9ca3af;
+  font-size: 13px;
+  margin-top: 20px;
+}
+
+.df-workoutTypePill {
+  width: fit-content;
+  border-radius: 999px;
+  background: #f3e8ff;
+  color: #7e22ce;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+}
+
+.df-workoutMeta {
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.df-workoutSlot {
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #2563eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.df-workoutAddBtn {
+  appearance: none;
+  border: 1px solid #bfdbfe;
+  background: #2563eb;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 999px;
+  width: fit-content;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.df-workoutFilters {
+  display: grid;
+  gap: 10px;
+}
+
+.df-workoutFilterGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.df-workoutFilterLabel {
+  color: #6b7280;
+  font-size: 13px;
+  margin-inline-end: 2px;
+}
+
+.df-workoutFilterChip {
+  appearance: none;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.df-workoutLibraryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.df-workoutLibraryCard {
+  border: 1px solid var(--df-border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+}
+
+.df-workoutLibraryCardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 10px;
+}
+
+.df-workoutLibraryTitle {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.df-workoutLibraryAdd {
+  appearance: none;
+  border: 0;
+  background: #eff6ff;
+  color: #2563eb;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.df-workoutsTopbarUser {
+  font-size: 14px;
+  color: #374151;
+  font-weight: 600;
+}
+
+.df-workoutsAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #e879f9;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 @media (max-width: 720px) {
   .df-settingsLayout {
     flex-direction: column;
@@ -968,6 +1155,23 @@ select.df-input {
   }
 
   .df-settingsRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1200px) {
+  .df-workoutWeekGrid {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+
+  .df-workoutLibraryGrid {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .df-workoutWeekGrid,
+  .df-workoutLibraryGrid {
     grid-template-columns: 1fr;
   }
 }
