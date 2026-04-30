@@ -123,6 +123,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
     return map;
   }, [workoutLibrary]);
+  const scheduledWorkoutCount = weeklyPlanSuggestions.length;
+  const scheduledDistinctDays = React.useMemo(() => {
+    return new Set(weeklyPlanSuggestions.map((s) => s.recommended_day).filter(Boolean)).size;
+  }, [weeklyPlanSuggestions]);
 
   async function getAuthToken(): Promise<string> {
     const session = await fetchAuthSession();
@@ -303,9 +307,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             <div className="df-workoutsSectionHeader">
               <h2 className="df-workoutsTitle">Weekly Workout Plan</h2>
               <div className="df-workoutsGoal">
-                {weeklyPlanSuggestions.length > 0
-                  ? `Goal: ${weeklyPlanSuggestions.length} workouts/week`
-                  : 'Goal: workouts/week'}
+                {scheduledWorkoutCount > 0
+                  ? `Scheduled: ${scheduledWorkoutCount} workouts across ${scheduledDistinctDays} days`
+                  : 'Scheduled: 0 workouts'}
               </div>
             </div>
             <div className="df-workoutWeekGrid">
