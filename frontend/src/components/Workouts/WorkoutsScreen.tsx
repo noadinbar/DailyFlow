@@ -81,6 +81,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [isGeneratingPlan, setIsGeneratingPlan] = React.useState<boolean>(false);
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
+  const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
 
   const displayName = (username || 'Noa Levi').trim();
   const initials = (displayName || 'N').slice(0, 2).toUpperCase();
@@ -217,6 +218,14 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     void loadWorkoutsData({ mode: 'saved', startDate: weekStartIso, endDate: weekEndIso });
   }, [weekStartIso, weekEndIso]);
 
+  React.useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setSelectedLibraryWorkout(null);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   return (
     <section className="df-calendarPage df-workoutsPage" aria-label="DailyFlow workouts screen">
       <aside className="df-calendarLeftNav">
@@ -262,7 +271,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         </nav>
       </aside>
 
-      <div className="df-calendarMain">
+      <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
             <button type="button" className="df-btn" onClick={handleThisWeekClick}>
@@ -385,7 +394,20 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             </div>
             <div className="df-workoutLibraryGrid">
               {workoutLibrary.map((item) => (
-                <article key={item.id} className="df-workoutLibraryCard">
+                <article
+                  key={item.id}
+                  className="df-workoutLibraryCard df-workoutLibraryCardClickable"
+                  onClick={() => setSelectedLibraryWorkout(item)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedLibraryWorkout(item);
+                    }
+                  }}
+                  aria-label={`Open details for ${item.title}`}
+                >
                   <div className="df-workoutLibraryCardTop">
                     <h3 className="df-workoutLibraryTitle">{item.title}</h3>
                     <button type="button" className="df-workoutLibraryAdd" aria-label={`Add ${item.title}`}>
@@ -408,6 +430,15 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             )}
           </section>
         </div>
+
+        {isGeneratingPlan && (
+          <div className="df-workoutsLoadingOverlay" role="status" aria-live="polite" aria-label="Generating workout plan">
+            <div className="df-workoutsLoadingCard">
+              <div className="df-workoutsSpinner" aria-hidden />
+              <div className="df-workoutsLoadingText">Generating new workout plan...</div>
+            </div>
+          </div>
+        )}
       </div>
 
       <ProfileSettingsModal
@@ -415,6 +446,94 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         initialName={displayName}
         onClose={() => setIsProfileSettingsOpen(false)}
       />
+
+      {selectedLibraryWorkout && (
+        <div
+          className="df-modalBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedLibraryWorkout(null);
+          }}
+        >
+          <div className="df-modalPanel" role="dialog" aria-modal="true" aria-label="Workout details">
+            <div className="df-modalHeader">
+              <div className="df-modalTitle">{selectedLibraryWorkout.title}</div>
+              <button
+                type="button"
+                className="df-iconBtn"
+                onClick={() => setSelectedLibraryWorkout(null)}
+                aria-label="Close workout details"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
+              <div className="df-workoutTypePill">{selectedLibraryWorkout.workout_type}</div>
+              <div className="df-workoutMeta">
+                {selectedLibraryWorkout.duration_minutes} min · {selectedLibraryWorkout.intensity} ·{' '}
+                {selectedLibraryWorkout.location}
+              </div>
+              <div className="df-workoutMeta">{selectedLibraryWorkout.summary_short}</div>
+
+              {selectedLibraryWorkout.workout_flow?.summary && (
+                <div className="df-field">
+                  <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Overview</div>
+                  <div>{selectedLibraryWorkout.workout_flow.summary}</div>
+                </div>
+              )}
+
+              {Array.isArray(selectedLibraryWorkout.workout_flow?.warmup_steps) &&
+                selectedLibraryWorkout.workout_flow?.warmup_steps.length > 0 && (
+                  <div className="df-field">
+                    <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Warmup</div>
+                    <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                      {selectedLibraryWorkout.workout_flow.warmup_steps.map((step, idx) => (
+                        <li key={`warmup-${idx}`}>{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+              {Array.isArray(selectedLibraryWorkout.workout_flow?.main_steps) &&
+                selectedLibraryWorkout.workout_flow?.main_steps.length > 0 && (
+                  <div className="df-field">
+                    <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Main steps</div>
+                    <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                      {selectedLibraryWorkout.workout_flow.main_steps.map((step, idx) => (
+                        <li key={`main-${idx}`}>{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+              {Array.isArray(selectedLibraryWorkout.workout_flow?.cooldown_steps) &&
+                selectedLibraryWorkout.workout_flow?.cooldown_steps.length > 0 && (
+                  <div className="df-field">
+                    <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Cooldown</div>
+                    <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                      {selectedLibraryWorkout.workout_flow.cooldown_steps.map((step, idx) => (
+                        <li key={`cooldown-${idx}`}>{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+              {Array.isArray(selectedLibraryWorkout.workout_flow?.notes) &&
+                selectedLibraryWorkout.workout_flow?.notes.length > 0 && (
+                  <div className="df-field">
+                    <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Notes</div>
+                    <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                      {selectedLibraryWorkout.workout_flow.notes.map((note, idx) => (
+                        <li key={`note-${idx}`}>{note}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

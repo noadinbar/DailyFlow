@@ -13,6 +13,11 @@ MAX_PERIOD_DAYS = 14
 MIN_FREE_WINDOW_MINUTES = 20
 DEFAULT_TIMEZONE_LABEL = "Asia/Jerusalem"
 WORKOUT_LIBRARY_DEFAULT_TABLE_NAME = "WorkoutLibrary"
+DURATION_BUCKETS: List[Tuple[str, int, int]] = [
+    ("10_20", 10, 20),
+    ("20_40", 21, 40),
+    ("40_60", 41, 60),
+]
 PREFERRED_TIME_RANGES: Dict[str, Tuple[time, time]] = {
     "morning": (time(6, 0), time(11, 0)),
     "noon": (time(11, 0), time(15, 0)),
@@ -276,53 +281,53 @@ def _type_display_name(type_key: str) -> str:
 def _variant_templates_for_type(type_key: str) -> List[Tuple[str, int, str, str]]:
     templates: Dict[str, List[Tuple[str, int, str, str]]] = {
         "strength": [
-            ("Full body strength", 35, "Moderate", "Gym"),
-            ("Upper body workout", 30, "Moderate", "Gym"),
-            ("Lower body strength", 35, "Moderate", "Gym"),
+            ("Strength activation", 20, "Light", "Gym"),
+            ("Upper body workout", 35, "Moderate", "Gym"),
+            ("Lower body strength", 50, "Moderate", "Gym"),
         ],
         "walking": [
-            ("Brisk outdoor walk", 30, "Light", "Outside"),
-            ("Stress-relief walk", 25, "Light", "Outside"),
-            ("Interval walk", 30, "Moderate", "Outside"),
+            ("Stress-relief walk", 20, "Light", "Outside"),
+            ("Brisk outdoor walk", 35, "Light", "Outside"),
+            ("Interval walk", 45, "Moderate", "Outside"),
         ],
         "pilates": [
-            ("Morning pilates flow", 25, "Light", "Home"),
-            ("Core pilates session", 30, "Moderate", "Home"),
             ("Mobility pilates", 20, "Light", "Home"),
+            ("Core pilates session", 30, "Moderate", "Home"),
+            ("Morning pilates flow", 45, "Moderate", "Home"),
         ],
         "yoga": [
-            ("Morning yoga flow", 25, "Light", "Home"),
+            ("Quick yoga reset", 15, "Light", "Home"),
             ("Recovery yoga session", 30, "Light", "Home"),
-            ("Power yoga practice", 35, "Moderate", "Home"),
+            ("Power yoga practice", 50, "Moderate", "Home"),
         ],
         "running": [
-            ("Steady outdoor run", 30, "Moderate", "Outside"),
-            ("Interval run", 25, "High", "Outside"),
             ("Easy recovery jog", 20, "Light", "Outside"),
+            ("Steady outdoor run", 35, "Moderate", "Outside"),
+            ("Interval run", 45, "High", "Outside"),
         ],
         "gym": [
-            ("Gym circuit session", 35, "Moderate", "Gym"),
-            ("Functional gym workout", 30, "Moderate", "Gym"),
-            ("Strength machine session", 40, "Moderate", "Gym"),
+            ("Gym warmup circuit", 20, "Light", "Gym"),
+            ("Functional gym workout", 35, "Moderate", "Gym"),
+            ("Strength machine session", 50, "Moderate", "Gym"),
         ],
         "home_workouts": [
-            ("Full body home workout", 30, "Moderate", "Home"),
-            ("Bodyweight circuit", 25, "Moderate", "Home"),
             ("Quick home conditioning", 20, "Moderate", "Home"),
+            ("Bodyweight circuit", 30, "Moderate", "Home"),
+            ("Full body home workout", 45, "Moderate", "Home"),
         ],
         "stretching": [
-            ("Full body stretching", 20, "Light", "Home"),
             ("Desk-reset stretching", 15, "Light", "Home"),
             ("Evening stretch flow", 25, "Light", "Home"),
+            ("Full body stretching", 45, "Light", "Home"),
         ],
     }
     if type_key in templates:
         return templates[type_key]
     display = _type_display_name(type_key)
     return [
-        (f"{display} session", 25, "Moderate", "Home"),
+        (f"{display} session", 20, "Moderate", "Home"),
         (f"{display} flow", 30, "Moderate", "Home"),
-        (f"{display} training", 35, "Moderate", "Home"),
+        (f"{display} training", 45, "Moderate", "Home"),
     ]
 
 
@@ -392,6 +397,16 @@ def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str
         used_signatures.add(signature)
         by_type.setdefault(item_type_key, []).append(item)
 
+    def duration_bucket(duration_minutes: int) -> str:
+        for bucket, min_m, max_m in DURATION_BUCKETS:
+            if min_m <= duration_minutes <= max_m:
+                return bucket
+        if duration_minutes <= 20:
+            return "10_20"
+        if duration_minutes <= 40:
+            return "20_40"
+        return "40_60"
+
     # ensure each selected type exists and has multiple variants
     for type_key in preferred_type_keys:
         existing = by_type.get(type_key, [])
@@ -417,6 +432,41 @@ def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str
                 )
             )
             needed -= 1
+
+        # ensure duration-bucket diversity for each selected type
+        existing_items = by_type.get(type_key, [])
+        covered_buckets = {
+            duration_bucket(_to_int(item.get("duration_minutes"), 0))
+            for item in existing_items
+            if _to_int(item.get("duration_minutes"), 0) > 0
+        }
+        templates = _variant_templates_for_type(type_key)
+        for bucket, min_m, max_m in DURATION_BUCKETS:
+            if bucket in covered_buckets:
+                continue
+            picked = None
+            for title, duration, intensity, location in templates:
+                if min_m <= duration <= max_m:
+                    picked = (title, duration, intensity, location)
+                    break
+            if not picked:
+                midpoint = (min_m + max_m) // 2
+                picked = (f"{_type_display_name(type_key)} workout", midpoint, "Moderate", "Home")
+            title, duration, intensity, location = picked
+            signature = f"{type_key}|{duration}|{title.lower()}"
+            if signature in used_signatures:
+                continue
+            used_signatures.add(signature)
+            by_type.setdefault(type_key, []).append(
+                _make_library_item(
+                    item_id="",
+                    title=title,
+                    workout_type_key=type_key,
+                    duration_minutes=duration,
+                    intensity=intensity,
+                    location=location,
+                )
+            )
 
     merged: List[Dict[str, Any]] = []
     for type_key in preferred_type_keys:
@@ -661,13 +711,68 @@ def _derive_weekly_plan(
     remaining_windows = eligible_windows.copy()
     plan: List[Dict[str, Any]] = []
     used_library_ids = set()
+    day_usage: Dict[str, int] = {}
+    time_label_usage: Dict[str, int] = {}
+    available_days_sorted = sorted({window["date"] for window in eligible_windows})
+    day_position = {day: idx for idx, day in enumerate(available_days_sorted)}
 
-    # First pass: spread across different days whenever possible.
-    day_first_window: Dict[str, int] = {}
-    for idx, window in enumerate(remaining_windows):
-        day = window["date"]
-        if day not in day_first_window:
-            day_first_window[day] = idx
+    def target_day_position(planned_count: int) -> int:
+        day_count = len(available_days_sorted)
+        if day_count <= 1:
+            return 0
+        if max_items <= 1:
+            return day_count // 2
+        ratio = planned_count / max(1, max_items - 1)
+        return int(round(ratio * (day_count - 1)))
+
+    def choose_varied_start(window: Dict[str, Any], duration: int) -> Tuple[str, str]:
+        start_t = _parse_hh_mm(window["start_time"])
+        end_t = _parse_hh_mm(window["end_time"])
+        if not start_t or not end_t:
+            return window["start_time"], window["end_time"]
+        start_minutes = start_t.hour * 60 + start_t.minute
+        latest_start_minutes = (end_t.hour * 60 + end_t.minute) - duration
+        if latest_start_minutes <= start_minutes:
+            final_start = start_minutes
+        else:
+            span = latest_start_minutes - start_minutes
+            label = window["time_label"]
+            slot_index = time_label_usage.get(label, 0) % 3
+            fractions = [0.2, 0.5, 0.75]
+            offset = int(span * fractions[slot_index])
+            final_start = start_minutes + offset
+            final_start = int(round(final_start / 5) * 5)
+            final_start = max(start_minutes, min(final_start, latest_start_minutes))
+        final_end = final_start + duration
+        return f"{final_start // 60:02d}:{final_start % 60:02d}", f"{final_end // 60:02d}:{final_end % 60:02d}"
+
+    def pick_window(duration: int, require_new_day: bool) -> int:
+        used_days = {entry["recommended_day"] for entry in plan}
+        target_pos = target_day_position(len(plan))
+        candidates: List[Tuple[int, int, int, int]] = []
+        for idx, window in enumerate(remaining_windows):
+            if int(window["duration_minutes"]) < duration:
+                continue
+            day = window["date"]
+            if require_new_day and day in used_days:
+                continue
+            label = window["time_label"]
+            s = _parse_hh_mm(window["start_time"])
+            start_hour = s.hour if s else 0
+            pos = day_position.get(day, 0)
+            # Soft spread target across the week to avoid always filling earliest days first.
+            spread_penalty = abs(pos - target_pos) * (40 if require_new_day else 18)
+            score = (
+                spread_penalty
+                + day_usage.get(day, 0) * 100
+                + time_label_usage.get(label, 0) * 20
+                + start_hour
+            )
+            candidates.append((score, idx, day_usage.get(day, 0), time_label_usage.get(label, 0)))
+        if not candidates:
+            return -1
+        candidates.sort(key=lambda x: (x[0], x[2], x[3], x[1]))
+        return candidates[0][1]
 
     for library_item in workout_library:
         if len(plan) >= max_items:
@@ -676,41 +781,22 @@ def _derive_weekly_plan(
         duration = _to_int(library_item.get("duration_minutes"), 0)
         if not lib_id or duration <= 0 or lib_id in used_library_ids:
             continue
-        chosen_idx = -1
-        used_days = {entry["recommended_day"] for entry in plan}
-        for day, idx in day_first_window.items():
-            if day in used_days:
-                continue
-            if idx >= len(remaining_windows):
-                continue
-            window = remaining_windows[idx]
-            if int(window["duration_minutes"]) >= duration:
-                chosen_idx = idx
-                break
+        chosen_idx = pick_window(duration, True)
         if chosen_idx < 0:
             continue
         window = remaining_windows.pop(chosen_idx)
-        day_first_window = {}
-        for idx, candidate in enumerate(remaining_windows):
-            day = candidate["date"]
-            if day not in day_first_window:
-                day_first_window[day] = idx
-        start_t = _parse_hh_mm(window["start_time"])
-        end_bound = _parse_hh_mm(window["end_time"])
-        if not start_t or not end_bound:
-            continue
-        end_minutes = start_t.hour * 60 + start_t.minute + duration
-        end_t = time(end_minutes // 60, end_minutes % 60)
-        if end_t > end_bound:
-            continue
+        rec_start, rec_end = choose_varied_start(window, duration)
         used_library_ids.add(lib_id)
+        day_usage[window["date"]] = day_usage.get(window["date"], 0) + 1
+        label = window["time_label"]
+        time_label_usage[label] = time_label_usage.get(label, 0) + 1
         plan.append(
             {
                 "id": f"plan_{len(plan)+1}",
                 "library_workout_id": lib_id,
                 "recommended_day": window["date"],
-                "recommended_start_time": window["start_time"],
-                "recommended_end_time": end_t.strftime("%H:%M"),
+                "recommended_start_time": rec_start,
+                "recommended_end_time": rec_end,
                 "recommended_time_label": window["time_label"],
                 "reason_short": "Matches your saved workout library and current free time.",
             }
@@ -725,30 +811,22 @@ def _derive_weekly_plan(
             duration = _to_int(library_item.get("duration_minutes"), 0)
             if not lib_id or duration <= 0 or lib_id in used_library_ids:
                 continue
-            chosen_idx = -1
-            for idx, window in enumerate(remaining_windows):
-                if int(window["duration_minutes"]) >= duration:
-                    chosen_idx = idx
-                    break
+            chosen_idx = pick_window(duration, False)
             if chosen_idx < 0:
                 continue
             window = remaining_windows.pop(chosen_idx)
-            start_t = _parse_hh_mm(window["start_time"])
-            end_bound = _parse_hh_mm(window["end_time"])
-            if not start_t or not end_bound:
-                continue
-            end_minutes = start_t.hour * 60 + start_t.minute + duration
-            end_t = time(end_minutes // 60, end_minutes % 60)
-            if end_t > end_bound:
-                continue
+            rec_start, rec_end = choose_varied_start(window, duration)
             used_library_ids.add(lib_id)
+            day_usage[window["date"]] = day_usage.get(window["date"], 0) + 1
+            label = window["time_label"]
+            time_label_usage[label] = time_label_usage.get(label, 0) + 1
             plan.append(
                 {
                     "id": f"plan_{len(plan)+1}",
                     "library_workout_id": lib_id,
                     "recommended_day": window["date"],
-                    "recommended_start_time": window["start_time"],
-                    "recommended_end_time": end_t.strftime("%H:%M"),
+                    "recommended_start_time": rec_start,
+                    "recommended_end_time": rec_end,
                     "recommended_time_label": window["time_label"],
                     "reason_short": "Matches your saved workout library and current free time.",
                 }
