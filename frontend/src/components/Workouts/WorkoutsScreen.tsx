@@ -9,10 +9,7 @@ type WorkoutsScreenProps = {
 
 type WeeklyPlanSuggestion = {
   id: string;
-  title: string;
-  workout_type: string;
-  duration_minutes: number;
-  intensity: string;
+  library_workout_id: string;
   recommended_day: string;
   recommended_start_time: string;
   recommended_end_time: string;
@@ -24,18 +21,24 @@ type WorkoutLibraryItem = {
   id: string;
   title: string;
   workout_type: string;
-  duration_bucket: string;
-  duration_min_minutes: number;
-  duration_max_minutes: number;
+  duration_minutes: number;
   intensity: string;
+  location: string;
   summary_short: string;
+  workout_flow?: {
+    summary?: string;
+    warmup_steps?: string[];
+    main_steps?: string[];
+    cooldown_steps?: string[];
+    notes?: string[];
+  };
 };
 
 type SuggestionsResponse = {
   period?: { start_date?: string; end_date?: string };
   weekly_plan_suggestions?: WeeklyPlanSuggestion[];
   workout_library?: WorkoutLibraryItem[];
-  metadata?: { generation_warning?: string };
+  metadata?: { generation_warning?: string; library_source?: string };
   message?: string;
 };
 
@@ -103,7 +106,22 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     return Array.from(new Set(workoutLibrary.map((item) => item.workout_type))).slice(0, 6);
   }, [workoutLibrary]);
   const selectedDurationBuckets = React.useMemo(() => {
-    return Array.from(new Set(workoutLibrary.map((item) => item.duration_bucket))).slice(0, 6);
+    return Array.from(
+      new Set(
+        workoutLibrary.map((item) => {
+          if (item.duration_minutes <= 20) return '10-20';
+          if (item.duration_minutes <= 40) return '20-40';
+          return '40-60';
+        })
+      )
+    ).slice(0, 6);
+  }, [workoutLibrary]);
+  const libraryById = React.useMemo(() => {
+    const map = new Map<string, WorkoutLibraryItem>();
+    for (const item of workoutLibrary) {
+      map.set(item.id, item);
+    }
+    return map;
   }, [workoutLibrary]);
 
   async function getAuthToken(): Promise<string> {
@@ -115,24 +133,33 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     return token;
   }
 
-  async function handleGeneratePlanClick() {
+  async function loadWorkoutsData(args: { mode: 'saved' | 'generate'; startDate: string; endDate: string }) {
+    const { mode, startDate, endDate } = args;
     setGenerateError('');
     setGenerateHint('');
-    setIsGeneratingPlan(true);
+    setIsGeneratingPlan(mode === 'generate');
     try {
       const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
       if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
       const token = await getAuthToken();
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/workouts/suggestions`, {
-        method: 'POST',
+      const isGenerate = mode === 'generate';
+      const endpoint = isGenerate
+        ? `${baseUrl.replace(/\/$/, '')}/workouts/suggestions/generate`
+        : `${baseUrl.replace(/\/$/, '')}/workouts/suggestions?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+      const response = await fetch(endpoint, {
+        method: isGenerate ? 'POST' : 'GET',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          start_date: weekStartIso,
-          end_date: weekEndIso,
-        }),
+        ...(isGenerate
+          ? {
+              body: JSON.stringify({
+                start_date: startDate,
+                end_date: endDate,
+              }),
+            }
+          : {}),
       });
 
       let payload: SuggestionsResponse = {};
@@ -155,9 +182,11 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       setWeeklyPlanSuggestions(weekly);
       setWorkoutLibrary(library);
       if (weekly.length === 0 && library.length === 0) {
-        setGenerateHint('No suggestions were returned for this week.');
+        setGenerateHint('No saved workout library yet. Click Generate plan.');
       } else if (typeof payload.metadata?.generation_warning === 'string' && payload.metadata.generation_warning) {
         setGenerateHint(payload.metadata.generation_warning);
+      } else if (mode === 'saved' && payload.metadata?.library_source === 'saved') {
+        setGenerateHint('');
       } else {
         setGenerateHint('');
       }
@@ -171,11 +200,18 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
   }
 
+  async function handleGeneratePlanClick() {
+    await loadWorkoutsData({ mode: 'generate', startDate: weekStartIso, endDate: weekEndIso });
+  }
+
   function handleThisWeekClick() {
     const next = startOfWeek(new Date());
     setWeekStartDate(next);
-    setGenerateHint('Week reset to current week. Click Generate plan to refresh suggestions.');
   }
+
+  React.useEffect(() => {
+    void loadWorkoutsData({ mode: 'saved', startDate: weekStartIso, endDate: weekEndIso });
+  }, [weekStartIso, weekEndIso]);
 
   return (
     <section className="df-calendarPage df-workoutsPage" aria-label="DailyFlow workouts screen">
@@ -276,6 +312,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               {weekCards.map((card) => {
                 const daySuggestions = suggestionsByDay.get(card.dateIso) || [];
                 const item = daySuggestions[0];
+                const libraryWorkout = item ? libraryById.get(item.library_workout_id) : undefined;
                 return (
                   <article key={card.dateIso} className="df-workoutDayCard">
                     <h3 className="df-workoutDay">{card.dayLabel}</h3>
@@ -283,9 +320,15 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                       <div className="df-workoutRestDay">{isGeneratingPlan ? 'Loading...' : 'Rest day'}</div>
                     ) : (
                       <>
-                        <div className="df-workoutTypePill">{item.workout_type}</div>
-                        <div className="df-workoutMeta">{item.duration_minutes} min</div>
-                        <div className="df-workoutMeta">{item.intensity}</div>
+                        <div className="df-workoutTypePill">
+                          {libraryWorkout?.workout_type || 'Workout'}
+                        </div>
+                        <div className="df-workoutMeta">
+                          {libraryWorkout ? `${libraryWorkout.duration_minutes} min` : 'Duration'}
+                        </div>
+                        <div className="df-workoutMeta">
+                          {libraryWorkout?.intensity || item.recommended_time_label}
+                        </div>
                         <div className="df-workoutSlot">
                           {item.recommended_day} {item.recommended_start_time}-{item.recommended_end_time}
                         </div>
@@ -328,7 +371,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 {selectedDurationBuckets.length > 0 ? (
                   selectedDurationBuckets.map((bucket) => (
                     <button key={bucket} type="button" className="df-workoutFilterChip">
-                      {bucket.replace('_', '-')} min
+                      {bucket} min
                     </button>
                   ))
                 ) : (
@@ -347,9 +390,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                   </div>
                   <div className="df-workoutTypePill">{item.workout_type}</div>
                   <div className="df-workoutMeta">
-                    {item.duration_min_minutes}-{item.duration_max_minutes} min
+                    {item.duration_minutes} min
                   </div>
-                  <div className="df-workoutMeta">{item.intensity}</div>
+                  <div className="df-workoutMeta">{item.intensity} · {item.location}</div>
                   <div className="df-workoutMeta">{item.summary_short}</div>
                 </article>
               ))}
