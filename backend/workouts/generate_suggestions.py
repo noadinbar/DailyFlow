@@ -1,5 +1,6 @@
 import json
 import os
+from hashlib import sha1
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -531,6 +532,71 @@ def _save_library(user_id: str, workout_library: List[Dict[str, Any]], generated
     )
 
 
+def _save_library_with_current_week_plan(
+    *,
+    user_id: str,
+    generated_at: str,
+    workout_library: List[Dict[str, Any]],
+    week_start: str,
+    week_end: str,
+    weekly_plan: List[Dict[str, Any]],
+    busyblocks_signature: str,
+    library_signature: str,
+) -> str:
+    updated_at = _iso_utc_now()
+    table = _workout_library_table()
+    table.put_item(
+        Item={
+            "user_id": user_id,
+            "generated_at": generated_at,
+            "workout_library": workout_library,
+            "current_week_plan_week_start": week_start,
+            "current_week_plan_week_end": week_end,
+            "current_week_plan": weekly_plan,
+            "current_week_plan_busyblocks_signature": busyblocks_signature,
+            "current_week_plan_library_signature": library_signature,
+            "current_week_plan_updated_at": updated_at,
+            "updated_at": updated_at,
+        }
+    )
+    return updated_at
+
+
+def _library_signature(workout_library: List[Dict[str, Any]]) -> str:
+    normalized = []
+    for item in workout_library:
+        normalized.append(
+            {
+                "id": str(item.get("id", "")).strip(),
+                "title": str(item.get("title", "")).strip(),
+                "workout_type": str(item.get("workout_type", "")).strip(),
+                "duration_minutes": _to_int(item.get("duration_minutes"), 0),
+                "intensity": str(item.get("intensity", "")).strip(),
+                "location": str(item.get("location", "")).strip(),
+            }
+        )
+    normalized.sort(
+        key=lambda x: (x["id"], x["title"], x["workout_type"], x["duration_minutes"], x["intensity"], x["location"])
+    )
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _busyblocks_signature(busy_blocks: List[Dict[str, Any]]) -> str:
+    normalized = []
+    for block in busy_blocks:
+        normalized.append(
+            {
+                "date": str(block.get("date", "")).strip(),
+                "start_time": str(block.get("start_time", "")).strip(),
+                "end_time": str(block.get("end_time", "")).strip(),
+            }
+        )
+    normalized.sort(key=lambda x: (x["date"], x["start_time"], x["end_time"]))
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return sha1(payload.encode("utf-8")).hexdigest()
+
+
 def _parse_hh_mm(value: str) -> Optional[time]:
     if not isinstance(value, str):
         return None
@@ -887,6 +953,30 @@ def _handle_common_weekly_derivation(
     )
 
 
+def _derive_weekly_plan_and_signatures(
+    *,
+    user_id: str,
+    start_date_value: date,
+    end_date_value: date,
+    workout_library: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], str, str]:
+    period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
+    preferences = _read_user_preferences(user_id)
+    busy_blocks = _query_busy_blocks(user_id, period["start_date"], period["end_date"])
+    free_windows = _derive_free_windows(
+        start_date_value=start_date_value, end_date_value=end_date_value, busy_blocks=busy_blocks
+    )
+    eligible_windows = _derive_eligible_windows(
+        free_windows=free_windows, preferred_times=preferences.get("preferred_workout_times") or []
+    )
+    weekly_plan = _derive_weekly_plan(
+        workout_library=workout_library,
+        eligible_windows=eligible_windows,
+        workouts_per_week=preferences.get("workouts_per_week") or 3,
+    )
+    return weekly_plan, _busyblocks_signature(busy_blocks), _library_signature(workout_library)
+
+
 def _fallback_library(preferences: Dict[str, Any]) -> List[Dict[str, Any]]:
     preferred_types = preferences.get("preferred_workout_types") or []
     if not isinstance(preferred_types, list) or not preferred_types:
@@ -954,15 +1044,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             workout_library = _ensure_library_coverage(preferences, workout_library)
         generated_at = _iso_utc_now()
-        _save_library(user_id, workout_library, generated_at)
-        payload = _handle_common_weekly_derivation(
+        weekly_plan, busy_sig, lib_sig = _derive_weekly_plan_and_signatures(
             user_id=user_id,
             start_date_value=start_date_value,
             end_date_value=end_date_value,
             workout_library=workout_library,
+        )
+        plan_updated_at = _save_library_with_current_week_plan(
+            user_id=user_id,
             generated_at=generated_at,
+            workout_library=workout_library,
+            week_start=start_date_value.isoformat(),
+            week_end=end_date_value.isoformat(),
+            weekly_plan=weekly_plan,
+            busyblocks_signature=busy_sig,
+            library_signature=lib_sig,
+        )
+        payload = _response_payload(
+            period={"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()},
+            workout_library=workout_library,
+            weekly_plan_suggestions=weekly_plan,
+            generated_at=generated_at or plan_updated_at,
             library_source="generated",
         )
+        payload["metadata"]["weekly_plan_source"] = "generated_and_saved_current_week_plan"
         if generation_warning:
             payload["metadata"]["generation_warning"] = generation_warning
         return _json_response(200, payload)

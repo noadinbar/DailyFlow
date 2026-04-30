@@ -429,6 +429,114 @@ def _load_saved_library(user_id: str) -> Tuple[List[Dict[str, Any]], str]:
     return cleaned, generated_at
 
 
+def _load_saved_workouts_item(user_id: str) -> Dict[str, Any]:
+    table = _workout_library_table()
+    response = table.get_item(Key={"user_id": user_id})
+    item = response.get("Item") if isinstance(response, dict) else None
+    if not isinstance(item, dict):
+        return {}
+    return item
+
+
+def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        lib_id = str(item.get("library_workout_id", "")).strip()
+        rec_day = str(item.get("recommended_day", "")).strip()
+        rec_start = str(item.get("recommended_start_time", "")).strip()
+        rec_end = str(item.get("recommended_end_time", "")).strip()
+        rec_label = str(item.get("recommended_time_label", "")).strip()
+        reason = str(item.get("reason_short", "")).strip()
+        if not lib_id or not rec_day or not rec_start or not rec_end:
+            continue
+        cleaned.append(
+            {
+                "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned)+1}",
+                "library_workout_id": lib_id,
+                "recommended_day": rec_day,
+                "recommended_start_time": rec_start,
+                "recommended_end_time": rec_end,
+                "recommended_time_label": rec_label or "Evening",
+                "reason_short": reason or "Matches your saved workout library and current free time.",
+            }
+        )
+    return cleaned
+
+
+def _library_signature(workout_library: List[Dict[str, Any]]) -> str:
+    normalized = []
+    for item in workout_library:
+        normalized.append(
+            {
+                "id": str(item.get("id", "")).strip(),
+                "title": str(item.get("title", "")).strip(),
+                "workout_type": str(item.get("workout_type", "")).strip(),
+                "duration_minutes": _to_int(item.get("duration_minutes"), 0),
+                "intensity": str(item.get("intensity", "")).strip(),
+                "location": str(item.get("location", "")).strip(),
+            }
+        )
+    normalized.sort(
+        key=lambda x: (x["id"], x["title"], x["workout_type"], x["duration_minutes"], x["intensity"], x["location"])
+    )
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _busyblocks_signature(busy_blocks: List[Dict[str, Any]]) -> str:
+    normalized = []
+    for block in busy_blocks:
+        normalized.append(
+            {
+                "date": str(block.get("date", "")).strip(),
+                "start_time": str(block.get("start_time", "")).strip(),
+                "end_time": str(block.get("end_time", "")).strip(),
+            }
+        )
+    normalized.sort(key=lambda x: (x["date"], x["start_time"], x["end_time"]))
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _save_current_week_plan_fields(
+    *,
+    user_id: str,
+    week_start: str,
+    week_end: str,
+    weekly_plan: List[Dict[str, Any]],
+    busyblocks_signature: str,
+    library_signature: str,
+) -> str:
+    updated_at = _iso_utc_now()
+    table = _workout_library_table()
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression=(
+            "SET current_week_plan_week_start = :week_start, "
+            "current_week_plan_week_end = :week_end, "
+            "current_week_plan = :weekly_plan, "
+            "current_week_plan_busyblocks_signature = :busy_sig, "
+            "current_week_plan_library_signature = :lib_sig, "
+            "current_week_plan_updated_at = :plan_updated_at, "
+            "updated_at = :updated_at"
+        ),
+        ExpressionAttributeValues={
+            ":week_start": week_start,
+            ":week_end": week_end,
+            ":weekly_plan": weekly_plan,
+            ":busy_sig": busyblocks_signature,
+            ":lib_sig": library_signature,
+            ":plan_updated_at": updated_at,
+            ":updated_at": updated_at,
+        },
+    )
+    return updated_at
+
+
 def _save_library(user_id: str, workout_library: List[Dict[str, Any]], generated_at: str) -> None:
     table = _workout_library_table()
     table.put_item(
@@ -658,15 +766,77 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return _json_response(500, {"message": "BusyBlocks schema mismatch. Expected PK user_id, SK block_key."})
         if not _workout_library_schema_ok():
             return _json_response(500, {"message": "WorkoutLibrary schema mismatch. Expected PK user_id only."})
+        period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
+        saved_item = _load_saved_workouts_item(user_id)
         workout_library, generated_at = _load_saved_library(user_id)
-        payload = _handle_common_weekly_derivation(
-            user_id=user_id,
-            start_date_value=start_date_value,
-            end_date_value=end_date_value,
+
+        if not workout_library:
+            payload = _response_payload(
+                period=period,
+                workout_library=[],
+                weekly_plan_suggestions=[],
+                generated_at=generated_at,
+                library_source="saved",
+            )
+            return _json_response(200, payload)
+
+        preferences = _read_user_preferences(user_id)
+        busy_blocks = _query_busy_blocks(user_id, period["start_date"], period["end_date"])
+        free_windows = _derive_free_windows(
+            start_date_value=start_date_value, end_date_value=end_date_value, busy_blocks=busy_blocks
+        )
+        eligible_windows = _derive_eligible_windows(
+            free_windows=free_windows, preferred_times=preferences.get("preferred_workout_times") or []
+        )
+
+        current_busy_sig = _busyblocks_signature(busy_blocks)
+        current_lib_sig = _library_signature(workout_library)
+        saved_week_start = str(saved_item.get("current_week_plan_week_start", "")).strip()
+        saved_week_end = str(saved_item.get("current_week_plan_week_end", "")).strip()
+        saved_busy_sig = str(saved_item.get("current_week_plan_busyblocks_signature", "")).strip()
+        saved_lib_sig = str(saved_item.get("current_week_plan_library_signature", "")).strip()
+        saved_weekly_plan = _normalize_saved_weekly_plan(saved_item.get("current_week_plan"))
+
+        is_saved_plan_valid = (
+            saved_week_start == period["start_date"]
+            and saved_week_end == period["end_date"]
+            and saved_busy_sig == current_busy_sig
+            and saved_lib_sig == current_lib_sig
+            and len(saved_weekly_plan) > 0
+        )
+
+        if is_saved_plan_valid:
+            payload = _response_payload(
+                period=period,
+                workout_library=workout_library,
+                weekly_plan_suggestions=saved_weekly_plan,
+                generated_at=generated_at,
+                library_source="saved",
+            )
+            payload["metadata"]["weekly_plan_source"] = "saved_current_week_plan"
+            return _json_response(200, payload)
+
+        weekly_plan = _derive_weekly_plan(
             workout_library=workout_library,
-            generated_at=generated_at,
+            eligible_windows=eligible_windows,
+            workouts_per_week=preferences.get("workouts_per_week") or 3,
+        )
+        plan_updated_at = _save_current_week_plan_fields(
+            user_id=user_id,
+            week_start=period["start_date"],
+            week_end=period["end_date"],
+            weekly_plan=weekly_plan,
+            busyblocks_signature=current_busy_sig,
+            library_signature=current_lib_sig,
+        )
+        payload = _response_payload(
+            period=period,
+            workout_library=workout_library,
+            weekly_plan_suggestions=weekly_plan,
+            generated_at=generated_at or plan_updated_at,
             library_source="saved",
         )
+        payload["metadata"]["weekly_plan_source"] = "derived_and_saved_current_week_plan"
         return _json_response(200, payload)
     except ValueError as err:
         return _json_response(500, {"message": str(err)})
