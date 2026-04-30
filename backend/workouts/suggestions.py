@@ -1,5 +1,6 @@
 import json
 import os
+from hashlib import sha1
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -452,7 +453,77 @@ def _derive_weekly_plan(
     remaining_windows = eligible_windows.copy()
     plan: List[Dict[str, Any]] = []
     used_library_ids = set()
+    day_usage: Dict[str, int] = {}
+    time_label_usage: Dict[str, int] = {}
+    available_days_sorted = sorted({window["date"] for window in eligible_windows})
+    day_position = {day: idx for idx, day in enumerate(available_days_sorted)}
+    week_start = available_days_sorted[0] if available_days_sorted else ""
+    week_end = available_days_sorted[-1] if available_days_sorted else ""
 
+    def target_day_position(planned_count: int) -> int:
+        day_count = len(available_days_sorted)
+        if day_count <= 1:
+            return 0
+        if max_items <= 1:
+            return day_count // 2
+        ratio = planned_count / max(1, max_items - 1)
+        return int(round(ratio * (day_count - 1)))
+
+    def choose_deterministic_start(window: Dict[str, Any], duration: int, library_id: str) -> Tuple[str, str]:
+        start_t = _parse_hh_mm(window["start_time"])
+        end_t = _parse_hh_mm(window["end_time"])
+        if not start_t or not end_t:
+            return window["start_time"], window["end_time"]
+        start_minutes = start_t.hour * 60 + start_t.minute
+        latest_start_minutes = (end_t.hour * 60 + end_t.minute) - duration
+        if latest_start_minutes <= start_minutes:
+            final_start = start_minutes
+        else:
+            material = "|".join(
+                [
+                    library_id,
+                    window["date"],
+                    week_start,
+                    week_end,
+                    window["start_time"],
+                    window["end_time"],
+                ]
+            )
+            hash_num = int(sha1(material.encode("utf-8")).hexdigest()[:8], 16)
+            slot_count = max(1, ((latest_start_minutes - start_minutes) // 5) + 1)
+            chosen_slot = hash_num % slot_count
+            final_start = start_minutes + chosen_slot * 5
+        final_end = final_start + duration
+        return f"{final_start // 60:02d}:{final_start % 60:02d}", f"{final_end // 60:02d}:{final_end % 60:02d}"
+
+    def pick_window(duration: int, require_new_day: bool) -> int:
+        used_days = {entry["recommended_day"] for entry in plan}
+        target_pos = target_day_position(len(plan))
+        candidates: List[Tuple[int, int, int, int]] = []
+        for idx, window in enumerate(remaining_windows):
+            if int(window["duration_minutes"]) < duration:
+                continue
+            day = window["date"]
+            if require_new_day and day in used_days:
+                continue
+            label = window["time_label"]
+            s = _parse_hh_mm(window["start_time"])
+            start_hour = s.hour if s else 0
+            pos = day_position.get(day, 0)
+            spread_penalty = abs(pos - target_pos) * (40 if require_new_day else 18)
+            score = (
+                spread_penalty
+                + day_usage.get(day, 0) * 100
+                + time_label_usage.get(label, 0) * 20
+                + start_hour
+            )
+            candidates.append((score, idx, day_usage.get(day, 0), time_label_usage.get(label, 0)))
+        if not candidates:
+            return -1
+        candidates.sort(key=lambda x: (x[0], x[2], x[3], x[1]))
+        return candidates[0][1]
+
+    # Pass 1: spread across different days when possible.
     for library_item in workout_library:
         if len(plan) >= max_items:
             break
@@ -460,34 +531,54 @@ def _derive_weekly_plan(
         duration = _to_int(library_item.get("duration_minutes"), 0)
         if not lib_id or duration <= 0 or lib_id in used_library_ids:
             continue
-
-        chosen_window_index = -1
-        for idx, window in enumerate(remaining_windows):
-            if int(window["duration_minutes"]) >= duration:
-                chosen_window_index = idx
-                break
-        if chosen_window_index < 0:
+        chosen_idx = pick_window(duration, True)
+        if chosen_idx < 0:
             continue
-        window = remaining_windows.pop(chosen_window_index)
-        start_t = _parse_hh_mm(window["start_time"])
-        if not start_t:
-            continue
-        end_minutes = start_t.hour * 60 + start_t.minute + duration
-        end_t = time(end_minutes // 60, end_minutes % 60)
-        if end_t > _parse_hh_mm(window["end_time"]):
-            continue
+        window = remaining_windows.pop(chosen_idx)
+        rec_start, rec_end = choose_deterministic_start(window, duration, lib_id)
         used_library_ids.add(lib_id)
+        day_usage[window["date"]] = day_usage.get(window["date"], 0) + 1
+        time_label_usage[window["time_label"]] = time_label_usage.get(window["time_label"], 0) + 1
         plan.append(
             {
                 "id": f"plan_{len(plan)+1}",
                 "library_workout_id": lib_id,
                 "recommended_day": window["date"],
-                "recommended_start_time": window["start_time"],
-                "recommended_end_time": end_t.strftime("%H:%M"),
+                "recommended_start_time": rec_start,
+                "recommended_end_time": rec_end,
                 "recommended_time_label": window["time_label"],
                 "reason_short": "Matches your saved workout library and current free time.",
             }
         )
+
+    # Pass 2: allow same-day if needed.
+    if len(plan) < max_items:
+        for library_item in workout_library:
+            if len(plan) >= max_items:
+                break
+            lib_id = str(library_item.get("id", "")).strip()
+            duration = _to_int(library_item.get("duration_minutes"), 0)
+            if not lib_id or duration <= 0 or lib_id in used_library_ids:
+                continue
+            chosen_idx = pick_window(duration, False)
+            if chosen_idx < 0:
+                continue
+            window = remaining_windows.pop(chosen_idx)
+            rec_start, rec_end = choose_deterministic_start(window, duration, lib_id)
+            used_library_ids.add(lib_id)
+            day_usage[window["date"]] = day_usage.get(window["date"], 0) + 1
+            time_label_usage[window["time_label"]] = time_label_usage.get(window["time_label"], 0) + 1
+            plan.append(
+                {
+                    "id": f"plan_{len(plan)+1}",
+                    "library_workout_id": lib_id,
+                    "recommended_day": window["date"],
+                    "recommended_start_time": rec_start,
+                    "recommended_end_time": rec_end,
+                    "recommended_time_label": window["time_label"],
+                    "reason_short": "Matches your saved workout library and current free time.",
+                }
+            )
     return plan
 
 

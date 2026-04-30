@@ -1165,26 +1165,27 @@ select.df-input {
   border: 1px solid var(--df-border);
   border-radius: 12px;
   background: #fff;
-  padding: 16px 18px;
+  padding: 18px 22px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  gap: 12px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
 .df-workoutsSpinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid #dbeafe;
+  width: 28px;
+  height: 28px;
+  border: 3px solid #bfdbfe;
   border-top-color: #2563eb;
   border-radius: 999px;
-  animation: df-spin 0.8s linear infinite;
+  animation: df-spin 0.7s linear infinite;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12);
 }
 
 .df-workoutsLoadingText {
-  font-size: 14px;
-  color: #374151;
-  font-weight: 600;
+  font-size: 15px;
+  color: #1f2937;
+  font-weight: 700;
 }
 
 @keyframes df-spin {
