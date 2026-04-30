@@ -1153,9 +1153,22 @@ select.df-input {
 .df-workoutsLoadingOverlay {
   position: absolute;
   inset: 0;
-  z-index: 15;
-  background: rgba(255, 255, 255, 0.76);
+  z-index: 40;
+  pointer-events: all;
+}
+
+.df-workoutsLoadingShade {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: rgba(17, 24, 39, 0.2);
   backdrop-filter: blur(1px);
+}
+
+.df-workoutsLoadingCenter {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1170,17 +1183,20 @@ select.df-input {
   align-items: center;
   gap: 12px;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  position: relative;
+  z-index: 2;
 }
 
 .df-workoutsSpinner {
+  display: block;
   width: 34px;
   height: 34px;
-  border: 4px solid #93c5fd;
+  border: 4px solid rgba(59, 130, 246, 0.3);
   border-top-color: #1d4ed8;
-  border-right-color: #2563eb;
+  border-right-color: #1d4ed8;
   border-radius: 999px;
   animation: df-spin 0.65s linear infinite;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
 .df-workoutsLoadingText {

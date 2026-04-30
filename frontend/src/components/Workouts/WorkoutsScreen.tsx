@@ -428,9 +428,12 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
         {isGeneratingPlan && (
           <div className="df-workoutsLoadingOverlay" role="status" aria-live="polite" aria-label="Generating workout plan">
-            <div className="df-workoutsLoadingCard">
-              <div className="df-workoutsSpinner" aria-hidden />
-              <div className="df-workoutsLoadingText">Generating new workout plan...</div>
+            <div className="df-workoutsLoadingShade" aria-hidden />
+            <div className="df-workoutsLoadingCenter">
+              <div className="df-workoutsLoadingCard">
+                <div className="df-workoutsSpinner" aria-hidden />
+                <div className="df-workoutsLoadingText">Generating new workout plan...</div>
+              </div>
             </div>
           </div>
         )}
