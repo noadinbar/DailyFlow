@@ -130,6 +130,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [isGeneratingPlan, setIsGeneratingPlan] = React.useState<boolean>(false);
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState<boolean>(false);
   const [isSavingWeeklyPlan, setIsSavingWeeklyPlan] = React.useState<boolean>(false);
+  const [addFromLibraryWorkout, setAddFromLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
+  const [addFromLibraryDay, setAddFromLibraryDay] = React.useState<string>('');
+  const [addFromLibraryStartTime, setAddFromLibraryStartTime] = React.useState<string>('18:00');
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
@@ -300,7 +303,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     await loadWorkoutsData({ mode: 'generate', startDate: weekStartIso, endDate: weekEndIso });
   }
 
-  async function persistWeeklyPlan(nextWeeklyPlan: WeeklyPlanSuggestion[]): Promise<WeeklyPlanSuggestion[] | null> {
+  async function mutateWeeklyPlan(payload: Record<string, unknown>): Promise<WeeklyPlanSuggestion[] | null> {
     try {
       setGenerateError('');
       setIsSavingWeeklyPlan(true);
@@ -308,33 +311,30 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
       const token = await getAuthToken();
       const response = await fetch(`${baseUrl.replace(/\/$/, '')}/workouts/weekly-plan`, {
-        method: 'POST',
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          start_date: weekStartIso,
-          end_date: weekEndIso,
-          weekly_plan_suggestions: nextWeeklyPlan,
-        }),
+        body: JSON.stringify(payload),
       });
-      let payload: WeeklyPlanUpdateResponse = {};
+      let responsePayload: WeeklyPlanUpdateResponse = {};
       try {
-        payload = (await response.json()) as WeeklyPlanUpdateResponse;
+        responsePayload = (await response.json()) as WeeklyPlanUpdateResponse;
       } catch {
-        payload = {};
+        responsePayload = {};
       }
       if (!response.ok) {
         throw new Error(
-          typeof payload.message === 'string' && payload.message.trim()
-            ? payload.message
-            : `Could not save weekly plan (${response.status}).`
+          typeof responsePayload.message === 'string' && responsePayload.message.trim()
+            ? responsePayload.message
+            : `Could not update weekly plan (${response.status}).`
         );
       }
-      const savedPlan = Array.isArray(payload.weekly_plan_suggestions)
-        ? payload.weekly_plan_suggestions
-        : nextWeeklyPlan;
+      const savedPlan = Array.isArray(responsePayload.weekly_plan_suggestions)
+        ? responsePayload.weekly_plan_suggestions
+        : null;
+      if (!savedPlan) throw new Error('Weekly plan update returned invalid payload.');
       setWeeklyPlanSuggestions(savedPlan);
       return savedPlan;
     } catch (e) {
@@ -347,8 +347,37 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }
 
   async function handleRemoveWeeklyWorkout(planId: string) {
-    const next = weeklyPlanSuggestions.filter((item) => item.id !== planId);
-    await persistWeeklyPlan(next);
+    await mutateWeeklyPlan({
+      action: 'remove_plan_item',
+      week_start: weekStartIso,
+      week_end: weekEndIso,
+      plan_id: planId,
+    });
+  }
+
+  function openAddFromLibraryModal(workout: WorkoutLibraryItem) {
+    setAddFromLibraryWorkout(workout);
+    setAddFromLibraryDay(weekStartIso);
+    setAddFromLibraryStartTime('18:00');
+  }
+
+  function closeAddFromLibraryModal() {
+    setAddFromLibraryWorkout(null);
+    setAddFromLibraryDay('');
+    setAddFromLibraryStartTime('18:00');
+  }
+
+  async function handleAddFromLibrarySave() {
+    if (!addFromLibraryWorkout || !addFromLibraryDay || !addFromLibraryStartTime) return;
+    const saved = await mutateWeeklyPlan({
+      action: 'add_library_workout',
+      week_start: weekStartIso,
+      week_end: weekEndIso,
+      library_workout_id: addFromLibraryWorkout.id,
+      recommended_day: addFromLibraryDay,
+      recommended_start_time: addFromLibraryStartTime,
+    });
+    if (saved) closeAddFromLibraryModal();
   }
 
   async function toggleFavorite(workout: WorkoutLibraryItem | FavoriteWorkoutItem) {
@@ -571,7 +600,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                           {item.recommended_day} {item.recommended_start_time}-{item.recommended_end_time}
                         </div>
                         <button type="button" className="df-workoutAddBtn" title="Add to calendar" aria-label="Add to calendar">
-                          + Add
+                          +
                         </button>
                         <div className="df-weeklyPlanActions">
                           <button
@@ -698,6 +727,19 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                     >
                       ❤
                     </button>
+                    <button
+                      type="button"
+                      className="df-workoutLibraryAdd"
+                      aria-label={`Add ${item.title} to weekly plan`}
+                      title="Add to weekly plan"
+                      disabled={isSavingWeeklyPlan}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openAddFromLibraryModal(item);
+                      }}
+                    >
+                      +
+                    </button>
                   </div>
                   <div className="df-workoutTypePill">{item.workout_type}</div>
                   <div className="df-workoutMeta">
@@ -820,6 +862,76 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                     </ul>
                   </div>
                 )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addFromLibraryWorkout && (
+        <div
+          className="df-modalBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeAddFromLibraryModal();
+          }}
+        >
+          <div className="df-modalPanel df-addWeeklyModal" role="dialog" aria-modal="true" aria-label="Add workout to weekly plan">
+            <div className="df-modalHeader">
+              <div className="df-modalTitle">Add to Weekly Plan</div>
+              <button
+                type="button"
+                className="df-iconBtn"
+                onClick={closeAddFromLibraryModal}
+                aria-label="Close add workout dialog"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="df-settingsContent" style={{ display: 'grid', gap: 12 }}>
+              <div className="df-workoutMeta">
+                {addFromLibraryWorkout.title} · {addFromLibraryWorkout.duration_minutes} min
+              </div>
+              <label className="df-field">
+                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Day</div>
+                <select
+                  className="df-select"
+                  value={addFromLibraryDay}
+                  onChange={(event) => setAddFromLibraryDay(event.target.value)}
+                >
+                  {weekCards.map((card) => (
+                    <option key={card.dateIso} value={card.dateIso}>
+                      {card.dayLabel} ({card.dateIso})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="df-field">
+                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Start time</div>
+                <input
+                  className="df-input"
+                  type="time"
+                  value={addFromLibraryStartTime}
+                  onChange={(event) => setAddFromLibraryStartTime(event.target.value)}
+                />
+              </label>
+              <div className="df-weeklyPlanActions">
+                <button
+                  type="button"
+                  className="df-weeklyPlanActionBtn"
+                  disabled={!addFromLibraryDay || !addFromLibraryStartTime || isSavingWeeklyPlan}
+                  onClick={() => void handleAddFromLibrarySave()}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className="df-weeklyPlanActionBtn"
+                  disabled={isSavingWeeklyPlan}
+                  onClick={closeAddFromLibraryModal}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>

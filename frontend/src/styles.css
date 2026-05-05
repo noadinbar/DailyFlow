@@ -813,6 +813,10 @@ body {
   overflow: hidden;
 }
 
+.df-addWeeklyModal {
+  width: min(460px, 100%);
+}
+
 .df-modalHeader {
   display: flex;
   align-items: center;
