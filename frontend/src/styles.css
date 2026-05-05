@@ -1187,16 +1187,14 @@ select.df-input {
   z-index: 2;
 }
 
-.df-workoutsSpinner {
-  display: block;
-  width: 34px;
-  height: 34px;
-  border: 4px solid rgba(59, 130, 246, 0.3);
-  border-top-color: #1d4ed8;
-  border-right-color: #1d4ed8;
-  border-radius: 999px;
-  animation: df-spin 0.65s linear infinite;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+.df-workoutsBasicSpinner {
+  width: 44px;
+  height: 44px;
+  border: 5px solid #c7d2fe;
+  border-top: 5px solid #1d4ed8;
+  border-radius: 50%;
+  animation: df-workouts-basic-spin 0.9s linear infinite;
+  flex: 0 0 auto;
 }
 
 .df-workoutsLoadingText {
@@ -1205,7 +1203,7 @@ select.df-input {
   font-weight: 700;
 }
 
-@keyframes df-spin {
+@keyframes df-workouts-basic-spin {
   from {
     transform: rotate(0deg);
   }

@@ -431,7 +431,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             <div className="df-workoutsLoadingShade" aria-hidden />
             <div className="df-workoutsLoadingCenter">
               <div className="df-workoutsLoadingCard">
-                <div className="df-workoutsSpinner" aria-hidden />
+                <div className="df-workoutsBasicSpinner" aria-hidden />
                 <div className="df-workoutsLoadingText">Generating new workout plan...</div>
               </div>
             </div>
