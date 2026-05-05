@@ -159,6 +159,31 @@ def _to_int(value: Any, default: int) -> int:
     return default
 
 
+def _normalize_type_key(value: Any) -> str:
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
+def _duration_bucket(duration_minutes: int) -> str:
+    if duration_minutes <= 20:
+        return "10_20"
+    if duration_minutes <= 40:
+        return "20_40"
+    return "40_60"
+
+
+def _favorite_key_from_item(item: Dict[str, Any]) -> str:
+    material = "|".join(
+        [
+            str(item.get("title", "")).strip().lower(),
+            _normalize_type_key(item.get("workout_type")),
+            str(_to_int(item.get("duration_minutes"), 0)),
+            str(item.get("intensity", "")).strip().lower(),
+            str(item.get("location", "")).strip().lower(),
+        ]
+    )
+    return sha1(material.encode("utf-8")).hexdigest()
+
+
 def _parse_hh_mm(value: str) -> Optional[time]:
     if not isinstance(value, str):
         return None
@@ -429,6 +454,44 @@ def _load_saved_library(user_id: str) -> Tuple[List[Dict[str, Any]], str]:
     return cleaned, generated_at
 
 
+def _normalize_saved_favorites(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        title = str(entry.get("title", "")).strip()
+        workout_type = str(entry.get("workout_type", "")).strip()
+        duration_minutes = _to_int(entry.get("duration_minutes"), 0)
+        if not title or not workout_type or duration_minutes <= 0:
+            continue
+        intensity = str(entry.get("intensity", "")).strip() or "Moderate"
+        location = str(entry.get("location", "")).strip() or "Home"
+        summary_short = str(entry.get("summary_short", "")).strip() or f"{title} workout."
+        workout_flow = entry.get("workout_flow") if isinstance(entry.get("workout_flow"), dict) else {}
+        normalized = {
+            "favorite_key": str(entry.get("favorite_key", "")).strip(),
+            "id": str(entry.get("id", "")).strip() or "",
+            "title": title,
+            "workout_type": workout_type,
+            "duration_minutes": duration_minutes,
+            "duration_bucket": str(entry.get("duration_bucket", "")).strip() or _duration_bucket(duration_minutes),
+            "intensity": intensity,
+            "location": location,
+            "summary_short": summary_short,
+            "workout_flow": workout_flow,
+        }
+        favorite_key = normalized["favorite_key"] or _favorite_key_from_item(normalized)
+        if favorite_key in seen:
+            continue
+        normalized["favorite_key"] = favorite_key
+        seen.add(favorite_key)
+        cleaned.append(normalized)
+    return cleaned
+
+
 def _load_saved_workouts_item(user_id: str) -> Dict[str, Any]:
     table = _workout_library_table()
     response = table.get_item(Key={"user_id": user_id})
@@ -694,6 +757,7 @@ def _response_payload(
     *,
     period: Dict[str, str],
     workout_library: List[Dict[str, Any]],
+    favorite_workouts: List[Dict[str, Any]],
     weekly_plan_suggestions: List[Dict[str, Any]],
     generated_at: str,
     library_source: str,
@@ -701,6 +765,7 @@ def _response_payload(
     return {
         "period": period,
         "workout_library": workout_library,
+        "favorite_workouts": favorite_workouts,
         "weekly_plan_suggestions": weekly_plan_suggestions,
         "metadata": {
             "generated_at": generated_at or _iso_utc_now(),
@@ -719,6 +784,7 @@ def _handle_common_weekly_derivation(
     workout_library: List[Dict[str, Any]],
     generated_at: str,
     library_source: str,
+    favorite_workouts: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
     preferences = _read_user_preferences(user_id)
@@ -737,6 +803,7 @@ def _handle_common_weekly_derivation(
     return _response_payload(
         period=period,
         workout_library=workout_library,
+        favorite_workouts=favorite_workouts,
         weekly_plan_suggestions=weekly_plan,
         generated_at=generated_at,
         library_source=library_source,
@@ -769,11 +836,13 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
         saved_item = _load_saved_workouts_item(user_id)
         workout_library, generated_at = _load_saved_library(user_id)
+        favorite_workouts = _normalize_saved_favorites(saved_item.get("favorite_workouts"))
 
         if not workout_library:
             payload = _response_payload(
                 period=period,
                 workout_library=[],
+                favorite_workouts=favorite_workouts,
                 weekly_plan_suggestions=[],
                 generated_at=generated_at,
                 library_source="saved",
@@ -809,6 +878,7 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             payload = _response_payload(
                 period=period,
                 workout_library=workout_library,
+                favorite_workouts=favorite_workouts,
                 weekly_plan_suggestions=saved_weekly_plan,
                 generated_at=generated_at,
                 library_source="saved",
@@ -832,6 +902,7 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         payload = _response_payload(
             period=period,
             workout_library=workout_library,
+            favorite_workouts=favorite_workouts,
             weekly_plan_suggestions=weekly_plan,
             generated_at=generated_at or plan_updated_at,
             library_source="saved",

@@ -137,6 +137,12 @@ Workouts / AI product direction:
   3. OpenAI integration
   4. acceptance / scheduling flow
 - Do not implement unrelated Meals, Stress, Overview, or Apple Watch logic as part of Workouts work unless explicitly requested
+- Generated workout library items should include practical workout_flow content, not vague placeholders
+- Assume the user may not know how to perform the workout alone
+- Workout details should explain what to actually do in a clear, beginner-friendly, actionable way
+- Walking workouts should include concrete pacing structure when relevant
+- Strength / Pilates / Mobility / Yoga style workouts should include specific movements or exercises where appropriate
+
 
 Important:
 - Work incrementally and in small steps

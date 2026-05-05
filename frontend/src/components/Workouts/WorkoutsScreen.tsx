@@ -34,11 +34,24 @@ type WorkoutLibraryItem = {
   };
 };
 
+type FavoriteWorkoutItem = WorkoutLibraryItem & {
+  favorite_key: string;
+  duration_bucket?: string;
+};
+
 type SuggestionsResponse = {
   period?: { start_date?: string; end_date?: string };
   weekly_plan_suggestions?: WeeklyPlanSuggestion[];
   workout_library?: WorkoutLibraryItem[];
+  favorite_workouts?: FavoriteWorkoutItem[];
   metadata?: { generation_warning?: string; library_source?: string };
+  message?: string;
+};
+
+type FavoriteToggleResponse = {
+  favorite_workouts?: FavoriteWorkoutItem[];
+  toggled_favorite_key?: string;
+  is_favorite?: boolean;
   message?: string;
 };
 
@@ -50,6 +63,32 @@ function pad2(value: number): string {
 
 function toIsoDateLocal(value: Date): string {
   return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+}
+
+function normalizeTypeKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function getDurationBucket(durationMinutes: number): string {
+  if (durationMinutes <= 20) return '10_20';
+  if (durationMinutes <= 40) return '20_40';
+  return '40_60';
+}
+
+function favoriteSignature(item: {
+  title: string;
+  workout_type: string;
+  duration_minutes: number;
+  intensity: string;
+  location: string;
+}): string {
+  return [
+    item.title.trim().toLowerCase(),
+    normalizeTypeKey(item.workout_type),
+    String(item.duration_minutes),
+    item.intensity.trim().toLowerCase(),
+    item.location.trim().toLowerCase(),
+  ].join('|');
 }
 
 function startOfWeek(value: Date): Date {
@@ -78,7 +117,12 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [weekStartDate, setWeekStartDate] = React.useState<Date>(() => startOfWeek(new Date()));
   const [weeklyPlanSuggestions, setWeeklyPlanSuggestions] = React.useState<WeeklyPlanSuggestion[]>([]);
   const [workoutLibrary, setWorkoutLibrary] = React.useState<WorkoutLibraryItem[]>([]);
+  const [favoriteWorkouts, setFavoriteWorkouts] = React.useState<FavoriteWorkoutItem[]>([]);
+  const [isFavoritesMode, setIsFavoritesMode] = React.useState<boolean>(false);
+  const [selectedTypeFilters, setSelectedTypeFilters] = React.useState<string[]>([]);
+  const [selectedDurationFilters, setSelectedDurationFilters] = React.useState<string[]>([]);
   const [isGeneratingPlan, setIsGeneratingPlan] = React.useState<boolean>(false);
+  const [isTogglingFavorite, setIsTogglingFavorite] = React.useState<boolean>(false);
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
@@ -103,20 +147,61 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
     return grouped;
   }, [weeklyPlanSuggestions]);
-  const selectedWorkoutTypes = React.useMemo(() => {
-    return Array.from(new Set(workoutLibrary.map((item) => item.workout_type))).slice(0, 6);
-  }, [workoutLibrary]);
-  const selectedDurationBuckets = React.useMemo(() => {
+  const favoriteKeySet = React.useMemo(
+    () => new Set(favoriteWorkouts.map((item) => item.favorite_key)),
+    [favoriteWorkouts]
+  );
+  const favoriteSignatureSet = React.useMemo(
+    () =>
+      new Set(
+        favoriteWorkouts.map((item) =>
+          favoriteSignature({
+            title: item.title,
+            workout_type: item.workout_type,
+            duration_minutes: item.duration_minutes,
+            intensity: item.intensity,
+            location: item.location,
+          })
+        )
+      ),
+    [favoriteWorkouts]
+  );
+  const availableWorkoutTypes = React.useMemo(() => {
+    const all = [...workoutLibrary, ...favoriteWorkouts];
+    return Array.from(new Set(all.map((item) => item.workout_type))).slice(0, 12);
+  }, [workoutLibrary, favoriteWorkouts]);
+  const availableDurationBuckets = React.useMemo(() => {
+    const all = [...workoutLibrary, ...favoriteWorkouts];
     return Array.from(
       new Set(
-        workoutLibrary.map((item) => {
-          if (item.duration_minutes <= 20) return '10-20';
-          if (item.duration_minutes <= 40) return '20-40';
-          return '40-60';
-        })
+        all.map((item) =>
+          'duration_bucket' in item && typeof item.duration_bucket === 'string'
+            ? item.duration_bucket
+            : getDurationBucket(item.duration_minutes)
+        )
       )
-    ).slice(0, 6);
-  }, [workoutLibrary]);
+    ).slice(0, 3);
+  }, [workoutLibrary, favoriteWorkouts]);
+  const displayedLibrary = React.useMemo(() => {
+    const base = isFavoritesMode ? favoriteWorkouts : workoutLibrary;
+    return base.filter((item) => {
+      const typeMatch =
+        selectedTypeFilters.length === 0 || selectedTypeFilters.includes(item.workout_type);
+      const durationBucket =
+        'duration_bucket' in item && typeof item.duration_bucket === 'string'
+          ? item.duration_bucket
+          : getDurationBucket(item.duration_minutes);
+      const durationMatch =
+        selectedDurationFilters.length === 0 || selectedDurationFilters.includes(durationBucket);
+      return typeMatch && durationMatch;
+    });
+  }, [
+    isFavoritesMode,
+    favoriteWorkouts,
+    workoutLibrary,
+    selectedTypeFilters,
+    selectedDurationFilters,
+  ]);
   const libraryById = React.useMemo(() => {
     const map = new Map<string, WorkoutLibraryItem>();
     for (const item of workoutLibrary) {
@@ -181,8 +266,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
       const weekly = Array.isArray(payload.weekly_plan_suggestions) ? payload.weekly_plan_suggestions : [];
       const library = Array.isArray(payload.workout_library) ? payload.workout_library : [];
+      const favorites = Array.isArray(payload.favorite_workouts) ? payload.favorite_workouts : [];
       setWeeklyPlanSuggestions(weekly);
       setWorkoutLibrary(library);
+      setFavoriteWorkouts(favorites);
       if (weekly.length === 0 && library.length === 0) {
         setGenerateHint('No saved workout library yet. Click Generate plan.');
       } else if (typeof payload.metadata?.generation_warning === 'string' && payload.metadata.generation_warning) {
@@ -204,6 +291,70 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
   async function handleGeneratePlanClick() {
     await loadWorkoutsData({ mode: 'generate', startDate: weekStartIso, endDate: weekEndIso });
+  }
+
+  async function toggleFavorite(workout: WorkoutLibraryItem | FavoriteWorkoutItem) {
+    try {
+      setGenerateError('');
+      setIsTogglingFavorite(true);
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+      const token = await getAuthToken();
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/workouts/favorites`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          workout: {
+            id: workout.id,
+            title: workout.title,
+            workout_type: workout.workout_type,
+            duration_minutes: workout.duration_minutes,
+            duration_bucket:
+              'duration_bucket' in workout && typeof workout.duration_bucket === 'string'
+                ? workout.duration_bucket
+                : getDurationBucket(workout.duration_minutes),
+            intensity: workout.intensity,
+            location: workout.location,
+            summary_short: workout.summary_short,
+            workout_flow: workout.workout_flow || {},
+          },
+        }),
+      });
+      let payload: FavoriteToggleResponse = {};
+      try {
+        payload = (await response.json()) as FavoriteToggleResponse;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not toggle favorite (${response.status}).`
+        );
+      }
+      setFavoriteWorkouts(Array.isArray(payload.favorite_workouts) ? payload.favorite_workouts : []);
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setGenerateError(typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to toggle favorite.');
+    } finally {
+      setIsTogglingFavorite(false);
+    }
+  }
+
+  function toggleTypeFilter(type: string) {
+    setSelectedTypeFilters((prev) =>
+      prev.includes(type) ? prev.filter((value) => value !== type) : [...prev, type]
+    );
+  }
+
+  function toggleDurationFilter(bucket: string) {
+    setSelectedDurationFilters((prev) =>
+      prev.includes(bucket) ? prev.filter((value) => value !== bucket) : [...prev, bucket]
+    );
   }
 
   function handleThisWeekClick() {
@@ -360,13 +511,31 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           </section>
 
           <section className="df-workoutsSection">
-            <h2 className="df-workoutsTitle">Workout Library</h2>
+            <div className="df-workoutsSectionHeader">
+              <h2 className="df-workoutsTitle">Workout Library</h2>
+              <button
+                type="button"
+                className={`df-workoutFavoriteToggle${isFavoritesMode ? ' df-workoutFavoriteToggleActive' : ''}`}
+                onClick={() => setIsFavoritesMode((prev) => !prev)}
+                aria-label={isFavoritesMode ? 'Show all workouts' : 'Show favorite workouts only'}
+                title={isFavoritesMode ? 'Showing favorites' : 'Show favorites'}
+              >
+                ♥
+              </button>
+            </div>
             <div className="df-workoutFilters">
               <div className="df-workoutFilterGroup">
                 <span className="df-workoutFilterLabel">Type</span>
-                {selectedWorkoutTypes.length > 0 ? (
-                  selectedWorkoutTypes.map((type) => (
-                    <button key={type} type="button" className="df-workoutFilterChip">
+                {availableWorkoutTypes.length > 0 ? (
+                  availableWorkoutTypes.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className={`df-workoutFilterChip${
+                        selectedTypeFilters.includes(type) ? ' df-workoutFilterChipActive' : ''
+                      }`}
+                      onClick={() => toggleTypeFilter(type)}
+                    >
                       {type.replace(/_/g, ' ')}
                     </button>
                   ))
@@ -376,10 +545,17 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               </div>
               <div className="df-workoutFilterGroup">
                 <span className="df-workoutFilterLabel">Duration</span>
-                {selectedDurationBuckets.length > 0 ? (
-                  selectedDurationBuckets.map((bucket) => (
-                    <button key={bucket} type="button" className="df-workoutFilterChip">
-                      {bucket} min
+                {availableDurationBuckets.length > 0 ? (
+                  availableDurationBuckets.map((bucket) => (
+                    <button
+                      key={bucket}
+                      type="button"
+                      className={`df-workoutFilterChip${
+                        selectedDurationFilters.includes(bucket) ? ' df-workoutFilterChipActive' : ''
+                      }`}
+                      onClick={() => toggleDurationFilter(bucket)}
+                    >
+                      {bucket.replace('_', '-')} min
                     </button>
                   ))
                 ) : (
@@ -388,7 +564,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               </div>
             </div>
             <div className="df-workoutLibraryGrid">
-              {workoutLibrary.map((item) => (
+              {displayedLibrary.map((item) => (
                 <article
                   key={item.id}
                   className="df-workoutLibraryCard df-workoutLibraryCardClickable"
@@ -405,8 +581,28 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 >
                   <div className="df-workoutLibraryCardTop">
                     <h3 className="df-workoutLibraryTitle">{item.title}</h3>
-                    <button type="button" className="df-workoutLibraryAdd" aria-label={`Add ${item.title}`}>
-                      +
+                    <button
+                      type="button"
+                      className={`df-workoutFavoriteBtn${
+                        favoriteKeySet.has((item as FavoriteWorkoutItem).favorite_key) ||
+                        favoriteSignatureSet.has(favoriteSignature(item))
+                          ? ' df-workoutFavoriteBtnActive'
+                          : ''
+                      }`}
+                      aria-label={`Toggle favorite for ${item.title}`}
+                      title={
+                        favoriteKeySet.has((item as FavoriteWorkoutItem).favorite_key) ||
+                        favoriteSignatureSet.has(favoriteSignature(item))
+                          ? 'Unfavorite'
+                          : 'Favorite'
+                      }
+                      disabled={isTogglingFavorite}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void toggleFavorite(item);
+                      }}
+                    >
+                      ♥
                     </button>
                   </div>
                   <div className="df-workoutTypePill">{item.workout_type}</div>
@@ -418,9 +614,11 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 </article>
               ))}
             </div>
-            {!isGeneratingPlan && workoutLibrary.length === 0 && (
+            {!isGeneratingPlan && displayedLibrary.length === 0 && (
               <div className="df-calendarLegend" style={{ color: '#6b7280', marginBottom: 0 }}>
-                Generate a plan to see workout library suggestions.
+                {isFavoritesMode
+                  ? 'No favorite workouts match the current filters.'
+                  : 'No workouts match the current filters.'}
               </div>
             )}
           </section>

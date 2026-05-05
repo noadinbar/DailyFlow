@@ -227,6 +227,63 @@ def _to_int(value: Any, default: int) -> int:
     return default
 
 
+def _duration_bucket(duration_minutes: int) -> str:
+    if duration_minutes <= 20:
+        return "10_20"
+    if duration_minutes <= 40:
+        return "20_40"
+    return "40_60"
+
+
+def _favorite_key_from_item(item: Dict[str, Any]) -> str:
+    material = "|".join(
+        [
+            str(item.get("title", "")).strip().lower(),
+            _normalize_type_key(item.get("workout_type")),
+            str(_to_int(item.get("duration_minutes"), 0)),
+            str(item.get("intensity", "")).strip().lower(),
+            str(item.get("location", "")).strip().lower(),
+        ]
+    )
+    return sha1(material.encode("utf-8")).hexdigest()
+
+
+def _normalize_saved_favorites(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        title = str(entry.get("title", "")).strip()
+        workout_type = str(entry.get("workout_type", "")).strip()
+        duration_minutes = _to_int(entry.get("duration_minutes"), 0)
+        if not title or not workout_type or duration_minutes <= 0:
+            continue
+        intensity = str(entry.get("intensity", "")).strip() or "Moderate"
+        location = str(entry.get("location", "")).strip() or "Home"
+        normalized = {
+            "favorite_key": str(entry.get("favorite_key", "")).strip(),
+            "id": str(entry.get("id", "")).strip() or "",
+            "title": title,
+            "workout_type": workout_type,
+            "duration_minutes": duration_minutes,
+            "duration_bucket": str(entry.get("duration_bucket", "")).strip() or _duration_bucket(duration_minutes),
+            "intensity": intensity,
+            "location": location,
+            "summary_short": str(entry.get("summary_short", "")).strip() or f"{title} workout.",
+            "workout_flow": entry.get("workout_flow") if isinstance(entry.get("workout_flow"), dict) else {},
+        }
+        favorite_key = normalized["favorite_key"] or _favorite_key_from_item(normalized)
+        if favorite_key in seen:
+            continue
+        normalized["favorite_key"] = favorite_key
+        seen.add(favorite_key)
+        cleaned.append(normalized)
+    return cleaned
+
+
 def _normalize_generated_library(raw: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw, list):
         return []
@@ -248,14 +305,13 @@ def _normalize_generated_library(raw: Any) -> List[Dict[str, Any]]:
         location = str(entry.get("location", "")).strip() or "Home"
         summary_short = str(entry.get("summary_short", "")).strip() or f"{title} workout."
         workout_flow = entry.get("workout_flow")
-        if not isinstance(workout_flow, dict):
-            workout_flow = {
-                "summary": summary_short,
-                "warmup_steps": [],
-                "main_steps": [],
-                "cooldown_steps": [],
-                "notes": [],
-            }
+        if _needs_flow_enrichment(workout_flow):
+            workout_flow = _build_concrete_workout_flow(
+                title=title,
+                workout_type_key=workout_type,
+                duration_minutes=duration,
+                intensity=intensity,
+            )
         cleaned.append(
             {
                 "id": f"lib_{index}",
@@ -277,6 +333,168 @@ def _normalize_type_key(value: str) -> str:
 
 def _type_display_name(type_key: str) -> str:
     return type_key.replace("_", " ").title()
+
+
+def _is_actionable_line(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    generic_tokens = [
+        "main sequence",
+        "main walking sequence",
+        "main pilates sequence",
+        "cooldown and stretch",
+        "light warm-up",
+        "adjust pace to fitness level",
+        " flow.",
+    ]
+    if any(token in lowered for token in generic_tokens):
+        return False
+    detail_markers = ["min", "minutes", "sec", "seconds", "reps", "sets", "rest", "repeat", " x "]
+    return any(marker in lowered for marker in detail_markers) or len(text) >= 28
+
+
+def _needs_flow_enrichment(workout_flow: Any) -> bool:
+    if not isinstance(workout_flow, dict):
+        return True
+    for key in ["warmup_steps", "main_steps", "cooldown_steps"]:
+        steps = workout_flow.get(key)
+        if not isinstance(steps, list) or not steps:
+            return True
+        if sum(1 for step in steps if _is_actionable_line(step)) == 0:
+            return True
+    return False
+
+
+def _walking_style_flow(
+    *, title: str, duration_minutes: int, intensity: str, workout_type_key: str
+) -> Dict[str, Any]:
+    is_running = workout_type_key == "running"
+    movement = "jog" if is_running else "walk"
+    easy = "easy jog" if is_running else "easy walk"
+    hard = "steady run pace" if is_running else "brisk walk pace"
+
+    warmup_minutes = 5 if duration_minutes >= 25 else 4
+    cooldown_minutes = 5 if duration_minutes >= 25 else 4
+    main_minutes = max(8, duration_minutes - warmup_minutes - cooldown_minutes)
+    harder = "high" in intensity.lower() or is_running
+    block_hard = 3 if harder and main_minutes >= 12 else 2
+    block_recovery = 1
+    repeats = max(2, main_minutes // (block_hard + block_recovery))
+    used_main = repeats * (block_hard + block_recovery)
+    leftover = max(0, main_minutes - used_main)
+
+    main_steps = [f"Repeat {repeats} rounds: {block_hard} min {hard}, {block_recovery} min recovery {easy}."]
+    if leftover > 0:
+        main_steps.append(f"Finish with {leftover} min at comfortable {movement} pace.")
+    main_steps.append("Keep posture tall, relax shoulders, and maintain steady breathing.")
+
+    return {
+        "summary": f"{title}: beginner-friendly paced {movement} workout with clear intervals.",
+        "warmup_steps": [
+            f"{warmup_minutes} min {easy}.",
+            "Add 20-30 sec each of shoulder rolls and ankle circles during warmup.",
+        ],
+        "main_steps": main_steps,
+        "cooldown_steps": [
+            f"{cooldown_minutes} min very easy {movement} pace.",
+            "30 sec calf stretch and 30 sec quad stretch per side.",
+        ],
+        "notes": [
+            "Use the talk test: you should be able to say short sentences.",
+            "If pain appears, slow down and switch to an easy walk.",
+        ],
+    }
+
+
+def _movement_style_flow(
+    *, title: str, duration_minutes: int, intensity: str, workout_type_key: str
+) -> Dict[str, Any]:
+    intensity_lower = intensity.lower()
+    is_light = "light" in intensity_lower
+    is_high = "high" in intensity_lower
+
+    if workout_type_key in ["strength", "gym", "home_workouts"]:
+        rounds = 2 if duration_minutes <= 25 else 3
+        if is_high and duration_minutes >= 35:
+            rounds = 4
+        return {
+            "summary": f"{title}: full-body beginner strength with clear sets, reps, and rest.",
+            "warmup_steps": [
+                "2 min marching in place with arm circles.",
+                "8 bodyweight squats, 8 hip hinges, 6 incline push-ups.",
+            ],
+            "main_steps": [
+                f"Do {rounds} rounds: 10 squats, 8 incline push-ups, 10 glute bridges, 8 reverse lunges per leg.",
+                "Rest 45-60 sec between rounds.",
+                "Finish with plank hold 20-30 sec x 2 sets, rest 30 sec.",
+            ],
+            "cooldown_steps": [
+                "30 sec hamstring stretch and 30 sec chest stretch per side.",
+                "1 min lying breathing: inhale 4 sec, exhale 6 sec.",
+            ],
+            "notes": [
+                "Move slowly and keep form clean over speed.",
+                "If needed, reduce each exercise by 2-3 reps.",
+            ],
+        }
+
+    if workout_type_key in ["pilates", "mobility", "stretching", "yoga"]:
+        holds = 30 if is_light else 40
+        rounds = 2 if duration_minutes <= 25 else 3
+        return {
+            "summary": f"{title}: guided low-impact flow for control, mobility, and posture.",
+            "warmup_steps": [
+                "1 min diaphragmatic breathing in seated position.",
+                "6 cat-cow reps and 6 thread-the-needle reps per side.",
+            ],
+            "main_steps": [
+                f"Complete {rounds} rounds: dead bug 8 reps/side, glute bridge 10 reps, bird-dog 8 reps/side.",
+                f"Then hold low lunge stretch {holds} sec per side and downward dog {holds} sec.",
+                "Rest 30 sec between rounds.",
+            ],
+            "cooldown_steps": [
+                "Figure-4 stretch 30 sec per side, then child's pose 60 sec.",
+                "Finish with 1 min slow nasal breathing while lying down.",
+            ],
+            "notes": [
+                "Work in pain-free range and focus on controlled movement.",
+                "Use a wall/chair for balance support when needed.",
+            ],
+        }
+
+    return {
+        "summary": f"{title}: simple guided session with clear step-by-step structure.",
+        "warmup_steps": ["3 min easy warmup movement (march in place or easy walk)."],
+        "main_steps": [
+            "3 rounds: 40 sec effort + 20 sec rest for squats, wall push-ups, and hip hinges.",
+            "Rest 60 sec between rounds.",
+        ],
+        "cooldown_steps": ["3-5 min easy cooldown and gentle full-body stretching."],
+        "notes": ["Keep effort moderate and stop if you feel pain."],
+    }
+
+
+def _build_concrete_workout_flow(
+    *, title: str, workout_type_key: str, duration_minutes: int, intensity: str
+) -> Dict[str, Any]:
+    key = _normalize_type_key(workout_type_key)
+    if key in ["walking", "running"]:
+        return _walking_style_flow(
+            title=title,
+            duration_minutes=duration_minutes,
+            intensity=intensity,
+            workout_type_key=key,
+        )
+    return _movement_style_flow(
+        title=title,
+        duration_minutes=duration_minutes,
+        intensity=intensity,
+        workout_type_key=key,
+    )
 
 
 def _variant_templates_for_type(type_key: str) -> List[Tuple[str, int, str, str]]:
@@ -351,13 +569,12 @@ def _make_library_item(
         "intensity": intensity,
         "location": location,
         "summary_short": summary_short,
-        "workout_flow": {
-            "summary": f"{title} flow.",
-            "warmup_steps": ["Light warm-up 3-5 minutes"],
-            "main_steps": [f"Main {display_type.lower()} sequence"],
-            "cooldown_steps": ["Cooldown and stretch"],
-            "notes": ["Adjust pace to fitness level"],
-        },
+        "workout_flow": _build_concrete_workout_flow(
+            title=title,
+            workout_type_key=display_type,
+            duration_minutes=duration_minutes,
+            intensity=intensity,
+        ),
     }
 
 
@@ -520,13 +737,28 @@ def _read_user_preferences(user_id: str) -> Dict[str, Any]:
     }
 
 
-def _save_library(user_id: str, workout_library: List[Dict[str, Any]], generated_at: str) -> None:
+def _load_saved_workouts_item(user_id: str) -> Dict[str, Any]:
+    table = _workout_library_table()
+    response = table.get_item(Key={"user_id": user_id})
+    item = response.get("Item") if isinstance(response, dict) else None
+    if not isinstance(item, dict):
+        return {}
+    return item
+
+
+def _save_library(
+    user_id: str,
+    workout_library: List[Dict[str, Any]],
+    generated_at: str,
+    favorite_workouts: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     table = _workout_library_table()
     table.put_item(
         Item={
             "user_id": user_id,
             "generated_at": generated_at,
             "workout_library": workout_library,
+            "favorite_workouts": favorite_workouts or [],
             "updated_at": _iso_utc_now(),
         }
     )
@@ -540,6 +772,7 @@ def _save_library_with_current_week_plan(
     week_start: str,
     week_end: str,
     weekly_plan: List[Dict[str, Any]],
+    favorite_workouts: List[Dict[str, Any]],
     busyblocks_signature: str,
     library_signature: str,
 ) -> str:
@@ -550,6 +783,7 @@ def _save_library_with_current_week_plan(
             "user_id": user_id,
             "generated_at": generated_at,
             "workout_library": workout_library,
+            "favorite_workouts": favorite_workouts,
             "current_week_plan_week_start": week_start,
             "current_week_plan_week_end": week_end,
             "current_week_plan": weekly_plan,
@@ -904,6 +1138,7 @@ def _response_payload(
     *,
     period: Dict[str, str],
     workout_library: List[Dict[str, Any]],
+    favorite_workouts: List[Dict[str, Any]],
     weekly_plan_suggestions: List[Dict[str, Any]],
     generated_at: str,
     library_source: str,
@@ -911,6 +1146,7 @@ def _response_payload(
     return {
         "period": period,
         "workout_library": workout_library,
+        "favorite_workouts": favorite_workouts,
         "weekly_plan_suggestions": weekly_plan_suggestions,
         "metadata": {
             "generated_at": generated_at or _iso_utc_now(),
@@ -927,6 +1163,7 @@ def _handle_common_weekly_derivation(
     start_date_value: date,
     end_date_value: date,
     workout_library: List[Dict[str, Any]],
+    favorite_workouts: List[Dict[str, Any]],
     generated_at: str,
     library_source: str,
 ) -> Dict[str, Any]:
@@ -947,6 +1184,7 @@ def _handle_common_weekly_derivation(
     return _response_payload(
         period=period,
         workout_library=workout_library,
+        favorite_workouts=favorite_workouts,
         weekly_plan_suggestions=weekly_plan,
         generated_at=generated_at,
         library_source=library_source,
@@ -1001,13 +1239,12 @@ def _fallback_library(preferences: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "intensity": "Moderate",
                     "location": "Home",
                     "summary_short": f"{clean_type.title()} in {duration} minutes.",
-                    "workout_flow": {
-                        "summary": f"{title} flow.",
-                        "warmup_steps": ["Light warm-up 3-5 minutes"],
-                        "main_steps": [f"Main {clean_type} sequence"],
-                        "cooldown_steps": ["Cooldown and stretch"],
-                        "notes": ["Adjust pace to fitness level"],
-                    },
+                    "workout_flow": _build_concrete_workout_flow(
+                        title=title,
+                        workout_type_key=clean_type,
+                        duration_minutes=duration,
+                        intensity="Moderate",
+                    ),
                 }
             )
             counter += 1
@@ -1037,6 +1274,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return _json_response(500, {"message": "BusyBlocks schema mismatch. Expected PK user_id, SK block_key."})
         if not _workout_library_schema_ok():
             return _json_response(500, {"message": "WorkoutLibrary schema mismatch. Expected PK user_id only."})
+        existing_item = _load_saved_workouts_item(user_id)
+        favorite_workouts = _normalize_saved_favorites(existing_item.get("favorite_workouts"))
         preferences = _read_user_preferences(user_id)
         workout_library, generation_warning = _generate_library_from_openai(preferences)
         if not workout_library:
@@ -1057,12 +1296,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             week_start=start_date_value.isoformat(),
             week_end=end_date_value.isoformat(),
             weekly_plan=weekly_plan,
+            favorite_workouts=favorite_workouts,
             busyblocks_signature=busy_sig,
             library_signature=lib_sig,
         )
         payload = _response_payload(
             period={"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()},
             workout_library=workout_library,
+            favorite_workouts=favorite_workouts,
             weekly_plan_suggestions=weekly_plan,
             generated_at=generated_at or plan_updated_at,
             library_source="generated",

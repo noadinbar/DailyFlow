@@ -1082,6 +1082,12 @@ select.df-input {
   font-weight: 600;
 }
 
+.df-workoutFilterChipActive {
+  background: #eef2ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
 .df-workoutLibraryGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
@@ -1129,6 +1135,44 @@ select.df-input {
   border-radius: 999px;
   font-size: 18px;
   line-height: 1;
+}
+
+.df-workoutFavoriteToggle {
+  appearance: none;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #9ca3af;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.df-workoutFavoriteToggleActive {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.df-workoutFavoriteBtn {
+  appearance: none;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #9ca3af;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.df-workoutFavoriteBtnActive {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fff1f2;
 }
 
 .df-workoutsTopbarUser {
