@@ -133,6 +133,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [addFromLibraryWorkout, setAddFromLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
   const [addFromLibraryDay, setAddFromLibraryDay] = React.useState<string>('');
   const [addFromLibraryStartTime, setAddFromLibraryStartTime] = React.useState<string>('18:00');
+  const [addFromLibraryError, setAddFromLibraryError] = React.useState<string>('');
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
@@ -303,7 +304,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     await loadWorkoutsData({ mode: 'generate', startDate: weekStartIso, endDate: weekEndIso });
   }
 
-  async function mutateWeeklyPlan(payload: Record<string, unknown>): Promise<WeeklyPlanSuggestion[] | null> {
+  async function mutateWeeklyPlan(
+    payload: Record<string, unknown>,
+    options?: { onError?: (message: string) => void; suppressGlobalError?: boolean }
+  ): Promise<WeeklyPlanSuggestion[] | null> {
     try {
       setGenerateError('');
       setIsSavingWeeklyPlan(true);
@@ -339,7 +343,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       return savedPlan;
     } catch (e) {
       const anyErr = e as { message?: string };
-      setGenerateError(typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to save weekly plan.');
+      const message =
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to save weekly plan.';
+      if (options?.onError) options.onError(message);
+      if (!options?.suppressGlobalError) setGenerateError(message);
       return null;
     } finally {
       setIsSavingWeeklyPlan(false);
@@ -356,12 +363,14 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }
 
   function openAddFromLibraryModal(workout: WorkoutLibraryItem) {
+    setAddFromLibraryError('');
     setAddFromLibraryWorkout(workout);
     setAddFromLibraryDay(weekStartIso);
     setAddFromLibraryStartTime('18:00');
   }
 
   function closeAddFromLibraryModal() {
+    setAddFromLibraryError('');
     setAddFromLibraryWorkout(null);
     setAddFromLibraryDay('');
     setAddFromLibraryStartTime('18:00');
@@ -369,6 +378,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
   async function handleAddFromLibrarySave() {
     if (!addFromLibraryWorkout || !addFromLibraryDay || !addFromLibraryStartTime) return;
+    setAddFromLibraryError('');
     const saved = await mutateWeeklyPlan({
       action: 'add_library_workout',
       week_start: weekStartIso,
@@ -376,7 +386,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       library_workout_id: addFromLibraryWorkout.id,
       recommended_day: addFromLibraryDay,
       recommended_start_time: addFromLibraryStartTime,
-    });
+    }, { onError: setAddFromLibraryError, suppressGlobalError: true });
     if (saved) closeAddFromLibraryModal();
   }
 
@@ -599,13 +609,21 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         <div className="df-workoutSlot">
                           {item.recommended_day} {item.recommended_start_time}-{item.recommended_end_time}
                         </div>
-                        <button type="button" className="df-workoutAddBtn" title="Add to calendar" aria-label="Add to calendar">
-                          +
-                        </button>
-                        <div className="df-weeklyPlanActions">
+                        <div className="df-weeklyPlanControls">
                           <button
                             type="button"
-                            className="df-weeklyPlanActionBtn df-weeklyPlanActionBtnDanger"
+                            className="df-weeklyPlanControlBtn df-weeklyPlanControlAdd"
+                            title="Add to calendar"
+                            aria-label="Add to calendar"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                            }}
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
                             disabled={isSavingWeeklyPlan}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -896,7 +914,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 <select
                   className="df-select"
                   value={addFromLibraryDay}
-                  onChange={(event) => setAddFromLibraryDay(event.target.value)}
+                  onChange={(event) => {
+                    setAddFromLibraryDay(event.target.value);
+                    setAddFromLibraryError('');
+                  }}
                 >
                   {weekCards.map((card) => (
                     <option key={card.dateIso} value={card.dateIso}>
@@ -911,9 +932,15 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                   className="df-input"
                   type="time"
                   value={addFromLibraryStartTime}
-                  onChange={(event) => setAddFromLibraryStartTime(event.target.value)}
+                  onChange={(event) => {
+                    setAddFromLibraryStartTime(event.target.value);
+                    setAddFromLibraryError('');
+                  }}
                 />
               </label>
+              {addFromLibraryError && (
+                <div className="df-errorText" style={{ marginTop: -2 }}>{addFromLibraryError}</div>
+              )}
               <div className="df-weeklyPlanActions">
                 <button
                   type="button"

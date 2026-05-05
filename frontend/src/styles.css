@@ -1063,6 +1063,42 @@ select.df-input {
   flex-wrap: wrap;
 }
 
+.df-weeklyPlanControls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.df-weeklyPlanControlBtn {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+}
+
+.df-weeklyPlanControlAdd {
+  border-radius: 999px;
+  border-color: #bfdbfe;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.df-weeklyPlanControlRemove {
+  border-radius: 8px;
+  border-color: #fecaca;
+  color: #dc2626;
+  background: #fff1f2;
+}
+
 .df-weeklyPlanActionBtn {
   appearance: none;
   border: 1px solid #d1d5db;
