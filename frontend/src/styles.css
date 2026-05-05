@@ -1053,6 +1053,28 @@ select.df-input {
   font-size: 12px;
 }
 
+.df-weeklyPlanActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.df-weeklyPlanActionBtn {
+  appearance: none;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.df-weeklyPlanReplaceRow {
+  display: grid;
+  gap: 6px;
+}
+
 .df-workoutFilters {
   display: grid;
   gap: 10px;

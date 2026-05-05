@@ -55,6 +55,12 @@ type FavoriteToggleResponse = {
   message?: string;
 };
 
+type WeeklyPlanUpdateResponse = {
+  weekly_plan_suggestions?: WeeklyPlanSuggestion[];
+  updated_at?: string;
+  message?: string;
+};
+
 type WeekDayCard = { dayLabel: string; dateIso: string };
 
 function pad2(value: number): string {
@@ -123,6 +129,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [selectedDurationFilters, setSelectedDurationFilters] = React.useState<string[]>([]);
   const [isGeneratingPlan, setIsGeneratingPlan] = React.useState<boolean>(false);
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState<boolean>(false);
+  const [isSavingWeeklyPlan, setIsSavingWeeklyPlan] = React.useState<boolean>(false);
+  const [replaceTargetPlanId, setReplaceTargetPlanId] = React.useState<string>('');
+  const [replaceLibraryWorkoutId, setReplaceLibraryWorkoutId] = React.useState<string>('');
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
@@ -291,6 +300,76 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
   async function handleGeneratePlanClick() {
     await loadWorkoutsData({ mode: 'generate', startDate: weekStartIso, endDate: weekEndIso });
+  }
+
+  async function persistWeeklyPlan(nextWeeklyPlan: WeeklyPlanSuggestion[]): Promise<WeeklyPlanSuggestion[] | null> {
+    try {
+      setGenerateError('');
+      setIsSavingWeeklyPlan(true);
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+      const token = await getAuthToken();
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/workouts/weekly-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          start_date: weekStartIso,
+          end_date: weekEndIso,
+          weekly_plan_suggestions: nextWeeklyPlan,
+        }),
+      });
+      let payload: WeeklyPlanUpdateResponse = {};
+      try {
+        payload = (await response.json()) as WeeklyPlanUpdateResponse;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not save weekly plan (${response.status}).`
+        );
+      }
+      const savedPlan = Array.isArray(payload.weekly_plan_suggestions)
+        ? payload.weekly_plan_suggestions
+        : nextWeeklyPlan;
+      setWeeklyPlanSuggestions(savedPlan);
+      return savedPlan;
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setGenerateError(typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to save weekly plan.');
+      return null;
+    } finally {
+      setIsSavingWeeklyPlan(false);
+    }
+  }
+
+  async function handleRemoveWeeklyWorkout(planId: string) {
+    const next = weeklyPlanSuggestions.filter((item) => item.id !== planId);
+    await persistWeeklyPlan(next);
+  }
+
+  function openReplaceChooser(planId: string, currentLibraryWorkoutId: string) {
+    setReplaceTargetPlanId(planId);
+    setReplaceLibraryWorkoutId(currentLibraryWorkoutId);
+  }
+
+  function cancelReplaceChooser() {
+    setReplaceTargetPlanId('');
+    setReplaceLibraryWorkoutId('');
+  }
+
+  async function confirmReplaceWeeklyWorkout(planId: string) {
+    if (!replaceLibraryWorkoutId) return;
+    const next = weeklyPlanSuggestions.map((item) =>
+      item.id === planId ? { ...item, library_workout_id: replaceLibraryWorkoutId } : item
+    );
+    const saved = await persistWeeklyPlan(next);
+    if (saved) cancelReplaceChooser();
   }
 
   async function toggleFavorite(workout: WorkoutLibraryItem | FavoriteWorkoutItem) {
@@ -472,8 +551,29 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 const daySuggestions = suggestionsByDay.get(card.dateIso) || [];
                 const item = daySuggestions[0];
                 const libraryWorkout = item ? libraryById.get(item.library_workout_id) : undefined;
+                const canOpenWeeklyDetails = Boolean(item && libraryWorkout);
                 return (
-                  <article key={card.dateIso} className="df-workoutDayCard">
+                  <article
+                    key={card.dateIso}
+                    className={`df-workoutDayCard${canOpenWeeklyDetails ? ' df-workoutLibraryCardClickable' : ''}`}
+                    onClick={() => {
+                      if (libraryWorkout) setSelectedLibraryWorkout(libraryWorkout);
+                    }}
+                    role={canOpenWeeklyDetails ? 'button' : undefined}
+                    tabIndex={canOpenWeeklyDetails ? 0 : undefined}
+                    onKeyDown={(event) => {
+                      if (!canOpenWeeklyDetails) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        if (libraryWorkout) setSelectedLibraryWorkout(libraryWorkout);
+                      }
+                    }}
+                    aria-label={
+                      canOpenWeeklyDetails
+                        ? `Open details for ${libraryWorkout?.title || 'workout'}`
+                        : undefined
+                    }
+                  >
                     <h3 className="df-workoutDay">{card.dayLabel}</h3>
                     {!item ? (
                       <div className="df-workoutRestDay">{isGeneratingPlan ? 'Loading...' : 'Rest day'}</div>
@@ -494,6 +594,63 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         <button type="button" className="df-workoutAddBtn">
                           + Add
                         </button>
+                        <div className="df-weeklyPlanActions">
+                          <button
+                            type="button"
+                            className="df-weeklyPlanActionBtn"
+                            disabled={isSavingWeeklyPlan}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleRemoveWeeklyWorkout(item.id);
+                            }}
+                            aria-label={`Remove ${libraryWorkout?.title || 'workout'} from weekly plan`}
+                          >
+                            Remove
+                          </button>
+                          <button
+                            type="button"
+                            className="df-weeklyPlanActionBtn"
+                            disabled={isSavingWeeklyPlan || workoutLibrary.length === 0}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openReplaceChooser(item.id, item.library_workout_id);
+                            }}
+                            aria-label={`Replace ${libraryWorkout?.title || 'workout'} in weekly plan`}
+                          >
+                            Replace
+                          </button>
+                        </div>
+                        {replaceTargetPlanId === item.id && (
+                          <div className="df-weeklyPlanReplaceRow" onClick={(event) => event.stopPropagation()}>
+                            <select
+                              className="df-select"
+                              value={replaceLibraryWorkoutId}
+                              onChange={(event) => setReplaceLibraryWorkoutId(event.target.value)}
+                            >
+                              {workoutLibrary.map((libItem) => (
+                                <option key={libItem.id} value={libItem.id}>
+                                  {libItem.title} ({libItem.duration_minutes} min)
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="df-weeklyPlanActionBtn"
+                              disabled={!replaceLibraryWorkoutId || isSavingWeeklyPlan}
+                              onClick={() => void confirmReplaceWeeklyWorkout(item.id)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="df-weeklyPlanActionBtn"
+                              disabled={isSavingWeeklyPlan}
+                              onClick={cancelReplaceChooser}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                         {daySuggestions.length > 1 && (
                           <div className="df-workoutMeta">+{daySuggestions.length - 1} more options</div>
                         )}
@@ -520,7 +677,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 aria-label={isFavoritesMode ? 'Show all workouts' : 'Show favorite workouts only'}
                 title={isFavoritesMode ? 'Showing favorites' : 'Show favorites'}
               >
-                ♥
+                ❤
               </button>
             </div>
             <div className="df-workoutFilters">
@@ -602,7 +759,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         void toggleFavorite(item);
                       }}
                     >
-                      ♥
+                      ❤
                     </button>
                   </div>
                   <div className="df-workoutTypePill">{item.workout_type}</div>
