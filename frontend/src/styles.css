@@ -1070,9 +1070,10 @@ select.df-input {
   font-weight: 600;
 }
 
-.df-weeklyPlanReplaceRow {
-  display: grid;
-  gap: 6px;
+.df-weeklyPlanActionBtnDanger {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fff1f2;
 }
 
 .df-workoutFilters {

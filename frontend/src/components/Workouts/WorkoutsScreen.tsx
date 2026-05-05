@@ -130,8 +130,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [isGeneratingPlan, setIsGeneratingPlan] = React.useState<boolean>(false);
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState<boolean>(false);
   const [isSavingWeeklyPlan, setIsSavingWeeklyPlan] = React.useState<boolean>(false);
-  const [replaceTargetPlanId, setReplaceTargetPlanId] = React.useState<string>('');
-  const [replaceLibraryWorkoutId, setReplaceLibraryWorkoutId] = React.useState<string>('');
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
@@ -353,25 +351,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     await persistWeeklyPlan(next);
   }
 
-  function openReplaceChooser(planId: string, currentLibraryWorkoutId: string) {
-    setReplaceTargetPlanId(planId);
-    setReplaceLibraryWorkoutId(currentLibraryWorkoutId);
-  }
-
-  function cancelReplaceChooser() {
-    setReplaceTargetPlanId('');
-    setReplaceLibraryWorkoutId('');
-  }
-
-  async function confirmReplaceWeeklyWorkout(planId: string) {
-    if (!replaceLibraryWorkoutId) return;
-    const next = weeklyPlanSuggestions.map((item) =>
-      item.id === planId ? { ...item, library_workout_id: replaceLibraryWorkoutId } : item
-    );
-    const saved = await persistWeeklyPlan(next);
-    if (saved) cancelReplaceChooser();
-  }
-
   async function toggleFavorite(workout: WorkoutLibraryItem | FavoriteWorkoutItem) {
     try {
       setGenerateError('');
@@ -591,66 +570,24 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         <div className="df-workoutSlot">
                           {item.recommended_day} {item.recommended_start_time}-{item.recommended_end_time}
                         </div>
-                        <button type="button" className="df-workoutAddBtn">
+                        <button type="button" className="df-workoutAddBtn" title="Add to calendar" aria-label="Add to calendar">
                           + Add
                         </button>
                         <div className="df-weeklyPlanActions">
                           <button
                             type="button"
-                            className="df-weeklyPlanActionBtn"
+                            className="df-weeklyPlanActionBtn df-weeklyPlanActionBtnDanger"
                             disabled={isSavingWeeklyPlan}
                             onClick={(event) => {
                               event.stopPropagation();
                               void handleRemoveWeeklyWorkout(item.id);
                             }}
                             aria-label={`Remove ${libraryWorkout?.title || 'workout'} from weekly plan`}
+                            title="Remove"
                           >
-                            Remove
-                          </button>
-                          <button
-                            type="button"
-                            className="df-weeklyPlanActionBtn"
-                            disabled={isSavingWeeklyPlan || workoutLibrary.length === 0}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openReplaceChooser(item.id, item.library_workout_id);
-                            }}
-                            aria-label={`Replace ${libraryWorkout?.title || 'workout'} in weekly plan`}
-                          >
-                            Replace
+                            🗑
                           </button>
                         </div>
-                        {replaceTargetPlanId === item.id && (
-                          <div className="df-weeklyPlanReplaceRow" onClick={(event) => event.stopPropagation()}>
-                            <select
-                              className="df-select"
-                              value={replaceLibraryWorkoutId}
-                              onChange={(event) => setReplaceLibraryWorkoutId(event.target.value)}
-                            >
-                              {workoutLibrary.map((libItem) => (
-                                <option key={libItem.id} value={libItem.id}>
-                                  {libItem.title} ({libItem.duration_minutes} min)
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              className="df-weeklyPlanActionBtn"
-                              disabled={!replaceLibraryWorkoutId || isSavingWeeklyPlan}
-                              onClick={() => void confirmReplaceWeeklyWorkout(item.id)}
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              className="df-weeklyPlanActionBtn"
-                              disabled={isSavingWeeklyPlan}
-                              onClick={cancelReplaceChooser}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        )}
                         {daySuggestions.length > 1 && (
                           <div className="df-workoutMeta">+{daySuggestions.length - 1} more options</div>
                         )}
