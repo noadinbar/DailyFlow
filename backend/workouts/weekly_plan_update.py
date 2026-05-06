@@ -15,6 +15,7 @@ WORKOUT_LIBRARY_DEFAULT_TABLE_NAME = "WorkoutLibrary"
 DAILYFLOW_CALENDAR_SUMMARY = "DailyFlow"
 APP_TIMEZONE_ID = "Asia/Jerusalem"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_CALENDAR_LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
 GOOGLE_CALENDAR_URL_TEMPLATE = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}"
 GOOGLE_CALENDAR_CREATE_URL = "https://www.googleapis.com/calendar/v3/calendars"
 GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
@@ -222,6 +223,19 @@ def _google_request_json(method: str, url: str, access_token: str, body: Optiona
         return json.loads(raw) if raw else {}
 
 
+def _google_request_no_content(method: str, url: str, access_token: str) -> None:
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+        },
+        method=method,
+    )
+    with urlopen(request, timeout=20):
+        return
+
+
 def _google_request_json_with_refresh(
     *,
     user_id: str,
@@ -251,18 +265,98 @@ def _google_request_json_with_refresh(
         return _google_request_json(method, url, refreshed_access_token.strip(), body)
 
 
-def _persist_dailyflow_calendar_id(user_id: str, calendar_id: str) -> None:
+def _google_request_no_content_with_refresh(
+    *,
+    user_id: str,
+    connection: Dict[str, Any],
+    method: str,
+    url: str,
+) -> None:
+    access_token = connection.get("access_token") or connection.get("accessToken")
+    refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise PermissionError("Google connection missing access token.")
+    try:
+        _google_request_no_content(method, url, access_token.strip())
+        return
+    except HTTPError as err:
+        if err.code != 401:
+            raise
+        if not isinstance(refresh_token, str) or not refresh_token.strip():
+            raise PermissionError("Google connection expired, reconnect required")
+        new_tokens = _refresh_access_token(refresh_token.strip())
+        if not new_tokens or not isinstance(new_tokens.get("access_token"), str):
+            raise PermissionError("Google connection expired, reconnect required")
+        _update_connection_access_token(user_id, connection, new_tokens)
+        refreshed_access_token = connection.get("access_token") or connection.get("accessToken")
+        if not isinstance(refreshed_access_token, str) or not refreshed_access_token.strip():
+            raise PermissionError("Google connection expired, reconnect required")
+        _google_request_no_content(method, url, refreshed_access_token.strip())
+
+
+def _selected_calendar_ids_from_sources(item: Dict[str, Any], connection: Dict[str, Any]) -> List[str]:
+    selected_raw = connection.get("selected_calendar_ids")
+    if not isinstance(selected_raw, list):
+        selected_raw = item.get("selected_calendar_ids") if isinstance(item, dict) else None
+    selected_calendar_ids: List[str] = []
+    for value in (selected_raw or []):
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if trimmed and trimmed not in selected_calendar_ids:
+            selected_calendar_ids.append(trimmed)
+    return selected_calendar_ids
+
+
+def _persist_dailyflow_calendar_id(
+    user_id: str, calendar_id: str, selected_calendar_ids: List[str]
+) -> None:
+    selected_next = list(selected_calendar_ids)
+    if calendar_id not in selected_next:
+        selected_next.append(calendar_id)
     _integrations_table().update_item(
         Key={"user_id": user_id},
-        UpdateExpression="SET dailyflow_calendar_id = :calendar_id, updated_at = :updated_at",
+        UpdateExpression=(
+            "SET dailyflow_calendar_id = :calendar_id, "
+            "selected_calendar_ids = :selected_calendar_ids, "
+            "updated_at = :updated_at"
+        ),
         ExpressionAttributeValues={
             ":calendar_id": calendar_id,
+            ":selected_calendar_ids": selected_next,
             ":updated_at": _iso_utc_now(),
         },
     )
 
 
-def _ensure_dailyflow_calendar(user_id: str, connection: Dict[str, Any]) -> str:
+def _dailyflow_calendar_id_from_list_payload(payload: Dict[str, Any]) -> str:
+    items = payload.get("items") if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        return ""
+    matching_ids: List[str] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        calendar_id = entry.get("id")
+        summary = entry.get("summary")
+        if not isinstance(calendar_id, str) or not calendar_id.strip():
+            continue
+        if isinstance(summary, str) and summary.strip() == DAILYFLOW_CALENDAR_SUMMARY:
+            matching_ids.append(calendar_id.strip())
+    if not matching_ids:
+        return ""
+    matching_ids.sort()
+    return matching_ids[0]
+
+
+def _ensure_dailyflow_calendar(user_id: str, item: Dict[str, Any], connection: Dict[str, Any]) -> str:
+    selected_calendar_ids = _selected_calendar_ids_from_sources(item, connection)
+    calendar_list_payload = _google_request_json_with_refresh(
+        user_id=user_id,
+        connection=connection,
+        method="GET",
+        url=GOOGLE_CALENDAR_LIST_URL,
+    )
     stored_calendar_id = str(connection.get("dailyflow_calendar_id", "")).strip()
     if not stored_calendar_id:
         stored_calendar_id = str(connection.get("dailyflowCalendarId", "")).strip()
@@ -275,10 +369,27 @@ def _ensure_dailyflow_calendar(user_id: str, connection: Dict[str, Any]) -> str:
                 method="GET",
                 url=check_url,
             )
+            _persist_dailyflow_calendar_id(user_id, stored_calendar_id, selected_calendar_ids)
+            connection["selected_calendar_ids"] = (
+                selected_calendar_ids
+                if stored_calendar_id in selected_calendar_ids
+                else [*selected_calendar_ids, stored_calendar_id]
+            )
             return stored_calendar_id
         except HTTPError as err:
             if err.code != 404:
                 raise
+    existing_id = _dailyflow_calendar_id_from_list_payload(calendar_list_payload)
+    if existing_id:
+        _persist_dailyflow_calendar_id(user_id, existing_id, selected_calendar_ids)
+        connection["dailyflow_calendar_id"] = existing_id
+        connection["dailyflowCalendarId"] = existing_id
+        connection["selected_calendar_ids"] = (
+            selected_calendar_ids
+            if existing_id in selected_calendar_ids
+            else [*selected_calendar_ids, existing_id]
+        )
+        return existing_id
     created = _google_request_json_with_refresh(
         user_id=user_id,
         connection=connection,
@@ -289,9 +400,14 @@ def _ensure_dailyflow_calendar(user_id: str, connection: Dict[str, Any]) -> str:
     created_id = str(created.get("id", "")).strip()
     if not created_id:
         raise ValueError("Failed to create DailyFlow Google calendar.")
-    _persist_dailyflow_calendar_id(user_id, created_id)
+    _persist_dailyflow_calendar_id(user_id, created_id, selected_calendar_ids)
     connection["dailyflow_calendar_id"] = created_id
     connection["dailyflowCalendarId"] = created_id
+    connection["selected_calendar_ids"] = (
+        selected_calendar_ids
+        if created_id in selected_calendar_ids
+        else [*selected_calendar_ids, created_id]
+    )
     return created_id
 
 
@@ -328,9 +444,36 @@ def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
                 "recommended_end_time": rec_end,
                 "recommended_time_label": str(item.get("recommended_time_label", "")).strip() or "Evening",
                 "reason_short": str(item.get("reason_short", "")).strip() or "Matches your saved workout library and current free time.",
+                "google_event_id": str(item.get("google_event_id", "")).strip(),
+                "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
             }
         )
     return cleaned
+
+
+def _today_iso_utc() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _mark_busy_blocks_stale(user_id: str) -> None:
+    try:
+        _integrations_table().update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET last_busy_sync_at = :last_busy_sync_at, updated_at = :updated_at",
+            ExpressionAttributeValues={
+                ":last_busy_sync_at": "",
+                ":updated_at": _iso_utc_now(),
+            },
+        )
+    except Exception:
+        return
+
+
+def _delete_dailyflow_event_row(*, user_id: str, plan_id: str) -> None:
+    try:
+        _dailyflow_events_table().delete_item(Key={"user_id": user_id, "plan_id": plan_id})
+    except Exception:
+        return
 
 
 def _query_busy_blocks(user_id: str, start_date_iso: str, end_date_iso: str) -> List[Dict[str, Any]]:
@@ -452,6 +595,8 @@ def _handle_add_library_workout(*, user_id: str, payload: Dict[str, Any]) -> Dic
     recommended_start_time = str(payload.get("recommended_start_time", "")).strip()
     if not week_start or not week_end or not library_workout_id or not recommended_day or not recommended_start_time:
         return _json_response(400, {"message": "week_start, week_end, library_workout_id, recommended_day and recommended_start_time are required."})
+    if recommended_day < _today_iso_utc():
+        return _json_response(400, {"message": "Cannot add new workouts to past dates."})
 
     item = _workout_library_table().get_item(Key={"user_id": user_id}).get("Item")
     if not isinstance(item, dict):
@@ -521,9 +666,42 @@ def _handle_remove_plan_item(*, user_id: str, payload: Dict[str, Any]) -> Dict[s
         return _json_response(400, {"message": "Saved workout library is missing."})
 
     weekly_plan = _normalize_saved_weekly_plan(item.get("current_week_plan"))
+    plan_item = next((entry for entry in weekly_plan if str(entry.get("id", "")).strip() == plan_id), None)
     filtered = [entry for entry in weekly_plan if str(entry.get("id", "")).strip() != plan_id]
     if len(filtered) == len(weekly_plan):
         return _json_response(404, {"message": "Weekly plan item not found."})
+
+    existing_event_id = str((plan_item or {}).get("google_event_id", "")).strip()
+    existing_calendar_id = str((plan_item or {}).get("dailyflow_calendar_id", "")).strip()
+    if existing_event_id and existing_calendar_id:
+        stored_connection = _fetch_google_connection(user_id)
+        if stored_connection:
+            _, connection = stored_connection
+            delete_url = (
+                f"{GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE.format(calendar_id=quote(existing_calendar_id, safe=''))}"
+                f"/{quote(existing_event_id, safe='')}"
+            )
+            try:
+                _google_request_no_content_with_refresh(
+                    user_id=user_id,
+                    connection=connection,
+                    method="DELETE",
+                    url=delete_url,
+                )
+            except HTTPError as err:
+                if err.code != 404:
+                    if err.code == 401:
+                        return _json_response(403, {"message": "Google connection expired, reconnect required"})
+                    return _json_response(
+                        502,
+                        {"message": f"Google Calendar API request failed with status {err.code}."},
+                    )
+            except PermissionError as err:
+                return _json_response(403, {"message": str(err)})
+            except (URLError, TimeoutError):
+                return _json_response(502, {"message": "Failed to reach Google Calendar API."})
+            except Exception:
+                return _json_response(500, {"message": "Unexpected error while deleting workout calendar event."})
 
     busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
     updated_at = _persist_weekly_plan(
@@ -534,6 +712,8 @@ def _handle_remove_plan_item(*, user_id: str, payload: Dict[str, Any]) -> Dict[s
         workout_library=workout_library,
         busy_blocks=busy_blocks,
     )
+    _delete_dailyflow_event_row(user_id=user_id, plan_id=plan_id)
+    _mark_busy_blocks_stale(user_id)
     return _json_response(200, {"weekly_plan_suggestions": filtered, "updated_at": updated_at})
 
 
@@ -556,6 +736,30 @@ def _build_workout_event_payload(plan_item: Dict[str, Any], library_item: Dict[s
         details.append(f"Location: {location}")
     if summary_short:
         details.append(summary_short)
+    workout_flow = library_item.get("workout_flow")
+    if isinstance(workout_flow, dict):
+        flow_summary = str(workout_flow.get("summary", "")).strip()
+        if flow_summary:
+            details.append("")
+            details.append(f"Overview: {flow_summary}")
+
+        def append_steps(label: str, key: str) -> None:
+            steps = workout_flow.get(key)
+            if not isinstance(steps, list):
+                return
+            cleaned_steps = [
+                str(step).strip() for step in steps if isinstance(step, str) and str(step).strip()
+            ]
+            if not cleaned_steps:
+                return
+            details.append(f"{label}:")
+            for idx, step in enumerate(cleaned_steps, start=1):
+                details.append(f"{idx}. {step}")
+
+        append_steps("Warmup", "warmup_steps")
+        append_steps("Main steps", "main_steps")
+        append_steps("Cooldown", "cooldown_steps")
+        append_steps("Notes", "notes")
     description = "\n".join(details) if details else "Planned in DailyFlow."
     return {
         "summary": workout_title,
@@ -655,7 +859,7 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
     _, connection = stored_connection
 
     try:
-        dailyflow_calendar_id = _ensure_dailyflow_calendar(user_id, connection)
+        dailyflow_calendar_id = _ensure_dailyflow_calendar(user_id, item, connection)
         create_event_url = GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE.format(
             calendar_id=quote(dailyflow_calendar_id, safe="")
         )
@@ -710,6 +914,7 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
         dailyflow_calendar_id=dailyflow_calendar_id,
         google_event_id=created_event_id,
     )
+    _mark_busy_blocks_stale(user_id)
     return _json_response(
         200,
         {

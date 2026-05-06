@@ -40,6 +40,10 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _today_iso_utc() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
     request_context = event.get("requestContext") or {}
     authorizer = request_context.get("authorizer") or {}
@@ -525,6 +529,8 @@ def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
                 "recommended_end_time": rec_end,
                 "recommended_time_label": rec_label or "Evening",
                 "reason_short": reason or "Matches your saved workout library and current free time.",
+                "google_event_id": str(item.get("google_event_id", "")).strip(),
+                "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
             }
         )
     return cleaned
@@ -618,6 +624,8 @@ def _derive_weekly_plan(
     eligible_windows: List[Dict[str, Any]],
     workouts_per_week: int,
 ) -> List[Dict[str, Any]]:
+    today_iso = _today_iso_utc()
+    eligible_windows = [window for window in eligible_windows if str(window.get("date", "")).strip() >= today_iso]
     if not workout_library or not eligible_windows:
         return []
     max_items = max(1, min(workouts_per_week, len(workout_library), len(eligible_windows)))
@@ -869,8 +877,6 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         is_saved_plan_valid = (
             saved_week_start == period["start_date"]
             and saved_week_end == period["end_date"]
-            and saved_busy_sig == current_busy_sig
-            and saved_lib_sig == current_lib_sig
             and len(saved_weekly_plan) > 0
         )
 

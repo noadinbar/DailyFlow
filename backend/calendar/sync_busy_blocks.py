@@ -544,6 +544,24 @@ def _list_busy_blocks_from_selected_calendars(
     return blocks
 
 
+def _selected_calendar_ids_from_google_list_payload(payload: Dict[str, Any]) -> List[str]:
+    items = payload.get("items") if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        return []
+    selected_ids: List[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        calendar_id = item.get("id")
+        if not isinstance(calendar_id, str) or not calendar_id.strip():
+            continue
+        if bool(item.get("selected", True)):
+            clean_id = calendar_id.strip()
+            if clean_id not in selected_ids:
+                selected_ids.append(clean_id)
+    return selected_ids
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_context = event.get("requestContext") or {}
     http = request_context.get("http") or {}
@@ -579,6 +597,36 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         for value in (selected_ids_raw or [])
         if isinstance(value, str) and value.strip()
     ]
+    selection_configured = bool(
+        isinstance(item, dict) and item.get("calendar_selection_configured") is True
+    )
+
+    if not selection_configured:
+        try:
+            calendar_list_payload = _google_get_json_with_refresh(
+                user_id=user_id,
+                connection=connection,
+                url=GOOGLE_CALENDAR_LIST_URL,
+            )
+            selected_calendar_ids = _selected_calendar_ids_from_google_list_payload(calendar_list_payload)
+            dailyflow_calendar_id = str(
+                connection.get("dailyflow_calendar_id")
+                or item.get("dailyflow_calendar_id")
+                or ""
+            ).strip()
+            if dailyflow_calendar_id and dailyflow_calendar_id not in selected_calendar_ids:
+                selected_calendar_ids.append(dailyflow_calendar_id)
+        except PermissionError as err:
+            return _json_response(403, {"message": str(err)})
+        except HTTPError as err:
+            return _json_response(
+                502,
+                {"message": f"Google Calendar API request failed with status {err.code}."},
+            )
+        except (URLError, TimeoutError):
+            return _json_response(502, {"message": "Failed to reach Google Calendar API."})
+        except Exception:
+            return _json_response(500, {"message": "Unexpected error while loading Google calendar selection."})
 
     if not selected_calendar_ids:
         _assert_supported_busyblocks_schema()

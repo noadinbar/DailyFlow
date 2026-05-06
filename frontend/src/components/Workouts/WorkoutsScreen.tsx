@@ -359,7 +359,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           const previous = prev[planId];
           if (previous) next[planId] = previous;
           if (typeof planItem.google_event_id === 'string' && planItem.google_event_id.trim()) {
-            next[planId] = { state: 'success', message: 'Added to DailyFlow calendar.' };
+            next[planId] = { state: 'success' };
           }
         }
         return next;
@@ -401,13 +401,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       { suppressGlobalError: true }
     );
     if (saved) {
-      const item = saved.find((entry) => entry.id === planId);
-      const alreadyAdded = Boolean(item?.google_event_id);
       setPlanCalendarStatusById((prev) => ({
         ...prev,
         [planId]: {
           state: 'success',
-          message: alreadyAdded ? 'Added to DailyFlow calendar.' : 'Added to DailyFlow calendar.',
         },
       }));
       return;
@@ -703,11 +700,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         )}
                         {itemCalendarStatus?.state === 'error' && (
                           <div className="df-errorText">{itemCalendarStatus.message || 'Could not add to calendar.'}</div>
-                        )}
-                        {itemCalendarStatus?.state === 'success' && (
-                          <div className="df-calendarLegend" style={{ color: '#065f46', marginBottom: 0 }}>
-                            {itemCalendarStatus.message || 'Added to DailyFlow calendar.'}
-                          </div>
                         )}
                       </>
                     )}

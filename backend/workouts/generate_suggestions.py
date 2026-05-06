@@ -47,6 +47,10 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _today_iso_utc() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
     request_context = event.get("requestContext") or {}
     authorizer = request_context.get("authorizer") or {}
@@ -282,6 +286,45 @@ def _normalize_saved_favorites(raw: Any) -> List[Dict[str, Any]]:
         seen.add(favorite_key)
         cleaned.append(normalized)
     return cleaned
+
+
+def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        lib_id = str(item.get("library_workout_id", "")).strip()
+        rec_day = str(item.get("recommended_day", "")).strip()
+        rec_start = str(item.get("recommended_start_time", "")).strip()
+        rec_end = str(item.get("recommended_end_time", "")).strip()
+        if not lib_id or not rec_day or not rec_start or not rec_end:
+            continue
+        cleaned.append(
+            {
+                "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned)+1}",
+                "library_workout_id": lib_id,
+                "recommended_day": rec_day,
+                "recommended_start_time": rec_start,
+                "recommended_end_time": rec_end,
+                "recommended_time_label": str(item.get("recommended_time_label", "")).strip() or "Evening",
+                "reason_short": str(item.get("reason_short", "")).strip()
+                or "Matches your saved workout library and current free time.",
+                "google_event_id": str(item.get("google_event_id", "")).strip(),
+                "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
+            }
+        )
+    return cleaned
+
+
+def _next_plan_id(current_plan: List[Dict[str, Any]]) -> str:
+    max_idx = 0
+    for item in current_plan:
+        plan_id = str(item.get("id", "")).strip()
+        if plan_id.startswith("plan_") and plan_id[5:].isdigit():
+            max_idx = max(max_idx, int(plan_id[5:]))
+    return f"plan_{max_idx + 1}"
 
 
 def _normalize_generated_library(raw: Any) -> List[Dict[str, Any]]:
@@ -1005,6 +1048,8 @@ def _derive_weekly_plan(
     eligible_windows: List[Dict[str, Any]],
     workouts_per_week: int,
 ) -> List[Dict[str, Any]]:
+    today_iso = _today_iso_utc()
+    eligible_windows = [window for window in eligible_windows if str(window.get("date", "")).strip() >= today_iso]
     if not workout_library or not eligible_windows:
         return []
     max_items = max(1, min(workouts_per_week, len(workout_library), len(eligible_windows)))
@@ -1197,9 +1242,10 @@ def _derive_weekly_plan_and_signatures(
     start_date_value: date,
     end_date_value: date,
     workout_library: List[Dict[str, Any]],
+    workouts_per_week: int,
+    preserved_weekly_plan: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], str, str]:
     period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
-    preferences = _read_user_preferences(user_id)
     busy_blocks = _query_busy_blocks(user_id, period["start_date"], period["end_date"])
     free_windows = _derive_free_windows(
         start_date_value=start_date_value, end_date_value=end_date_value, busy_blocks=busy_blocks
@@ -1207,11 +1253,83 @@ def _derive_weekly_plan_and_signatures(
     eligible_windows = _derive_eligible_windows(
         free_windows=free_windows, preferred_times=preferences.get("preferred_workout_times") or []
     )
-    weekly_plan = _derive_weekly_plan(
-        workout_library=workout_library,
-        eligible_windows=eligible_windows,
-        workouts_per_week=preferences.get("workouts_per_week") or 3,
-    )
+    keep_plan = preserved_weekly_plan or []
+    if keep_plan:
+        keep_plan = [
+            item
+            for item in keep_plan
+            if str(item.get("recommended_day", "")).strip() >= start_date_value.isoformat()
+            and str(item.get("recommended_day", "")).strip() <= end_date_value.isoformat()
+        ]
+    if keep_plan and len(keep_plan) >= workouts_per_week:
+        weekly_plan = sorted(
+            keep_plan,
+            key=lambda x: (
+                str(x.get("recommended_day", "")),
+                str(x.get("recommended_start_time", "")),
+                str(x.get("recommended_end_time", "")),
+                str(x.get("id", "")),
+            ),
+        )
+    elif keep_plan:
+        used_library_ids = {
+            str(item.get("library_workout_id", "")).strip()
+            for item in keep_plan
+            if str(item.get("library_workout_id", "")).strip()
+        }
+        remaining_library = [
+            item
+            for item in workout_library
+            if str(item.get("id", "")).strip() not in used_library_ids
+        ]
+
+        def _window_overlaps_kept(window: Dict[str, Any]) -> bool:
+            window_day = str(window.get("date", "")).strip()
+            window_start = _parse_hh_mm(str(window.get("start_time", "")).strip())
+            window_end = _parse_hh_mm(str(window.get("end_time", "")).strip())
+            if not window_day or not window_start or not window_end:
+                return True
+            ws = window_start.hour * 60 + window_start.minute
+            we = window_end.hour * 60 + window_end.minute
+            for kept in keep_plan:
+                if str(kept.get("recommended_day", "")).strip() != window_day:
+                    continue
+                ks = _parse_hh_mm(str(kept.get("recommended_start_time", "")).strip())
+                ke = _parse_hh_mm(str(kept.get("recommended_end_time", "")).strip())
+                if not ks or not ke:
+                    continue
+                ks_m = ks.hour * 60 + ks.minute
+                ke_m = ke.hour * 60 + ke.minute
+                if max(ws, ks_m) < min(we, ke_m):
+                    return True
+            return False
+
+        free_windows = [window for window in eligible_windows if not _window_overlaps_kept(window)]
+        additional = _derive_weekly_plan(
+            workout_library=remaining_library,
+            eligible_windows=free_windows,
+            workouts_per_week=max(0, workouts_per_week - len(keep_plan)),
+        )
+        merged = list(keep_plan)
+        for item in additional:
+            next_item = dict(item)
+            next_item["id"] = _next_plan_id(merged)
+            merged.append(next_item)
+        weekly_plan = sorted(
+            merged,
+            key=lambda x: (
+                str(x.get("recommended_day", "")),
+                str(x.get("recommended_start_time", "")),
+                str(x.get("recommended_end_time", "")),
+                str(x.get("id", "")),
+            ),
+        )
+    else:
+        weekly_plan = _derive_weekly_plan(
+            workout_library=workout_library,
+            eligible_windows=eligible_windows,
+            workouts_per_week=workouts_per_week,
+        )
     return weekly_plan, _busyblocks_signature(busy_blocks), _library_signature(workout_library)
 
 
@@ -1277,6 +1395,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         existing_item = _load_saved_workouts_item(user_id)
         favorite_workouts = _normalize_saved_favorites(existing_item.get("favorite_workouts"))
         preferences = _read_user_preferences(user_id)
+        workouts_per_week = preferences.get("workouts_per_week") or 3
+        saved_weekly_plan: List[Dict[str, Any]] = []
+        if (
+            str(existing_item.get("current_week_plan_week_start", "")).strip()
+            == start_date_value.isoformat()
+            and str(existing_item.get("current_week_plan_week_end", "")).strip()
+            == end_date_value.isoformat()
+        ):
+            saved_weekly_plan = _normalize_saved_weekly_plan(existing_item.get("current_week_plan"))
         workout_library, generation_warning = _generate_library_from_openai(preferences)
         if not workout_library:
             workout_library = _fallback_library(preferences)
@@ -1288,6 +1415,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_date_value=start_date_value,
             end_date_value=end_date_value,
             workout_library=workout_library,
+            workouts_per_week=workouts_per_week,
+            preserved_weekly_plan=saved_weekly_plan,
         )
         plan_updated_at = _save_library_with_current_week_plan(
             user_id=user_id,
