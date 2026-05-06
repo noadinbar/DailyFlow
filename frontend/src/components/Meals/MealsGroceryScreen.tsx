@@ -601,15 +601,23 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         <div className="df-workoutsContent">
           <section className="df-workoutsSection">
             <div className="df-workoutsSectionHeader">
-              <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
-                Meal Library
-              </h2>
-              <button type="button" className="df-btn" onClick={() => setMealLibraryOpen((prev) => !prev)}>
-                {mealLibraryOpen ? 'Collapse' : 'Expand'}
+              <button
+                type="button"
+                className="df-sectionToggle"
+                onClick={() => setMealLibraryOpen((prev) => !prev)}
+                aria-expanded={mealLibraryOpen}
+                aria-controls="meals-library-section"
+              >
+                <span className={`df-sectionChevron${mealLibraryOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
+                  ▶
+                </span>
+                <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
+                  Meal Library
+                </h2>
               </button>
             </div>
             {mealLibraryOpen && (
-              <>
+              <div id="meals-library-section">
                 <div className="df-workoutFilters">
                   <div className="df-workoutFilterGroup">
                     <span className="df-workoutFilterLabel">Meal type</span>
@@ -692,21 +700,29 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                     </article>
                   ))}
                 </div>
-              </>
+              </div>
             )}
           </section>
 
           <section className="df-workoutsSection">
             <div className="df-workoutsSectionHeader">
-              <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
-                Saved Meals This Week
-              </h2>
-              <button type="button" className="df-btn" onClick={() => setSavedMealsOpen((prev) => !prev)}>
-                {savedMealsOpen ? 'Collapse' : 'Expand'}
+              <button
+                type="button"
+                className="df-sectionToggle"
+                onClick={() => setSavedMealsOpen((prev) => !prev)}
+                aria-expanded={savedMealsOpen}
+                aria-controls="saved-meals-section"
+              >
+                <span className={`df-sectionChevron${savedMealsOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
+                  ▶
+                </span>
+                <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
+                  Saved Meals This Week
+                </h2>
               </button>
             </div>
             {savedMealsOpen && (
-              <div className="df-workoutLibraryGrid df-mealsSavedGrid">
+              <div id="saved-meals-section" className="df-workoutLibraryGrid df-mealsSavedGrid">
                 {savedMeals.map((savedMeal) => (
                   <article key={savedMeal.id} className="df-workoutLibraryCard">
                     <div className="df-workoutLibraryCardTop">
@@ -763,20 +779,28 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
 
           <section className="df-workoutsSection">
             <div className="df-workoutsSectionHeader">
-              <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
-                Grocery List
-              </h2>
-              <div className="df-calendarTopbarRight">
+              <button
+                type="button"
+                className="df-sectionToggle"
+                onClick={() => setGroceryOpen((prev) => !prev)}
+                aria-expanded={groceryOpen}
+                aria-controls="grocery-section"
+              >
+                <span className={`df-sectionChevron${groceryOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
+                  ▶
+                </span>
+                <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
+                  Grocery List
+                </h2>
+              </button>
+              <div>
                 <button type="button" className="df-btn" onClick={clearCheckedGroceryItems}>
                   Clear checked
-                </button>
-                <button type="button" className="df-btn" onClick={() => setGroceryOpen((prev) => !prev)}>
-                  {groceryOpen ? 'Collapse' : 'Expand'}
                 </button>
               </div>
             </div>
             {groceryOpen && (
-              <div className="df-mealsGroceryWrap">
+              <div id="grocery-section" className="df-mealsGroceryWrap">
                 {Array.from(groceryItemsByCategory.entries()).map(([category, items]) => (
                   <article key={category} className="df-calendarsList">
                     <h2 style={{ marginBottom: 8 }}>{category}</h2>
