@@ -53,6 +53,18 @@ type GroceryItem = {
   category: string;
 };
 
+type MealsStateResponse = {
+  meal_preferences?: {
+    allergies?: string[];
+    budget_level?: string;
+    goal?: string;
+  };
+  meal_library?: MealLibraryItem[];
+  favorite_meals?: string[];
+  saved_meals_this_week?: SavedMealItem[];
+  checked_grocery_items?: string[];
+};
+
 const SAMPLE_MEALS: MealLibraryItem[] = [
   {
     id: 'meal-1',
@@ -183,15 +195,17 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [selectedMealTypes, setSelectedMealTypes] = React.useState<MealType[]>([]);
   const [selectedDietTags, setSelectedDietTags] = React.useState<string[]>([]);
   const [selectedPrepFilters, setSelectedPrepFilters] = React.useState<PrepTimeFilter[]>([]);
+  const [mealLibrary, setMealLibrary] = React.useState<MealLibraryItem[]>(SAMPLE_MEALS);
   const [favoriteMealIds, setFavoriteMealIds] = React.useState<string[]>([]);
   const [savedMeals, setSavedMeals] = React.useState<SavedMealItem[]>([]);
   const [checkedGroceryKeys, setCheckedGroceryKeys] = React.useState<string[]>([]);
-  const [generateHint, setGenerateHint] = React.useState<string>('Using local sample meals for Step 1.');
+  const [mealsApiError, setMealsApiError] = React.useState<string>('');
 
   const [isMealPreferencesOpen, setIsMealPreferencesOpen] = React.useState<boolean>(false);
   const [allergiesInput, setAllergiesInput] = React.useState<string>('');
   const [budgetLevel, setBudgetLevel] = React.useState<BudgetLevel>('Medium');
   const [goalInput, setGoalInput] = React.useState<string>('');
+  const [isSavingMealPreferences, setIsSavingMealPreferences] = React.useState<boolean>(false);
 
   const [addMealSource, setAddMealSource] = React.useState<MealLibraryItem | null>(null);
   const [addMealDate, setAddMealDate] = React.useState<string>('');
@@ -405,12 +419,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   const availableDietTags = React.useMemo(
-    () => Array.from(new Set(SAMPLE_MEALS.flatMap((meal) => meal.diet_tags))).sort(),
-    []
+    () => Array.from(new Set(mealLibrary.flatMap((meal) => meal.diet_tags))).sort(),
+    [mealLibrary]
   );
 
   const filteredMealLibrary = React.useMemo(() => {
-    return SAMPLE_MEALS.filter((meal) => {
+    return mealLibrary.filter((meal) => {
       const mealTypeMatch = selectedMealTypes.length === 0 || selectedMealTypes.includes(meal.meal_type);
       const dietMatch =
         selectedDietTags.length === 0 || selectedDietTags.every((tag) => meal.diet_tags.includes(tag));
@@ -419,7 +433,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         selectedPrepFilters.some((filter) => prepFilterMatch(meal.prep_time_minutes, filter));
       return mealTypeMatch && dietMatch && prepMatch;
     });
-  }, [selectedMealTypes, selectedDietTags, selectedPrepFilters]);
+  }, [mealLibrary, selectedMealTypes, selectedDietTags, selectedPrepFilters]);
 
   const groceryItemsByCategory = React.useMemo(() => {
     const map = new Map<string, GroceryItem>();
@@ -512,8 +526,93 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     setCheckedGroceryKeys([]);
   }
 
+  async function loadMealsState(): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) return;
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/meals`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let payload: MealsStateResponse = {};
+      try {
+        payload = (await response.json()) as MealsStateResponse;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) return;
+
+      const incomingLibrary = Array.isArray(payload.meal_library) ? payload.meal_library : [];
+      setMealLibrary(incomingLibrary.length > 0 ? incomingLibrary : SAMPLE_MEALS);
+      setFavoriteMealIds(Array.isArray(payload.favorite_meals) ? payload.favorite_meals : []);
+      setSavedMeals(Array.isArray(payload.saved_meals_this_week) ? payload.saved_meals_this_week : []);
+      setCheckedGroceryKeys(
+        Array.isArray(payload.checked_grocery_items) ? payload.checked_grocery_items : []
+      );
+
+      const pref = payload.meal_preferences || {};
+      const prefAllergies = Array.isArray(pref.allergies)
+        ? pref.allergies.filter((value): value is string => typeof value === 'string')
+        : [];
+      const prefBudget =
+        pref.budget_level === 'Low' || pref.budget_level === 'Medium' || pref.budget_level === 'High'
+          ? pref.budget_level
+          : 'Medium';
+      setAllergiesInput(prefAllergies.join(', '));
+      setBudgetLevel(prefBudget);
+      setGoalInput(typeof pref.goal === 'string' ? pref.goal : '');
+    } catch {
+      // Silent fallback to local sample meals for this step.
+    }
+  }
+
+  async function saveMealPreferences() {
+    setMealsApiError('');
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) {
+      setIsMealPreferencesOpen(false);
+      return;
+    }
+    setIsSavingMealPreferences(true);
+    try {
+      const token = await getAuthToken();
+      const allergies = allergiesInput
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/meals/preferences`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          allergies,
+          budget_level: budgetLevel,
+          goal: goalInput.trim(),
+        }),
+      });
+      let payload: { message?: string } = {};
+      try {
+        payload = (await response.json()) as { message?: string };
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        setMealsApiError(payload.message || `Could not save meal preferences (${response.status}).`);
+        return;
+      }
+      setIsMealPreferencesOpen(false);
+    } catch {
+      setMealsApiError('Could not save meal preferences right now.');
+    } finally {
+      setIsSavingMealPreferences(false);
+    }
+  }
+
   function runMockGenerate() {
-    setGenerateHint('Mock refresh complete. Ready to swap with backend generation later.');
+    // Placeholder action for Step 2 (generation endpoint comes in Step 3).
   }
 
   React.useEffect(() => {
@@ -523,6 +622,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       } catch {
         // Keep username fallback when profile cannot be loaded.
       }
+      await loadMealsState();
     })();
   }, []);
 
@@ -594,9 +694,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
           </div>
         </header>
 
-        <div className="df-calendarLegend" style={{ padding: '8px 16px 0', color: '#6b7280' }}>
-          {generateHint}
-        </div>
+        {mealsApiError && <div className="df-errorText" style={{ padding: '8px 16px 0' }}>{mealsApiError}</div>}
 
         <div className="df-workoutsContent">
           <section className="df-workoutsSection">
@@ -904,8 +1002,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 />
               </label>
               <div className="df-weeklyPlanActions">
-                <button type="button" className="df-weeklyPlanActionBtn" onClick={() => setIsMealPreferencesOpen(false)}>
-                  Save
+                <button
+                  type="button"
+                  className="df-weeklyPlanActionBtn"
+                  onClick={() => void saveMealPreferences()}
+                  disabled={isSavingMealPreferences}
+                >
+                  {isSavingMealPreferences ? 'Saving...' : 'Save'}
                 </button>
                 <button
                   type="button"
