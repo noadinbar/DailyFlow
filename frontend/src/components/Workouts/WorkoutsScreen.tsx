@@ -137,6 +137,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const location = useLocation();
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
+  const [displayName, setDisplayName] = React.useState<string>('');
+  const [profileImageUrl, setProfileImageUrl] = React.useState<string>('');
+  const [savedQuestionnaire, setSavedQuestionnaire] = React.useState<Record<string, unknown> | null>(null);
   const [weekStartDate, setWeekStartDate] = React.useState<Date>(() => startOfWeek(new Date()));
   const [weeklyPlanSuggestions, setWeeklyPlanSuggestions] = React.useState<WeeklyPlanSuggestion[]>([]);
   const [workoutLibrary, setWorkoutLibrary] = React.useState<WorkoutLibraryItem[]>([]);
@@ -157,8 +160,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [dayPlanModal, setDayPlanModal] = React.useState<DayPlanModalState | null>(null);
   const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>({});
 
-  const displayName = (username || 'Noa Levi').trim();
-  const initials = (displayName || 'N').slice(0, 2).toUpperCase();
+  const effectiveName = (displayName || username || 'Noa Levi').trim();
+  const initials = (effectiveName || 'N').slice(0, 2).toUpperCase();
   const isWorkoutsRoute = location.pathname.startsWith('/workouts');
   const weekCards = React.useMemo(() => buildWeekCards(weekStartDate), [weekStartDate]);
   const weekStartIso = React.useMemo(() => toIsoDateLocal(weekStartDate), [weekStartDate]);
@@ -254,6 +257,176 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     const token = accessToken || idToken;
     if (!token) throw new Error('You need to be signed in.');
     return token;
+  }
+
+  async function loadProfile(): Promise<{
+    displayName: string;
+    profileImageUrl: string;
+    questionnaire: Record<string, unknown> | null;
+  }> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    let payload: {
+      display_name?: string;
+      profile_image_url?: string;
+      questionnaire?: Record<string, unknown>;
+      message?: string;
+    } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not load profile (${response.status}).`;
+      throw new Error(message);
+    }
+    const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
+    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
+    if (name) setDisplayName(name);
+    setProfileImageUrl(imageUrl);
+    const q =
+      payload.questionnaire && typeof payload.questionnaire === 'object' && !Array.isArray(payload.questionnaire)
+        ? payload.questionnaire
+        : null;
+    setSavedQuestionnaire(q);
+    return { displayName: name, profileImageUrl: imageUrl, questionnaire: q };
+  }
+
+  async function saveProfileDisplayName(nextName: string): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ display_name: nextName }),
+    });
+    let payload: { display_name?: string; profile_image_url?: string; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not save profile (${response.status}).`;
+      throw new Error(message);
+    }
+    const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
+    setDisplayName(name);
+    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
+    if (imageUrl) setProfileImageUrl(imageUrl);
+  }
+
+  async function saveQuestionnairePreferences(patch: Record<string, unknown>): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(patch),
+    });
+    let payload: { questionnaire?: Record<string, unknown>; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not save preferences (${response.status}).`;
+      throw new Error(message);
+    }
+    if (
+      payload.questionnaire &&
+      typeof payload.questionnaire === 'object' &&
+      !Array.isArray(payload.questionnaire)
+    ) {
+      setSavedQuestionnaire(payload.questionnaire);
+    }
+  }
+
+  async function requestProfileImageUploadUrl(args: { contentType: string }): Promise<{
+    uploadUrl: string;
+    objectKey: string;
+  }> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile/image/upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ content_type: args.contentType }),
+    });
+    let payload: { upload_url?: string; object_key?: string; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not create upload URL (${response.status}).`;
+      throw new Error(message);
+    }
+    const uploadUrl = typeof payload.upload_url === 'string' ? payload.upload_url : '';
+    const objectKey = typeof payload.object_key === 'string' ? payload.object_key : '';
+    if (!uploadUrl || !objectKey) throw new Error('Upload URL response is missing required fields.');
+    return { uploadUrl, objectKey };
+  }
+
+  async function saveProfileImageKey(objectKey: string): Promise<void> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ profile_image_key: objectKey }),
+    });
+    let payload: { profile_image_url?: string; message?: string } = {};
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not save profile (${response.status}).`;
+      throw new Error(message);
+    }
+    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
+    if (imageUrl) setProfileImageUrl(imageUrl);
   }
 
   async function handleLogoutClick() {
@@ -557,14 +730,35 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  React.useEffect(() => {
+    void (async () => {
+      try {
+        await loadProfile();
+      } catch {
+        // Keep username fallback when profile cannot be loaded.
+      }
+    })();
+  }, []);
+
   return (
     <section className="df-calendarPage df-workoutsPage" aria-label="DailyFlow workouts screen">
       <aside className="df-calendarLeftNav">
         <div className="df-calendarBrand">DailyFlow</div>
         <div className="df-calendarProfile">
-          <div className="df-calendarProfileAvatar">{initials}</div>
+          <div className="df-calendarProfileAvatar">
+            {profileImageUrl ? (
+              <img
+                key={profileImageUrl}
+                src={profileImageUrl}
+                alt=""
+                className="df-calendarProfileAvatarImg"
+              />
+            ) : (
+              initials
+            )}
+          </div>
           <div>
-            <div className="df-calendarProfileName">{displayName}</div>
+            <div className="df-calendarProfileName">{effectiveName}</div>
             <div className="df-calendarProfileHint">Plan your week</div>
           </div>
           <button
@@ -896,7 +1090,14 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
       <ProfileSettingsModal
         isOpen={isProfileSettingsOpen}
-        initialName={displayName}
+        initialName={effectiveName}
+        savedProfileImageUrl={profileImageUrl}
+        savedQuestionnaire={savedQuestionnaire}
+        onLoadProfile={loadProfile}
+        onSaveDisplayName={saveProfileDisplayName}
+        onRequestProfileImageUploadUrl={requestProfileImageUploadUrl}
+        onSaveProfileImageKey={saveProfileImageKey}
+        onSaveQuestionnaire={saveQuestionnairePreferences}
         onClose={() => setIsProfileSettingsOpen(false)}
       />
 
