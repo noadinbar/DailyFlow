@@ -15,6 +15,8 @@ type WeeklyPlanSuggestion = {
   recommended_end_time: string;
   recommended_time_label: string;
   reason_short: string;
+  google_event_id?: string;
+  dailyflow_calendar_id?: string;
 };
 
 type WorkoutLibraryItem = {
@@ -58,6 +60,14 @@ type FavoriteToggleResponse = {
 type WeeklyPlanUpdateResponse = {
   weekly_plan_suggestions?: WeeklyPlanSuggestion[];
   updated_at?: string;
+  already_scheduled?: boolean;
+  google_event_id?: string;
+  dailyflow_calendar_id?: string;
+  message?: string;
+};
+
+type PlanCalendarStatus = {
+  state: 'loading' | 'success' | 'error';
   message?: string;
 };
 
@@ -137,6 +147,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
+  const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>({});
 
   const displayName = (username || 'Noa Levi').trim();
   const initials = (displayName || 'N').slice(0, 2).toUpperCase();
@@ -340,6 +351,19 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         : null;
       if (!savedPlan) throw new Error('Weekly plan update returned invalid payload.');
       setWeeklyPlanSuggestions(savedPlan);
+      setPlanCalendarStatusById((prev) => {
+        const next: Record<string, PlanCalendarStatus> = {};
+        for (const planItem of savedPlan) {
+          const planId = typeof planItem.id === 'string' ? planItem.id : '';
+          if (!planId) continue;
+          const previous = prev[planId];
+          if (previous) next[planId] = previous;
+          if (typeof planItem.google_event_id === 'string' && planItem.google_event_id.trim()) {
+            next[planId] = { state: 'success', message: 'Added to DailyFlow calendar.' };
+          }
+        }
+        return next;
+      });
       return savedPlan;
     } catch (e) {
       const anyErr = e as { message?: string };
@@ -360,6 +384,38 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       week_end: weekEndIso,
       plan_id: planId,
     });
+  }
+
+  async function handleAddToCalendar(planId: string) {
+    setPlanCalendarStatusById((prev) => ({
+      ...prev,
+      [planId]: { state: 'loading', message: 'Adding...' },
+    }));
+    const saved = await mutateWeeklyPlan(
+      {
+        action: 'add_to_calendar',
+        week_start: weekStartIso,
+        week_end: weekEndIso,
+        plan_id: planId,
+      },
+      { suppressGlobalError: true }
+    );
+    if (saved) {
+      const item = saved.find((entry) => entry.id === planId);
+      const alreadyAdded = Boolean(item?.google_event_id);
+      setPlanCalendarStatusById((prev) => ({
+        ...prev,
+        [planId]: {
+          state: 'success',
+          message: alreadyAdded ? 'Added to DailyFlow calendar.' : 'Added to DailyFlow calendar.',
+        },
+      }));
+      return;
+    }
+    setPlanCalendarStatusById((prev) => ({
+      ...prev,
+      [planId]: { state: 'error', message: 'Could not add to calendar.' },
+    }));
   }
 
   function openAddFromLibraryModal(workout: WorkoutLibraryItem) {
@@ -570,6 +626,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 const item = daySuggestions[0];
                 const libraryWorkout = item ? libraryById.get(item.library_workout_id) : undefined;
                 const canOpenWeeklyDetails = Boolean(item && libraryWorkout);
+                const itemCalendarStatus = item ? planCalendarStatusById[item.id] : undefined;
+                const isItemAddLoading = itemCalendarStatus?.state === 'loading';
+                const isItemAdded =
+                  Boolean(item?.google_event_id) || itemCalendarStatus?.state === 'success';
                 return (
                   <article
                     key={card.dateIso}
@@ -615,11 +675,14 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                             className="df-weeklyPlanControlBtn df-weeklyPlanControlAdd"
                             title="Add to calendar"
                             aria-label="Add to calendar"
+                            disabled={!item || isItemAddLoading || isItemAdded}
                             onClick={(event) => {
                               event.stopPropagation();
+                              if (!item) return;
+                              void handleAddToCalendar(item.id);
                             }}
                           >
-                            +
+                            {isItemAddLoading ? '…' : isItemAdded ? '✓' : '+'}
                           </button>
                           <button
                             type="button"
@@ -637,6 +700,14 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         </div>
                         {daySuggestions.length > 1 && (
                           <div className="df-workoutMeta">+{daySuggestions.length - 1} more options</div>
+                        )}
+                        {itemCalendarStatus?.state === 'error' && (
+                          <div className="df-errorText">{itemCalendarStatus.message || 'Could not add to calendar.'}</div>
+                        )}
+                        {itemCalendarStatus?.state === 'success' && (
+                          <div className="df-calendarLegend" style={{ color: '#065f46', marginBottom: 0 }}>
+                            {itemCalendarStatus.message || 'Added to DailyFlow calendar.'}
+                          </div>
                         )}
                       </>
                     )}
