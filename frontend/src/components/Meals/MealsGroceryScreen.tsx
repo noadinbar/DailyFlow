@@ -65,6 +65,7 @@ type MealsStateResponse = {
   meal_preferences?: {
     allergies?: string[];
     budget_level?: string;
+    goals?: string[];
     goal?: string;
   };
   meal_library?: MealLibraryItem[];
@@ -222,8 +223,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [isMealPreferencesOpen, setIsMealPreferencesOpen] = React.useState<boolean>(false);
   const [allergiesInput, setAllergiesInput] = React.useState<string>('');
   const [budgetLevel, setBudgetLevel] = React.useState<BudgetLevel>('Medium');
-  const [goalInput, setGoalInput] = React.useState<MealGoal>('Balanced');
+  const [goalInput, setGoalInput] = React.useState<MealGoal[]>(['Balanced']);
   const [isSavingMealPreferences, setIsSavingMealPreferences] = React.useState<boolean>(false);
+  const [isGeneratingMeals, setIsGeneratingMeals] = React.useState<boolean>(false);
 
   const [addMealSource, setAddMealSource] = React.useState<MealLibraryItem | null>(null);
   const [addMealDate, setAddMealDate] = React.useState<string>('');
@@ -579,11 +581,16 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
           : 'Medium';
       setAllergiesInput(prefAllergies.join(', '));
       setBudgetLevel(prefBudget);
-      const incomingGoal =
-        typeof pref.goal === 'string' && MEAL_GOAL_OPTIONS.includes(pref.goal as MealGoal)
-          ? (pref.goal as MealGoal)
-          : 'Balanced';
-      setGoalInput(incomingGoal);
+      const incomingGoals = Array.isArray(pref.goals)
+        ? pref.goals.filter((goal): goal is MealGoal => MEAL_GOAL_OPTIONS.includes(goal as MealGoal))
+        : [];
+      if (incomingGoals.length > 0) {
+        setGoalInput(incomingGoals);
+      } else if (typeof pref.goal === 'string' && MEAL_GOAL_OPTIONS.includes(pref.goal as MealGoal)) {
+        setGoalInput([pref.goal as MealGoal]);
+      } else {
+        setGoalInput(['Balanced']);
+      }
     } catch {
       // Silent fallback to local sample meals for this step.
     }
@@ -612,7 +619,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         body: JSON.stringify({
           allergies,
           budget_level: budgetLevel,
-          goal: goalInput.trim(),
+          goals: goalInput,
+          goal: goalInput[0] || '',
         }),
       });
       let payload: { message?: string } = {};
@@ -634,7 +642,41 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   function runMockGenerate() {
-    // Placeholder action for Step 2 (generation endpoint comes in Step 3).
+    void (async () => {
+      setMealsApiError('');
+      setIsGeneratingMeals(true);
+      try {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+        if (!baseUrl?.trim()) throw new Error('Missing API base URL.');
+        const token = await getAuthToken();
+        const response = await fetch(`${baseUrl.replace(/\/$/, '')}/meals/generate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({}),
+        });
+        let payload: { message?: string; meal_library?: MealLibraryItem[]; favorite_meals?: string[] } = {};
+        try {
+          payload = (await response.json()) as typeof payload;
+        } catch {
+          payload = {};
+        }
+        if (!response.ok) {
+          setMealsApiError(payload.message || `Could not generate meals (${response.status}).`);
+          return;
+        }
+        const generatedLibrary = Array.isArray(payload.meal_library) ? payload.meal_library : [];
+        if (generatedLibrary.length > 0) setMealLibrary(generatedLibrary);
+        if (Array.isArray(payload.favorite_meals)) setFavoriteMealIds(payload.favorite_meals);
+      } catch (err) {
+        const anyErr = err as { message?: string };
+        setMealsApiError(anyErr?.message || 'Could not generate meals right now.');
+      } finally {
+        setIsGeneratingMeals(false);
+      }
+    })();
   }
 
   React.useEffect(() => {
@@ -702,8 +744,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       <div className="df-calendarMain">
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
-            <button type="button" className="df-btn df-btnPrimary" onClick={runMockGenerate}>
-              Generate
+            <button
+              type="button"
+              className="df-btn df-btnPrimary"
+              onClick={runMockGenerate}
+              disabled={isGeneratingMeals}
+            >
+              {isGeneratingMeals ? 'Generating...' : 'Generate'}
             </button>
             <button type="button" className="df-btn" onClick={() => setIsMealPreferencesOpen(true)}>
               Meal Preferences
@@ -1016,9 +1063,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   Goal
                 </div>
                 <select
-                  className="df-select"
+                  className="df-select df-selectMulti"
                   value={goalInput}
-                  onChange={(event) => setGoalInput(event.target.value as MealGoal)}
+                  multiple
+                  onChange={(event) => {
+                    const selected = Array.from(event.target.selectedOptions).map((option) => option.value as MealGoal);
+                    setGoalInput(selected);
+                  }}
                 >
                   {MEAL_GOAL_OPTIONS.map((goal) => (
                     <option key={goal} value={goal}>
@@ -1026,6 +1077,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                     </option>
                   ))}
                 </select>
+                <div className="df-settingsHint">You can select multiple goals (Ctrl/Cmd + click).</div>
               </label>
               <div className="df-weeklyPlanActions">
                 <button

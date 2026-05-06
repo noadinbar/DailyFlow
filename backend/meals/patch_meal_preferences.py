@@ -91,10 +91,26 @@ def _normalize_budget_level(value: Any) -> str:
     return "Medium"
 
 
-def _normalize_goal(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    return value.strip()
+def _normalize_goals(value: Any, fallback_goal: Any = "") -> List[str]:
+    if isinstance(value, list):
+        goals: List[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            cleaned = item.strip()
+            if cleaned and cleaned not in goals:
+                goals.append(cleaned)
+        if goals:
+            return goals
+    if isinstance(value, str):
+        cleaned_single = value.strip()
+        if cleaned_single:
+            return [cleaned_single]
+    if isinstance(fallback_goal, str):
+        cleaned_fallback = fallback_goal.strip()
+        if cleaned_fallback:
+            return [cleaned_fallback]
+    return []
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -119,7 +135,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     allergies = _normalize_allergies(payload.get("allergies"))
     budget_level = _normalize_budget_level(payload.get("budget_level"))
-    goal = _normalize_goal(payload.get("goal"))
+    goals = _normalize_goals(payload.get("goals"), payload.get("goal"))
+    goal = goals[0] if goals else ""
     updated_at = _iso_utc_now()
 
     try:
@@ -130,6 +147,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "record_key": "PREFERENCES",
                 "allergies": allergies,
                 "budget_level": budget_level,
+                "goals": goals,
                 "goal": goal,
                 "updated_at": updated_at,
             }
@@ -145,6 +163,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "meal_preferences": {
                 "allergies": allergies,
                 "budget_level": budget_level,
+                "goals": goals,
                 "goal": goal,
                 "updated_at": updated_at,
             }

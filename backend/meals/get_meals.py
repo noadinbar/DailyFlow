@@ -94,6 +94,14 @@ def _safe_string(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _safe_goals(value: Any, fallback_goal: Any = "") -> List[str]:
+    goals = _safe_string_list(value)
+    if goals:
+        return goals
+    single = _safe_string(fallback_goal)
+    return [single] if single else []
+
+
 def _safe_list_of_dicts(value: Any) -> List[Dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -141,6 +149,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "meal_preferences": {
             "allergies": _safe_string_list(pref_item.get("allergies")),
             "budget_level": _safe_budget_level(pref_item.get("budget_level")),
+            "goals": _safe_goals(pref_item.get("goals"), pref_item.get("goal")),
             "goal": _safe_string(pref_item.get("goal")),
             "updated_at": _safe_string(pref_item.get("updated_at")),
         },
