@@ -236,6 +236,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const initials = (effectiveName || 'N').slice(0, 2).toUpperCase();
   const isMealsRoute = location.pathname.startsWith('/meals');
 
+  function getApiBaseUrl(): string {
+    const rawBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    const cleaned = typeof rawBaseUrl === 'string' ? rawBaseUrl.trim().replace(/\/+$/, '') : '';
+    if (!cleaned) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    return cleaned;
+  }
+
   async function getAuthToken(): Promise<string> {
     const session = await fetchAuthSession();
     const accessToken = session.tokens?.accessToken?.toString();
@@ -250,10 +257,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     profileImageUrl: string;
     questionnaire: Record<string, unknown> | null;
   }> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const baseUrl = getApiBaseUrl();
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(`${baseUrl}/profile`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -288,10 +294,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   async function saveProfileDisplayName(nextName: string): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const baseUrl = getApiBaseUrl();
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(`${baseUrl}/profile`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -319,10 +324,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   async function saveQuestionnairePreferences(patch: Record<string, unknown>): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const baseUrl = getApiBaseUrl();
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(`${baseUrl}/profile`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -356,10 +360,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     uploadUrl: string;
     objectKey: string;
   }> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const baseUrl = getApiBaseUrl();
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile/image/upload-url`, {
+    const response = await fetch(`${baseUrl}/profile/image/upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -387,10 +390,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   async function saveProfileImageKey(objectKey: string): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
+    const baseUrl = getApiBaseUrl();
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(`${baseUrl}/profile`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -547,11 +549,10 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   async function loadMealsState(): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) return;
+    const baseUrl = getApiBaseUrl();
     try {
       const token = await getAuthToken();
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/meals`, {
+      const response = await fetch(`${baseUrl}/meals`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -598,9 +599,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
 
   async function saveMealPreferences() {
     setMealsApiError('');
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) {
-      setIsMealPreferencesOpen(false);
+    let baseUrl = '';
+    try {
+      baseUrl = getApiBaseUrl();
+    } catch {
+      setMealsApiError('Missing API base URL configuration.');
       return;
     }
     setIsSavingMealPreferences(true);
@@ -610,7 +613,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         .split(',')
         .map((item) => item.trim())
         .filter((item) => item.length > 0);
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/meals/preferences`, {
+      const response = await fetch(`${baseUrl}/meals/preferences`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -641,15 +644,16 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     }
   }
 
-  function runMockGenerate() {
+  function runMockGenerate(event?: React.MouseEvent<HTMLButtonElement>) {
+    event?.preventDefault();
+    event?.stopPropagation();
     void (async () => {
       setMealsApiError('');
       setIsGeneratingMeals(true);
       try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-        if (!baseUrl?.trim()) throw new Error('Missing API base URL.');
+        const baseUrl = getApiBaseUrl();
         const token = await getAuthToken();
-        const response = await fetch(`${baseUrl.replace(/\/$/, '')}/meals/generate`, {
+        const response = await fetch(`${baseUrl}/meals/generate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
