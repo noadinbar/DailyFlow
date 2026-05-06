@@ -561,7 +561,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             <div className="df-workoutsSectionHeader">
               <h2 className="df-workoutsTitle">Weekly Workout Plan</h2>
               <div className="df-workoutsGoal">
-                {`${scheduledWorkoutCount} workouts a week`}
+                {`${scheduledWorkoutCount} workouts this week`}
               </div>
             </div>
             <div className="df-workoutWeekGrid">
