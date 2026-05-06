@@ -150,6 +150,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [isGeneratingPlan, setIsGeneratingPlan] = React.useState<boolean>(false);
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState<boolean>(false);
   const [isSavingWeeklyPlan, setIsSavingWeeklyPlan] = React.useState<boolean>(false);
+  const [isAddingAllToCalendar, setIsAddingAllToCalendar] = React.useState<boolean>(false);
   const [addFromLibraryWorkout, setAddFromLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
   const [addFromLibraryDay, setAddFromLibraryDay] = React.useState<string>('');
   const [addFromLibraryStartTime, setAddFromLibraryStartTime] = React.useState<string>('18:00');
@@ -621,6 +622,57 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }));
   }
 
+  async function handleAddAllToCalendar() {
+    if (isAddingAllToCalendar) return;
+    const eligibleItems = weeklyPlanSuggestions.filter((item) => {
+      const itemStatus = planCalendarStatusById[item.id];
+      const alreadyAdded =
+        Boolean(item.google_event_id && item.google_event_id.trim()) || itemStatus?.state === 'success';
+      return !alreadyAdded;
+    });
+    if (eligibleItems.length === 0) return;
+    setGenerateError('');
+    setIsAddingAllToCalendar(true);
+    let successCount = 0;
+    let failCount = 0;
+    for (const item of eligibleItems) {
+      const planId = item.id;
+      if (!planId) continue;
+      setPlanCalendarStatusById((prev) => ({
+        ...prev,
+        [planId]: { state: 'loading', message: 'Adding...' },
+      }));
+      const saved = await mutateWeeklyPlan(
+        {
+          action: 'add_to_calendar',
+          week_start: weekStartIso,
+          week_end: weekEndIso,
+          plan_id: planId,
+        },
+        { suppressGlobalError: true }
+      );
+      if (saved) {
+        successCount += 1;
+        setPlanCalendarStatusById((prev) => ({
+          ...prev,
+          [planId]: { state: 'success' },
+        }));
+      } else {
+        failCount += 1;
+        setPlanCalendarStatusById((prev) => ({
+          ...prev,
+          [planId]: { state: 'error', message: 'Could not add to calendar.' },
+        }));
+      }
+    }
+    if (failCount > 0) {
+      setGenerateError(`Added ${successCount} workouts. Failed to add ${failCount}.`);
+    } else {
+      setGenerateError('');
+    }
+    setIsAddingAllToCalendar(false);
+  }
+
   function openAddFromLibraryModal(workout: WorkoutLibraryItem) {
     setAddFromLibraryError('');
     setAddFromLibraryWorkout(workout);
@@ -713,11 +765,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     );
   }
 
-  function handleThisWeekClick() {
-    const next = startOfWeek(new Date());
-    setWeekStartDate(next);
-  }
-
   React.useEffect(() => {
     void loadWorkoutsData({ mode: 'saved', startDate: weekStartIso, endDate: weekEndIso });
   }, [weekStartIso, weekEndIso]);
@@ -799,9 +846,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
-            <button type="button" className="df-btn" onClick={handleThisWeekClick}>
-              This week
-            </button>
             <button
               type="button"
               className="df-btn df-btnPrimary"
@@ -810,8 +854,24 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             >
               {isGeneratingPlan ? 'Generating...' : 'Generate plan'}
             </button>
-            <button type="button" className="df-btn">
-              Add all to calendar
+            <button
+              type="button"
+              className="df-btn"
+              onClick={() => void handleAddAllToCalendar()}
+              disabled={
+                isAddingAllToCalendar ||
+                isSavingWeeklyPlan ||
+                isGeneratingPlan ||
+                weeklyPlanSuggestions.every((item) => {
+                  const itemStatus = planCalendarStatusById[item.id];
+                  return (
+                    Boolean(item.google_event_id && item.google_event_id.trim()) ||
+                    itemStatus?.state === 'success'
+                  );
+                })
+              }
+            >
+              {isAddingAllToCalendar ? 'Adding all...' : 'Add all to calendar'}
             </button>
           </div>
           <div className="df-calendarTopbarRight">

@@ -258,7 +258,7 @@ def _period_from_body(event: Dict[str, Any]) -> Tuple[Optional[date], Optional[d
 
 def _read_user_preferences(user_id: str) -> Dict[str, Any]:
     table = _dynamodb_table("USERS_TABLE")
-    response = table.get_item(Key={"user_id": user_id})
+    response = table.get_item(Key={"user_id": user_id}, ConsistentRead=True)
     item = response.get("Item") if isinstance(response, dict) else {}
     if not isinstance(item, dict):
         item = {}

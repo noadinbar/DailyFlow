@@ -765,7 +765,7 @@ def _generate_library_from_openai(preferences: Dict[str, Any]) -> Tuple[List[Dic
 
 def _read_user_preferences(user_id: str) -> Dict[str, Any]:
     table = _dynamodb_table("USERS_TABLE")
-    response = table.get_item(Key={"user_id": user_id})
+    response = table.get_item(Key={"user_id": user_id}, ConsistentRead=True)
     item = response.get("Item") if isinstance(response, dict) else {}
     if not isinstance(item, dict):
         item = {}
@@ -1326,7 +1326,27 @@ def _derive_weekly_plan_and_signatures(
             if str(item.get("recommended_day", "")).strip() >= start_date_value.isoformat()
             and str(item.get("recommended_day", "")).strip() <= end_date_value.isoformat()
         ]
-    if keep_plan and len(keep_plan) >= workouts_per_week:
+    if keep_plan and len(keep_plan) > workouts_per_week:
+        prioritized = sorted(
+            keep_plan,
+            key=lambda x: (
+                0 if str(x.get("google_event_id", "")).strip() else 1,
+                str(x.get("recommended_day", "")),
+                str(x.get("recommended_start_time", "")),
+                str(x.get("recommended_end_time", "")),
+                str(x.get("id", "")),
+            ),
+        )
+        weekly_plan = sorted(
+            prioritized[:workouts_per_week],
+            key=lambda x: (
+                str(x.get("recommended_day", "")),
+                str(x.get("recommended_start_time", "")),
+                str(x.get("recommended_end_time", "")),
+                str(x.get("id", "")),
+            ),
+        )
+    elif keep_plan and len(keep_plan) >= workouts_per_week:
         weekly_plan = sorted(
             keep_plan,
             key=lambda x: (
