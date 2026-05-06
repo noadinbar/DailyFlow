@@ -12,6 +12,14 @@ type IngredientRounding = 'none' | 'ceil';
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 type PrepTimeFilter = 'lt20' | '20to40' | 'gt40';
 type BudgetLevel = 'Low' | 'Medium' | 'High';
+type MealGoal =
+  | 'Balanced'
+  | 'Quick & easy'
+  | 'High protein'
+  | 'Budget friendly'
+  | 'Family friendly'
+  | 'Light meals'
+  | 'Meal prep';
 
 type MealIngredient = {
   name: string;
@@ -143,6 +151,16 @@ const SAMPLE_MEALS: MealLibraryItem[] = [
   },
 ];
 
+const MEAL_GOAL_OPTIONS: MealGoal[] = [
+  'Balanced',
+  'Quick & easy',
+  'High protein',
+  'Budget friendly',
+  'Family friendly',
+  'Light meals',
+  'Meal prep',
+];
+
 function prepFilterMatch(prepTime: number, prepFilter: PrepTimeFilter): boolean {
   if (prepFilter === 'lt20') return prepTime < 20;
   if (prepFilter === '20to40') return prepTime >= 20 && prepTime <= 40;
@@ -204,7 +222,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [isMealPreferencesOpen, setIsMealPreferencesOpen] = React.useState<boolean>(false);
   const [allergiesInput, setAllergiesInput] = React.useState<string>('');
   const [budgetLevel, setBudgetLevel] = React.useState<BudgetLevel>('Medium');
-  const [goalInput, setGoalInput] = React.useState<string>('');
+  const [goalInput, setGoalInput] = React.useState<MealGoal>('Balanced');
   const [isSavingMealPreferences, setIsSavingMealPreferences] = React.useState<boolean>(false);
 
   const [addMealSource, setAddMealSource] = React.useState<MealLibraryItem | null>(null);
@@ -561,7 +579,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
           : 'Medium';
       setAllergiesInput(prefAllergies.join(', '));
       setBudgetLevel(prefBudget);
-      setGoalInput(typeof pref.goal === 'string' ? pref.goal : '');
+      const incomingGoal =
+        typeof pref.goal === 'string' && MEAL_GOAL_OPTIONS.includes(pref.goal as MealGoal)
+          ? (pref.goal as MealGoal)
+          : 'Balanced';
+      setGoalInput(incomingGoal);
     } catch {
       // Silent fallback to local sample meals for this step.
     }
@@ -993,13 +1015,17 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
                   Goal
                 </div>
-                <input
-                  type="text"
-                  className="df-input"
-                  placeholder="e.g. high protein, lose weight"
+                <select
+                  className="df-select"
                   value={goalInput}
-                  onChange={(event) => setGoalInput(event.target.value)}
-                />
+                  onChange={(event) => setGoalInput(event.target.value as MealGoal)}
+                >
+                  {MEAL_GOAL_OPTIONS.map((goal) => (
+                    <option key={goal} value={goal}>
+                      {goal}
+                    </option>
+                  ))}
+                </select>
               </label>
               <div className="df-weeklyPlanActions">
                 <button
