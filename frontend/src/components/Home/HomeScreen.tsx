@@ -883,6 +883,7 @@ export default function HomeScreen(props: HomeScreenProps) {
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
   const isCalendarRoute = location.pathname.startsWith('/calendar');
+  const isMealsRoute = location.pathname.startsWith('/meals');
 
   return (
     <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
@@ -925,7 +926,11 @@ export default function HomeScreen(props: HomeScreenProps) {
           >
             Calendar
           </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
+          <button
+            type="button"
+            className={`df-calendarMenuItem${isMealsRoute ? ' df-calendarMenuItemActive' : ''}`}
+            onClick={() => navigate('/meals')}
+          >
             Meals & Grocery
           </button>
           <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/workouts')}>

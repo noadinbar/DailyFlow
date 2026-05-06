@@ -4,6 +4,7 @@ import AuthScreen from './components/Auth/AuthScreen';
 import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireWizard/OnboardingQuestionnaireWizard';
 import HomeScreen from './components/Home/HomeScreen';
 import WorkoutsScreen from './components/Workouts/WorkoutsScreen';
+import MealsGroceryScreen from './components/Meals/MealsGroceryScreen';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
 import { fetchOnboardingCompleted, signOutCurrentUser } from './services/auth/cognitoPlaceholders';
 import { configureAmplify } from './services/auth/amplifyConfig';
@@ -30,7 +31,7 @@ function normalizePathname(pathname: string): string {
 function shouldStartHydratingCalendar(): boolean {
   if (typeof window === 'undefined') return false;
   const current = normalizePathname(window.location.pathname);
-  return current === '/calendar' || current === '/workouts';
+  return current === '/calendar' || current === '/workouts' || current === '/meals';
 }
 
 export default function App() {
@@ -49,7 +50,7 @@ export default function App() {
 
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
-    if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts') {
+    if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts' && normalizedPath !== '/meals') {
       setIsHydratingCalendarRoute(false);
       return;
     }
@@ -111,7 +112,8 @@ export default function App() {
 
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
-    const isAllowedHomePath = normalizedPath === '/calendar' || normalizedPath === '/workouts';
+    const isAllowedHomePath =
+      normalizedPath === '/calendar' || normalizedPath === '/workouts' || normalizedPath === '/meals';
     if (screen === 'home' && authState.isAuthenticated && !isAllowedHomePath) {
       navigate('/calendar', { replace: true });
     }
@@ -185,6 +187,18 @@ export default function App() {
             <></>
           ) : screen === 'home' && authState.isAuthenticated ? (
             <WorkoutsScreen username={authState.user?.username} onLogout={() => handleLogout()} />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
+      />
+      <Route
+        path="/meals/*"
+        element={
+          isHydratingCalendarRoute ? (
+            <></>
+          ) : screen === 'home' && authState.isAuthenticated ? (
+            <MealsGroceryScreen username={authState.user?.username} onLogout={() => handleLogout()} />
           ) : (
             <Navigate to="/" replace />
           )

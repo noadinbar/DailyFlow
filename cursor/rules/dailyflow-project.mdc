@@ -1,185 +1,165 @@
 Project name: DailyFlow
 
 Project overview:
-DailyFlow is a web application that helps users manage their schedule, routines, and wellbeing in one place.
+DailyFlow is a web application that helps users manage schedule, routines, and wellbeing in one place.
 
-The full product is planned to include:
+Core product areas:
 - onboarding questionnaire
 - calendar screen
-- meals and grocery planning
 - workouts
+- meals and grocery planning
 - stress and break recommendations
 - overview / weekly summary
 - profile settings
 
-Main integrations and infrastructure:
-- Frontend: React
+Main stack and infrastructure:
+- Frontend: React + Vite
 - Backend: Python on AWS Lambda
 - Authentication: Amazon Cognito
 - Database: DynamoDB
 - Hosting: AWS Amplify
-- External integrations: Google Calendar
-- Storage for user-uploaded assets: Amazon S3
-- Future integrations: OpenAI and Apple Watch / HRV-based data
+- External integration: Google Calendar
+- User-uploaded assets: Amazon S3
+- AI integration: OpenAI
 
-Current implemented state:
-- AWS Cognito is already connected in the frontend
-- Sign up and Log in already work
-- A frontend questionnaire screen already exists
-- DynamoDB tables already exist, including:
-  - Users
-  - Integrations
+Existing DynamoDB tables:
+- Users
+  - PK: user_id
+- Integrations
+  - PK: user_id
+- BusyBlocks
+  - PK: user_id
+  - SK: block_key
+- DailyFlowEvents
+  - PK: user_id
+  - SK: event_id
+- WorkoutLibrary
+  - PK: user_id
+
+Current implemented foundation:
+- Cognito sign up / log in works.
+- Onboarding questionnaire exists.
+- Profile/settings foundation exists.
+- Profile image flow exists and uses S3.
+- Google Calendar OAuth flow exists.
+- Google Calendar list fetch exists.
+- User-selected Google calendars are persisted.
+- BusyBlocks sync/get flows exist.
+- Calendar screen supports DAY / WEEK / MONTH.
+- A dedicated Google Calendar named DailyFlow is created/reused for app-created events.
+- DailyFlow calendar id is stored in Integrations as dailyflow_calendar_id.
+- Workouts screen exists and is connected to real backend/OpenAI/Google Calendar flows.
+
+Google Calendar rules:
+- Do not create duplicate DailyFlow calendars.
+- Before creating a DailyFlow calendar, always check whether one already exists and reuse it.
+- DailyFlow-created events should be created only inside the dedicated DailyFlow Google Calendar.
+- BusyBlocks and DailyFlow-created events are different concepts and must remain logically separated.
+- BusyBlocks should represent occupied time from the user-selected Google calendars.
+- Reuse existing Google OAuth/token refresh logic where possible.
+- Current Google scopes should preserve both:
+  - https://www.googleapis.com/auth/calendar.readonly
+  - https://www.googleapis.com/auth/calendar.app.created
+
+Profile/settings rules:
+- Screens should use the shared profile/preferences source.
+- Do not create duplicate local preference state if existing profile data can be reused.
+- Preferences changed in one screen should be reflected in other screens after save/navigation.
+- Avoid adding new onboarding questionnaire questions unless explicitly requested.
+- Feature-specific preferences may live inside that feature when appropriate.
+
+Workouts rules:
+- Workouts implementation should remain stable and not be rewritten unless explicitly requested.
+- Workout generation should use saved preferences and available free time.
+- Existing saved/approved workout plan items should not disappear after Generate.
+- Items added to Google Calendar should remain marked as added.
+- Add to calendar must not create duplicate Google events.
+- Delete should remove the linked DailyFlow-created event when applicable.
+- Do not change Workouts while working on Meals unless the requested task explicitly depends on shared code.
+
+Current active milestone:
+The current active milestone is Meals & Grocery.
+
+Meals & Grocery high-level direction:
+- Build the real Meals & Grocery screen, not a temporary test page.
+- The screen should include:
+  - Meal Library
+  - Saved Meals This Week
+  - Grocery List
+- There should not be an automatic weekly meal plan like Workouts.
+- The user manually chooses meals from the Meal Library.
+- Clicking + on a meal should open a popup where the user chooses date and time.
+- The app should calculate the end time using the meal prep duration.
+- The app should check BusyBlocks before saving a meal prep event.
+- If valid, the app should create a DailyFlow Google Calendar event.
+- Saved Meals This Week should be the source for Grocery List generation.
+- Grocery List should not be generated from the entire Meal Library.
+- Meals should support servings, and grocery quantities should update according to servings.
+- Grocery list quantities should be aggregated and rounded sensibly for package-like units.
+- Meal Library should support favorites and filters.
+- Meal Preferences should be feature-specific and should not extend the onboarding questionnaire unless explicitly requested.
+- Use existing profile/questionnaire data where relevant, for example diet-related preferences.
+
+Planned Meals DynamoDB table:
+- Prefer one focused table:
+  - MealsAndGroceries
+  - PK: user_id
+  - SK: record_key
+- Exact schema/details should be defined in the relevant implementation prompt, not assumed too early.
+
+General milestone rules:
+- Work incrementally and in small scoped steps.
+- Do not skip ahead to unrelated milestone work.
+- Do not implement Stress, Overview, Apple Watch, or unrelated features unless explicitly requested.
+- Do not rewrite unrelated parts of the app.
+- Do not add unnecessary architecture changes.
+- Keep Calendar, Workouts, Meals, Stress, and Overview logically separated.
+- Reuse shared infrastructure when appropriate:
+  - profile/preferences
+  - Google Calendar
   - BusyBlocks
+  - DailyFlow calendar
   - DailyFlowEvents
-- The project is currently primarily inside the Calendar milestone, with profile settings foundation now also in scope when explicitly requested
-- Google Calendar OAuth flow is already implemented
-- Google OAuth start and callback already work
-- Google Calendar list fetch already works
-- Users can already choose which Google calendars to expose
-- Selected Google calendars are already persisted per user
-- The selected calendars are the source of truth for what should be used next
-- BusyBlocks sync and get flows already exist
-- Busy blocks are already synced in Asia/Jerusalem timezone
-- Busy blocks currently use the Google event title, not the calendar name
-- Busy blocks are fetched for a rolling one-month future window
-- Previously synced past busy blocks remain visible and are not filtered out just because they are before today
-- The Calendar screen already supports dynamic DAY / WEEK / MONTH modes
-- The right-side mini calendar is already dynamic and clickable
-- Calendar navigation arrows are always enabled, even for weeks with no synced blocks
-- Empty weeks/days should still open and simply show no busy blocks
-- The week view currently uses the original simple busy-block card style
-- Days without busy blocks do not show a "No busy blocks" placeholder
-- The visible month label near DAY / WEEK / MONTH is already dynamic
-- Automatic busy-block sync now uses a 1-hour freshness rule
-- If the last successful busy-block sync was within the last hour, auto-sync should be skipped
-- If the last successful busy-block sync is older than 1 hour, auto-sync should run in the background
-- Manual refresh remains an explicit force-sync path
-- Auto-sync already includes an in-flight guard to prevent overlapping auto-sync calls on repeated screen entry
-
-Final product goal:
-The final product should support a full user flow where a user signs in, completes an onboarding questionnaire, connects Google Calendar, chooses which calendars to expose, syncs availability, receives personalized suggestions, manages their schedule through the platform, and later manages their profile settings including a profile image.
-
-Current milestone scope:
-For now, focus only on the currently active scoped work:
-- onboarding questionnaire refinement if explicitly requested
-- preferences editing foundation if explicitly requested
-- calendar screen
-- Google Calendar connection
-- Google calendar list UI states
-- selected Google calendars flow
-- BusyBlocks sync design and implementation
-- DailyFlow calendar flow preparation
-- profile settings UI shell if explicitly requested
-- profile editing foundation if explicitly requested
-- S3-based profile image storage foundation if explicitly requested
-- OpenAI integration only after the onboarding data structure becomes stable and only if explicitly requested
-
-Calendar milestone product direction:
-- The app should include a Calendar screen
-- This screen should include a Google Calendar connection flow
-- After connection, the app can fetch the user's Google calendars
-- The user can choose which calendars to expose to the app
-- The system must use only those selected calendars for availability sync
-- Busy blocks must represent occupied time only from the selected calendars
-- Busy blocks must be synced for one month ahead
-- Busy blocks and DailyFlow-created events are different concepts and must remain logically separated
-- The system should later create and use a separate Google calendar named DailyFlow
-- BusyBlocks should be persisted in the BusyBlocks DynamoDB table
-- Busy blocks should include source calendar context when needed by product/UI
-- If busy blocks are displayed in UI, they should be able to reflect the source calendar color
-- Busy blocks should be fetched and available for a rolling one-month window
-- BusyBlocks history should remain available after the first sync, so past synced weeks can still be viewed later
-- The Calendar screen should support free navigation between weeks, even outside the currently synced window
-- If a week has no synced busy blocks, it should still be accessible and simply display no blocks
-- The week view busy-block presentation should remain in the original simple block style unless explicitly requested otherwise
-- Days without busy blocks should remain empty and should not display a "No busy blocks" placeholder
-- The right-side mini calendar should be dynamic, reflect the current real month and day, and support clicking a date to jump to that date's week
-- The top date strip should avoid duplicating date information that is already shown elsewhere in the week UI
-- The calendar should support dynamic DAY / WEEK / MONTH views while preserving the current project structure
-- The visible month label near DAY / WEEK / MONTH should be dynamic
-- In WEEK mode, the visible month label should follow the week start date
-- Calendar rendering should remain compatible with the existing Hebrew / RTL layout
-- For calendar UI work, preserve the existing weekly structure and improve behavior incrementally
-- Do not replace the current calendar screen with a new calendar library unless explicitly requested
-- Automatic busy-block sync should use a freshness rule
-- If the last successful sync was within the last hour, auto-sync should not run again
-- If the last successful sync is older than one hour, auto-sync may run in the background
-- Manual refresh should remain available as an explicit force-sync action
-- Repeated overlapping auto-sync calls should be prevented
-
-Profile/settings product direction:
-- The app should include a profile area with a settings entry point
-- Clicking the settings gear should open a small settings modal or panel
-- The settings UI should include a side menu
-- For now, the side menu should include:
-  - Profile
-  - Preferences
-- Profile should be the default selected tab when the settings UI opens
-- Preferences can remain a placeholder until explicitly expanded
-- The Profile tab should eventually support editing the user's display name
-- The Profile tab should eventually support choosing and previewing a profile image
-- Profile images should ultimately be stored in Amazon S3
-- User profile metadata should be stored in the Users table, while the image file itself should not be stored in DynamoDB
-- Profile image upload should be implemented incrementally and should not skip directly to unrelated profile features
-- When profile image upload is implemented, prefer minimal and secure architecture aligned with the existing project structure
-
-Workouts / AI product direction:
-- Workouts work is now in scope when explicitly requested
-- The Workouts screen should be implemented incrementally, starting from the real screen structure and UI, not from a temporary test page
-- Prefer building the Workouts screen in a way that will later connect directly to the real workout suggestions flow
-- Do not build temporary AI/testing routes that will be thrown away later
-- When workout suggestion generation is implemented, prefer a real product route aligned with the Workouts screen and the existing project architecture
-- Workout suggestions should later be based on the user's saved preferences and available free time
-- The long-term flow should stay aligned with the shared Generate & Schedule flow in the design: select period -> load preferences and availability -> generate workout suggestions -> store suggestions -> optionally create DailyFlow calendar events after user acceptance
-- Keep Workouts implementation incremental:
-  1. screen UI
-  2. real backend suggestions route
-  3. OpenAI integration
-  4. acceptance / scheduling flow
-- Do not implement unrelated Meals, Stress, Overview, or Apple Watch logic as part of Workouts work unless explicitly requested
-- Generated workout library items should include practical workout_flow content, not vague placeholders
-- Assume the user may not know how to perform the workout alone
-- Workout details should explain what to actually do in a clear, beginner-friendly, actionable way
-- Walking workouts should include concrete pacing structure when relevant
-- Strength / Pilates / Mobility / Yoga style workouts should include specific movements or exercises where appropriate
-
-
-Important:
-- Work incrementally and in small steps
-- Prefer doing one scoped step at a time
-- Do not skip ahead to unrelated milestone work
-- Do not implement Meals, Workouts, Stress, Overview, OpenAI, or Apple Watch logic unless explicitly requested
-- Do not invent recommendation logic yet
-- Do not implement advanced scheduling logic yet unless explicitly requested
-- Do not rewrite unrelated parts of the app
-- Do not add unnecessary architecture changes
-- Keep the implementation aligned with the existing project structure and the current milestone only
-- Prefer the correct long-term project direction over temporary shortcuts that create duplicate work later
 
 Implementation guidance:
-- Keep the code simple and minimal
-- Do not over-engineer
-- Use clear and scalable structure
-- Prefer readable components and small focused functions
-- Do not add unnecessary libraries
-- Use English for code, file names, comments, and prompts
-- Reuse the existing project structure as much as possible
-- Only create or update files that are necessary for the requested task
-- If environment variables are needed, clearly list their exact names
-- If backend routes are needed, keep them minimal and focused
-- If placeholder logic is used, make it light and easy to replace later
-- If a change requires AWS updates, state them explicitly and concretely
-- If a change requires Google Cloud / Google OAuth updates, state them explicitly and concretely
+- Keep code simple and minimal.
+- Do not over-engineer.
+- Prefer readable components and small focused functions.
+- Do not add unnecessary libraries.
+- Use English for code, file names, comments, and prompts.
+- Reuse the existing project structure as much as possible.
+- Only create or update files required for the requested step.
+- Keep backend routes minimal and product-oriented.
+- Avoid temporary routes or throwaway AI/testing endpoints.
+- If placeholder logic is used, keep it light and easy to replace.
+- Use real product routes when backend work is requested.
+
+AWS / deployment guidance:
+- If a change requires AWS updates, state them explicitly and concretely.
+- If a change requires Google Cloud / Google OAuth updates, state them explicitly and concretely.
+- If a new DynamoDB table is required, list:
+  - table name
+  - partition key
+  - sort key if any
+  - required Lambda IAM permissions
+  - required environment variables
+- If code changes require only redeploy and no AWS config changes, say that clearly.
+- Do not write “AWS CHANGES REQUIRED: none” when frontend or Lambda redeploy is still required.
+- Distinguish between:
+  - AWS configuration changes
+  - deployment/redeploy requirements
 
 Working style:
-- Before generating code, first explain the plan
-- Before generating code, list which files will be created or updated
-- Keep changes scoped to the requested step only
-- Prefer production-oriented structure, but implement only the smallest correct piece for the requested step
-- When something is not implemented yet, use a simple placeholder rather than inventing a full system
-- At the end of every response that includes code changes, include a section called:
-  AWS CHANGES REQUIRED
-- In that section, explain exactly what must be changed in AWS because of the code changes you made
-- Do not give generic AWS advice; base it only on your actual code changes
-- If no AWS changes are needed, write exactly:
+- Before generating code, first explain the plan.
+- Before generating code, list which files will be created or updated.
+- Keep changes scoped to the requested step only.
+- Prefer production-oriented structure, but implement only the smallest correct piece for the requested step.
+- At the end of every response that includes code changes, include:
+  - exact files changed
+  - short summary
+  - manual test steps
+  - AWS CHANGES REQUIRED
+- In AWS CHANGES REQUIRED, explain only what must change because of the actual code changes.
+- Do not give generic AWS advice.
+- If no AWS changes and no deploy are needed, write exactly:
   AWS CHANGES REQUIRED: none

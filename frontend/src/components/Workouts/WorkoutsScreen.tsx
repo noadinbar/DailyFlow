@@ -164,6 +164,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const effectiveName = (displayName || username || 'Noa Levi').trim();
   const initials = (effectiveName || 'N').slice(0, 2).toUpperCase();
   const isWorkoutsRoute = location.pathname.startsWith('/workouts');
+  const isMealsRoute = location.pathname.startsWith('/meals');
   const weekCards = React.useMemo(() => buildWeekCards(weekStartDate), [weekStartDate]);
   const weekStartIso = React.useMemo(() => toIsoDateLocal(weekStartDate), [weekStartDate]);
   const weekEndIso = React.useMemo(() => {
@@ -824,7 +825,11 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/calendar')}>
             Calendar
           </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
+          <button
+            type="button"
+            className={`df-calendarMenuItem${isMealsRoute ? ' df-calendarMenuItemActive' : ''}`}
+            onClick={() => navigate('/meals')}
+          >
             Meals & Grocery
           </button>
           <button
