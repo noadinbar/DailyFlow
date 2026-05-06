@@ -71,6 +71,11 @@ type PlanCalendarStatus = {
   message?: string;
 };
 
+type DayPlanModalState = {
+  dayIso: string;
+  dayLabel: string;
+};
+
 type WeekDayCard = { dayLabel: string; dateIso: string };
 
 function pad2(value: number): string {
@@ -147,6 +152,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
+  const [dayPlanModal, setDayPlanModal] = React.useState<DayPlanModalState | null>(null);
   const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>({});
 
   const displayName = (username || 'Noa Levi').trim();
@@ -194,7 +200,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }, [workoutLibrary, favoriteWorkouts]);
   const availableDurationBuckets = React.useMemo(() => {
     const all = [...workoutLibrary, ...favoriteWorkouts];
-    return Array.from(
+    const unique = Array.from(
       new Set(
         all.map((item) =>
           'duration_bucket' in item && typeof item.duration_bucket === 'string'
@@ -202,7 +208,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             : getDurationBucket(item.duration_minutes)
         )
       )
-    ).slice(0, 3);
+    );
+    const order = ['10_20', '20_40', '40_60'];
+    return order.filter((bucket) => unique.includes(bucket));
   }, [workoutLibrary, favoriteWorkouts]);
   const displayedLibrary = React.useMemo(() => {
     const base = isFavoritesMode ? favoriteWorkouts : workoutLibrary;
@@ -232,6 +240,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     return map;
   }, [workoutLibrary]);
   const scheduledWorkoutCount = weeklyPlanSuggestions.length;
+  const dayPlanModalSuggestions = React.useMemo(() => {
+    if (!dayPlanModal) return [];
+    return suggestionsByDay.get(dayPlanModal.dayIso) || [];
+  }, [dayPlanModal, suggestionsByDay]);
 
   async function getAuthToken(): Promise<string> {
     const session = await fetchAuthSession();
@@ -696,7 +708,17 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                           </button>
                         </div>
                         {daySuggestions.length > 1 && (
-                          <div className="df-workoutMeta">+{daySuggestions.length - 1} more options</div>
+                          <button
+                            type="button"
+                            className="df-btn"
+                            style={{ width: '100%', marginTop: 4 }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDayPlanModal({ dayIso: card.dateIso, dayLabel: card.dayLabel });
+                            }}
+                          >
+                            +{daySuggestions.length - 1} more options
+                          </button>
                         )}
                         {itemCalendarStatus?.state === 'error' && (
                           <div className="df-errorText">{itemCalendarStatus.message || 'Could not add to calendar.'}</div>
@@ -1022,6 +1044,84 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dayPlanModal && (
+        <div
+          className="df-modalBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setDayPlanModal(null);
+          }}
+        >
+          <div className="df-modalPanel" role="dialog" aria-modal="true" aria-label="Day workouts">
+            <div className="df-modalHeader">
+              <div className="df-modalTitle">{dayPlanModal.dayLabel} workouts</div>
+              <button
+                type="button"
+                className="df-iconBtn"
+                onClick={() => setDayPlanModal(null)}
+                aria-label="Close day workouts dialog"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="df-settingsContent" style={{ display: 'grid', gap: 10, maxHeight: '70vh', overflowY: 'auto' }}>
+              {dayPlanModalSuggestions.map((planItem) => {
+                const planWorkout = libraryById.get(planItem.library_workout_id);
+                const itemCalendarStatus = planCalendarStatusById[planItem.id];
+                const isItemAddLoading = itemCalendarStatus?.state === 'loading';
+                const isItemAdded =
+                  Boolean(planItem.google_event_id) || itemCalendarStatus?.state === 'success';
+                return (
+                  <article key={planItem.id} className="df-workoutLibraryCard">
+                    <div className="df-workoutLibraryCardTop">
+                      <h3 className="df-workoutLibraryTitle">{planWorkout?.title || 'Workout'}</h3>
+                      <div className="df-weeklyPlanControls">
+                        <button
+                          type="button"
+                          className="df-weeklyPlanControlBtn df-weeklyPlanControlAdd"
+                          title="Add to calendar"
+                          aria-label="Add to calendar"
+                          disabled={isItemAddLoading || isItemAdded}
+                          onClick={() => void handleAddToCalendar(planItem.id)}
+                        >
+                          {isItemAddLoading ? '…' : isItemAdded ? '✓' : '+'}
+                        </button>
+                        <button
+                          type="button"
+                          className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
+                          disabled={isSavingWeeklyPlan}
+                          onClick={() => void handleRemoveWeeklyWorkout(planItem.id)}
+                          aria-label={`Remove ${planWorkout?.title || 'workout'} from weekly plan`}
+                          title="Remove"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                    <div className="df-workoutTypePill">{planWorkout?.workout_type || 'Workout'}</div>
+                    <div className="df-workoutMeta">
+                      {(planWorkout ? `${planWorkout.duration_minutes} min` : 'Duration')} ·{' '}
+                      {planWorkout?.intensity || planItem.recommended_time_label}
+                    </div>
+                    <div className="df-workoutMeta">
+                      {planItem.recommended_start_time}-{planItem.recommended_end_time}
+                    </div>
+                    {itemCalendarStatus?.state === 'error' && (
+                      <div className="df-errorText">{itemCalendarStatus.message || 'Could not add to calendar.'}</div>
+                    )}
+                  </article>
+                );
+              })}
+              {dayPlanModalSuggestions.length === 0 && (
+                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  No workouts for this day.
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import json
 import os
+import traceback
 from hashlib import sha1
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -789,6 +790,85 @@ def _load_saved_workouts_item(user_id: str) -> Dict[str, Any]:
     return item
 
 
+def _normalize_saved_library(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        item_id = str(entry.get("id", "")).strip()
+        title = str(entry.get("title", "")).strip()
+        workout_type = str(entry.get("workout_type", "")).strip()
+        duration_minutes = _to_int(entry.get("duration_minutes"), 0)
+        if not item_id or not title or not workout_type or duration_minutes <= 0:
+            continue
+        intensity = str(entry.get("intensity", "")).strip() or "Moderate"
+        location = str(entry.get("location", "")).strip() or "Home"
+        summary_short = str(entry.get("summary_short", "")).strip() or f"{title} workout."
+        workout_flow = entry.get("workout_flow") if isinstance(entry.get("workout_flow"), dict) else {}
+        cleaned.append(
+            {
+                "id": item_id,
+                "title": title,
+                "workout_type": workout_type,
+                "duration_minutes": duration_minutes,
+                "intensity": intensity,
+                "location": location,
+                "summary_short": summary_short,
+                "workout_flow": workout_flow,
+            }
+        )
+    return cleaned
+
+
+def _next_library_id(existing_ids: set[str]) -> str:
+    max_idx = 0
+    for item_id in existing_ids:
+        if item_id.startswith("lib_") and item_id[4:].isdigit():
+            max_idx = max(max_idx, int(item_id[4:]))
+    next_idx = max_idx + 1
+    while f"lib_{next_idx}" in existing_ids:
+        next_idx += 1
+    return f"lib_{next_idx}"
+
+
+def _merge_generated_library_with_preserved_refs(
+    *,
+    existing_item: Dict[str, Any],
+    saved_weekly_plan: List[Dict[str, Any]],
+    generated_library: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    referenced_ids = {
+        str(item.get("library_workout_id", "")).strip()
+        for item in saved_weekly_plan
+        if str(item.get("library_workout_id", "")).strip()
+    }
+    if not referenced_ids:
+        return generated_library
+    old_library = _normalize_saved_library(existing_item.get("workout_library"))
+    preserved_items = [
+        dict(item)
+        for item in old_library
+        if str(item.get("id", "")).strip() in referenced_ids
+    ]
+    used_ids = {
+        str(item.get("id", "")).strip()
+        for item in preserved_items
+        if str(item.get("id", "")).strip()
+    }
+    merged = list(preserved_items)
+    for item in generated_library:
+        next_item = dict(item)
+        item_id = str(next_item.get("id", "")).strip()
+        if not item_id or item_id in used_ids:
+            item_id = _next_library_id(used_ids)
+            next_item["id"] = item_id
+        used_ids.add(item_id)
+        merged.append(next_item)
+    return merged
+
+
 def _save_library(
     user_id: str,
     workout_library: List[Dict[str, Any]],
@@ -1091,7 +1171,7 @@ def _derive_weekly_plan(
         final_end = final_start + duration
         return f"{final_start // 60:02d}:{final_start % 60:02d}", f"{final_end // 60:02d}:{final_end % 60:02d}"
 
-    def pick_window(duration: int, require_new_day: bool) -> int:
+    def pick_window(duration: int, require_new_day: bool, prefer_unused_day: bool = False) -> int:
         used_days = {entry["recommended_day"] for entry in plan}
         target_pos = target_day_position(len(plan))
         candidates: List[Tuple[int, int, int, int]] = []
@@ -1114,6 +1194,10 @@ def _derive_weekly_plan(
                 + start_hour
             )
             candidates.append((score, idx, day_usage.get(day, 0), time_label_usage.get(label, 0)))
+        if prefer_unused_day:
+            unused_day_candidates = [c for c in candidates if remaining_windows[c[1]]["date"] not in used_days]
+            if unused_day_candidates:
+                candidates = unused_day_candidates
         if not candidates:
             return -1
         candidates.sort(key=lambda x: (x[0], x[2], x[3], x[1]))
@@ -1156,7 +1240,7 @@ def _derive_weekly_plan(
             duration = _to_int(library_item.get("duration_minutes"), 0)
             if not lib_id or duration <= 0 or lib_id in used_library_ids:
                 continue
-            chosen_idx = pick_window(duration, False)
+            chosen_idx = pick_window(duration, False, prefer_unused_day=True)
             if chosen_idx < 0:
                 continue
             window = remaining_windows.pop(chosen_idx)
@@ -1246,6 +1330,7 @@ def _derive_weekly_plan_and_signatures(
     preserved_weekly_plan: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], str, str]:
     period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
+    preferences = _read_user_preferences(user_id)
     busy_blocks = _query_busy_blocks(user_id, period["start_date"], period["end_date"])
     free_windows = _derive_free_windows(
         start_date_value=start_date_value, end_date_value=end_date_value, busy_blocks=busy_blocks
@@ -1409,6 +1494,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             workout_library = _fallback_library(preferences)
         else:
             workout_library = _ensure_library_coverage(preferences, workout_library)
+        workout_library = _merge_generated_library_with_preserved_refs(
+            existing_item=existing_item,
+            saved_weekly_plan=saved_weekly_plan,
+            generated_library=workout_library,
+        )
         generated_at = _iso_utc_now()
         weekly_plan, busy_sig, lib_sig = _derive_weekly_plan_and_signatures(
             user_id=user_id,
@@ -1447,5 +1537,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _json_response(502, {"message": "Failed to reach OpenAI API."})
     except APIError as err:
         return _json_response(502, {"message": f"OpenAI request failed: {str(err)}"})
-    except Exception:
+    except Exception as err:
+        print(f"generate_suggestions unexpected error: {repr(err)}")
+        traceback.print_exc()
         return _json_response(500, {"message": "Unexpected error while generating workout library."})

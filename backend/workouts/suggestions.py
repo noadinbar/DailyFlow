@@ -675,7 +675,7 @@ def _derive_weekly_plan(
         final_end = final_start + duration
         return f"{final_start // 60:02d}:{final_start % 60:02d}", f"{final_end // 60:02d}:{final_end % 60:02d}"
 
-    def pick_window(duration: int, require_new_day: bool) -> int:
+    def pick_window(duration: int, require_new_day: bool, prefer_unused_day: bool = False) -> int:
         used_days = {entry["recommended_day"] for entry in plan}
         target_pos = target_day_position(len(plan))
         candidates: List[Tuple[int, int, int, int]] = []
@@ -697,6 +697,10 @@ def _derive_weekly_plan(
                 + start_hour
             )
             candidates.append((score, idx, day_usage.get(day, 0), time_label_usage.get(label, 0)))
+        if prefer_unused_day:
+            unused_day_candidates = [c for c in candidates if remaining_windows[c[1]]["date"] not in used_days]
+            if unused_day_candidates:
+                candidates = unused_day_candidates
         if not candidates:
             return -1
         candidates.sort(key=lambda x: (x[0], x[2], x[3], x[1]))
@@ -739,7 +743,7 @@ def _derive_weekly_plan(
             duration = _to_int(library_item.get("duration_minutes"), 0)
             if not lib_id or duration <= 0 or lib_id in used_library_ids:
                 continue
-            chosen_idx = pick_window(duration, False)
+            chosen_idx = pick_window(duration, False, prefer_unused_day=True)
             if chosen_idx < 0:
                 continue
             window = remaining_windows.pop(chosen_idx)
