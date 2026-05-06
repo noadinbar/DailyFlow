@@ -623,6 +623,7 @@ def _derive_weekly_plan(
     workout_library: List[Dict[str, Any]],
     eligible_windows: List[Dict[str, Any]],
     workouts_per_week: int,
+    used_days_seed: Optional[set[str]] = None,
 ) -> List[Dict[str, Any]]:
     today_iso = _today_iso_utc()
     eligible_windows = [window for window in eligible_windows if str(window.get("date", "")).strip() >= today_iso]
@@ -632,21 +633,11 @@ def _derive_weekly_plan(
     remaining_windows = eligible_windows.copy()
     plan: List[Dict[str, Any]] = []
     used_library_ids = set()
-    day_usage: Dict[str, int] = {}
-    time_label_usage: Dict[str, int] = {}
+    seed_used_days = {day for day in (used_days_seed or set()) if isinstance(day, str) and day.strip()}
+    used_days_global = set(seed_used_days)
     available_days_sorted = sorted({window["date"] for window in eligible_windows})
-    day_position = {day: idx for idx, day in enumerate(available_days_sorted)}
     week_start = available_days_sorted[0] if available_days_sorted else ""
     week_end = available_days_sorted[-1] if available_days_sorted else ""
-
-    def target_day_position(planned_count: int) -> int:
-        day_count = len(available_days_sorted)
-        if day_count <= 1:
-            return 0
-        if max_items <= 1:
-            return day_count // 2
-        ratio = planned_count / max(1, max_items - 1)
-        return int(round(ratio * (day_count - 1)))
 
     def choose_deterministic_start(window: Dict[str, Any], duration: int, library_id: str) -> Tuple[str, str]:
         start_t = _parse_hh_mm(window["start_time"])
@@ -675,93 +666,86 @@ def _derive_weekly_plan(
         final_end = final_start + duration
         return f"{final_start // 60:02d}:{final_start % 60:02d}", f"{final_end // 60:02d}:{final_end % 60:02d}"
 
-    def pick_window(duration: int, require_new_day: bool, prefer_unused_day: bool = False) -> int:
-        used_days = {entry["recommended_day"] for entry in plan}
-        target_pos = target_day_position(len(plan))
-        candidates: List[Tuple[int, int, int, int]] = []
-        for idx, window in enumerate(remaining_windows):
-            if int(window["duration_minutes"]) < duration:
-                continue
-            day = window["date"]
-            if require_new_day and day in used_days:
-                continue
-            label = window["time_label"]
-            s = _parse_hh_mm(window["start_time"])
-            start_hour = s.hour if s else 0
-            pos = day_position.get(day, 0)
-            spread_penalty = abs(pos - target_pos) * (40 if require_new_day else 18)
-            score = (
-                spread_penalty
-                + day_usage.get(day, 0) * 100
-                + time_label_usage.get(label, 0) * 20
-                + start_hour
-            )
-            candidates.append((score, idx, day_usage.get(day, 0), time_label_usage.get(label, 0)))
-        if prefer_unused_day:
-            unused_day_candidates = [c for c in candidates if remaining_windows[c[1]]["date"] not in used_days]
-            if unused_day_candidates:
-                candidates = unused_day_candidates
-        if not candidates:
-            return -1
-        candidates.sort(key=lambda x: (x[0], x[2], x[3], x[1]))
-        return candidates[0][1]
-
-    # Pass 1: spread across different days when possible.
-    for library_item in workout_library:
-        if len(plan) >= max_items:
-            break
-        lib_id = str(library_item.get("id", "")).strip()
-        duration = _to_int(library_item.get("duration_minutes"), 0)
-        if not lib_id or duration <= 0 or lib_id in used_library_ids:
-            continue
-        chosen_idx = pick_window(duration, True)
-        if chosen_idx < 0:
-            continue
-        window = remaining_windows.pop(chosen_idx)
-        rec_start, rec_end = choose_deterministic_start(window, duration, lib_id)
-        used_library_ids.add(lib_id)
-        day_usage[window["date"]] = day_usage.get(window["date"], 0) + 1
-        time_label_usage[window["time_label"]] = time_label_usage.get(window["time_label"], 0) + 1
-        plan.append(
-            {
-                "id": f"plan_{len(plan)+1}",
-                "library_workout_id": lib_id,
-                "recommended_day": window["date"],
-                "recommended_start_time": rec_start,
-                "recommended_end_time": rec_end,
-                "recommended_time_label": window["time_label"],
-                "reason_short": "Matches your saved workout library and current free time.",
-            }
-        )
-
-    # Pass 2: allow same-day if needed.
-    if len(plan) < max_items:
+    def try_place_on_day(day: str) -> bool:
         for library_item in workout_library:
-            if len(plan) >= max_items:
-                break
             lib_id = str(library_item.get("id", "")).strip()
             duration = _to_int(library_item.get("duration_minutes"), 0)
             if not lib_id or duration <= 0 or lib_id in used_library_ids:
                 continue
-            chosen_idx = pick_window(duration, False, prefer_unused_day=True)
-            if chosen_idx < 0:
-                continue
-            window = remaining_windows.pop(chosen_idx)
-            rec_start, rec_end = choose_deterministic_start(window, duration, lib_id)
-            used_library_ids.add(lib_id)
-            day_usage[window["date"]] = day_usage.get(window["date"], 0) + 1
-            time_label_usage[window["time_label"]] = time_label_usage.get(window["time_label"], 0) + 1
-            plan.append(
-                {
-                    "id": f"plan_{len(plan)+1}",
-                    "library_workout_id": lib_id,
-                    "recommended_day": window["date"],
-                    "recommended_start_time": rec_start,
-                    "recommended_end_time": rec_end,
-                    "recommended_time_label": window["time_label"],
-                    "reason_short": "Matches your saved workout library and current free time.",
-                }
-            )
+            for idx, window in enumerate(remaining_windows):
+                if str(window.get("date", "")).strip() != day:
+                    continue
+                if int(window.get("duration_minutes") or 0) < duration:
+                    continue
+                chosen_window = remaining_windows.pop(idx)
+                rec_start, rec_end = choose_deterministic_start(chosen_window, duration, lib_id)
+                used_library_ids.add(lib_id)
+                used_days_global.add(day)
+                plan.append(
+                    {
+                        "id": f"plan_{len(plan)+1}",
+                        "library_workout_id": lib_id,
+                        "recommended_day": day,
+                        "recommended_start_time": rec_start,
+                        "recommended_end_time": rec_end,
+                        "recommended_time_label": chosen_window["time_label"],
+                        "reason_short": "Matches your saved workout library and current free time.",
+                    }
+                )
+                return True
+        return False
+
+    # Pass 1 (hard day-first): at most one new workout per unused day in date order.
+    unused_days_sorted = sorted(
+        {str(window.get("date", "")).strip() for window in remaining_windows if str(window.get("date", "")).strip()}
+        - used_days_global
+    )
+    for day in unused_days_sorted:
+        if len(plan) >= max_items:
+            break
+        try_place_on_day(day)
+
+    # Pass 2: still missing -> prefer remaining unused days first, then allow used days.
+    while len(plan) < max_items:
+        progress = False
+        remaining_days = {
+            str(window.get("date", "")).strip()
+            for window in remaining_windows
+            if str(window.get("date", "")).strip()
+        }
+        unused_remaining_days = sorted(day for day in remaining_days if day not in used_days_global)
+        for day in unused_remaining_days:
+            if len(plan) >= max_items:
+                break
+            if try_place_on_day(day):
+                progress = True
+                break
+        if len(plan) >= max_items:
+            break
+        if progress:
+            continue
+        used_or_any_days = sorted(
+            {
+                str(window.get("date", "")).strip()
+                for window in remaining_windows
+                if str(window.get("date", "")).strip()
+            }
+        )
+        for day in used_or_any_days:
+            if len(plan) >= max_items:
+                break
+            if try_place_on_day(day):
+                progress = True
+                break
+        if not progress:
+            break
+
+    print(
+        "weekly_plan_day_debug "
+        f"eligible_days={available_days_sorted} "
+        f"seed_used_days={sorted(seed_used_days)} "
+        f"generated_days={[item.get('recommended_day') for item in plan]}"
+    )
     return plan
 
 

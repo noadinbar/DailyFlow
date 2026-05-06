@@ -184,7 +184,7 @@ export default function App() {
           isHydratingCalendarRoute ? (
             <></>
           ) : screen === 'home' && authState.isAuthenticated ? (
-            <WorkoutsScreen username={authState.user?.username} />
+            <WorkoutsScreen username={authState.user?.username} onLogout={() => handleLogout()} />
           ) : (
             <Navigate to="/" replace />
           )

@@ -1155,6 +1155,10 @@ select.df-input {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 12px;
+  max-height: 460px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-inline-end: 4px;
 }
 
 .df-workoutLibraryCard {

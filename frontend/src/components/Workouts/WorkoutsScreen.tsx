@@ -5,6 +5,7 @@ import ProfileSettingsModal from '../Home/ProfileSettingsModal';
 
 type WorkoutsScreenProps = {
   username?: string;
+  onLogout?: () => Promise<void>;
 };
 
 type WeeklyPlanSuggestion = {
@@ -131,10 +132,11 @@ function buildWeekCards(weekStart: Date): WeekDayCard[] {
 }
 
 export default function WorkoutsScreen(props: WorkoutsScreenProps) {
-  const { username } = props;
+  const { username, onLogout } = props;
   const navigate = useNavigate();
   const location = useLocation();
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
+  const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [weekStartDate, setWeekStartDate] = React.useState<Date>(() => startOfWeek(new Date()));
   const [weeklyPlanSuggestions, setWeeklyPlanSuggestions] = React.useState<WeeklyPlanSuggestion[]>([]);
   const [workoutLibrary, setWorkoutLibrary] = React.useState<WorkoutLibraryItem[]>([]);
@@ -252,6 +254,25 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     const token = accessToken || idToken;
     if (!token) throw new Error('You need to be signed in.');
     return token;
+  }
+
+  async function handleLogoutClick() {
+    setGenerateError('');
+    setIsLoggingOut(true);
+    try {
+      if (onLogout) await onLogout();
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      const message =
+        anyErr && typeof anyErr.message === 'string'
+          ? anyErr.message
+          : 'Failed to sign out. Please try again.';
+      setGenerateError(message);
+      // eslint-disable-next-line no-console
+      console.error(e);
+    } finally {
+      setIsLoggingOut(false);
+    }
   }
 
   async function loadWorkoutsData(args: { mode: 'saved' | 'generate'; startDate: string; endDate: string }) {
@@ -600,16 +621,13 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             </button>
           </div>
           <div className="df-calendarTopbarRight">
-            <div className="df-workoutsTopbarUser">{displayName}</div>
-            <div className="df-workoutsAvatar">{initials}</div>
             <button
               type="button"
-              className="df-iconBtn"
-              onClick={() => setIsProfileSettingsOpen(true)}
-              aria-label="Open profile settings"
-              title="Settings"
+              className="df-btn"
+              onClick={() => void handleLogoutClick()}
+              disabled={isLoggingOut}
             >
-              ⚙️
+              {isLoggingOut ? 'Signing out...' : 'Log out'}
             </button>
           </div>
         </header>
