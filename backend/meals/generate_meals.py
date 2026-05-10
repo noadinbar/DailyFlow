@@ -20,6 +20,8 @@ MEAL_TYPE_TARGETS: Dict[str, int] = {
     "Dinner": 3,
     "Snack": 3,
 }
+GENERATE_TARGET_COUNT = 4
+VALID_MEAL_TYPES = tuple(MEAL_TYPE_TARGETS.keys())
 PACKAGE_ROUNDING_UNITS = {"can", "box", "package", "pack", "jar", "bottle", "unit", "egg", "piece"}
 NORMAL_ROUNDING_UNITS = {"g", "kg", "ml", "l", "tbsp", "tsp"}
 
@@ -295,10 +297,10 @@ def _group_by_meal_type(meals: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,
     return grouped
 
 
-def _enforce_type_targets(meals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _enforce_type_targets(meals: List[Dict[str, Any]], target_counts: Dict[str, int]) -> List[Dict[str, Any]]:
     grouped = _group_by_meal_type(meals)
     output: List[Dict[str, Any]] = []
-    for meal_type, target_count in MEAL_TYPE_TARGETS.items():
+    for meal_type, target_count in target_counts.items():
         entries = grouped.get(meal_type) or []
         output.extend(entries[:target_count])
     return output
@@ -437,21 +439,24 @@ def _merge_meals_preserve_favorites(
     return _finalize_meal_ids(topped, fav_set)
 
 
-def _normalize_generated_library(raw: Any) -> List[Dict[str, Any]]:
+def _normalize_generated_library(raw: Any, target_counts: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
     if not isinstance(raw, list):
         return []
+    targets = target_counts or MEAL_TYPE_TARGETS
     dedupe = set()
     normalized: List[Dict[str, Any]] = []
     for idx, entry in enumerate(raw, start=1):
         meal = _normalize_meal_entry(entry, idx)
         if not meal:
             continue
+        if _safe_string(meal.get("meal_type")) not in targets:
+            continue
         key = f"{meal['meal_type'].lower()}|{meal['title'].strip().lower()}|{meal['prep_time_minutes']}"
         if key in dedupe:
             continue
         dedupe.add(key)
         normalized.append(meal)
-    normalized = _enforce_type_targets(normalized)
+    normalized = _enforce_type_targets(normalized, targets)
     return _reindex_meal_ids(normalized)
 
 
@@ -479,6 +484,7 @@ def _build_fallback_library(
     *,
     seed: int = 0,
     avoid_keys: Optional[Set[str]] = None,
+    target_counts: Optional[Dict[str, int]] = None,
 ) -> List[Dict[str, Any]]:
     """Varied 12-meal library when OpenAI is unavailable or returns invalid output."""
     budget_level = _safe_budget_level(preferences.get("budget_level"))
@@ -717,20 +723,21 @@ def _build_fallback_library(
 
     rng = random.Random(seed)
     avoid = set(avoid_keys or [])
-    by_type: Dict[str, List[Tuple[str, str, int, int, List[Dict[str, Any]], List[str]]]] = {k: [] for k in MEAL_TYPE_TARGETS}
+    targets = target_counts or MEAL_TYPE_TARGETS
+    by_type: Dict[str, List[Tuple[str, str, int, int, List[Dict[str, Any]], List[str]]]] = {k: [] for k in targets}
     for tup in expanded:
         mt = tup[0]
         if mt in by_type:
             by_type[mt].append(tup)
 
     selected: List[Tuple[str, str, int, int, List[Dict[str, Any]], List[str]]] = []
-    for meal_type in MEAL_TYPE_TARGETS:
+    for meal_type in targets:
         pool = list(by_type.get(meal_type) or [])
         rng.shuffle(pool)
         picked: List[Tuple[str, str, int, int, List[Dict[str, Any]], List[str]]] = []
         local_avoid = set(avoid)
         for tup in pool:
-            if len(picked) >= MEAL_TYPE_TARGETS[meal_type]:
+            if len(picked) >= targets[meal_type]:
                 break
             _, title, prep_min, _, _, _ = tup
             key = _meal_dedupe_key({"meal_type": meal_type, "title": title, "prep_time_minutes": prep_min})
@@ -739,7 +746,7 @@ def _build_fallback_library(
             picked.append(tup)
             local_avoid.add(key)
         attempt = 0
-        while len(picked) < MEAL_TYPE_TARGETS[meal_type] and pool:
+        while len(picked) < targets[meal_type] and pool:
             base = pool[attempt % len(pool)]
             attempt += 1
             salt = rng.randint(1, 99999)
@@ -795,20 +802,23 @@ def _read_generation_preferences(user_id: str) -> Dict[str, Any]:
 
 def _openai_prompt(
     preferences: Dict[str, Any],
+    meal_type: str,
+    target_count: int,
     avoid_meals: List[Dict[str, Any]],
     diversity_nonce: str,
 ) -> str:
     compact = {
         "preferences": preferences,
-        "targets": MEAL_TYPE_TARGETS,
-        "avoid_repeating_non_favorite_meals": avoid_meals[:48],
+        "meal_type": meal_type,
+        "target_count": target_count,
+        "avoid_repeating_non_favorite_meals": avoid_meals[:32],
         "generation_hint": diversity_nonce,
     }
     return (
         "Output JSON only with key meal_library.\n"
-        "Generate about 12 meals total: 3 Breakfast, 3 Lunch, 3 Dinner, 3 Snack.\n"
+        f"Generate exactly {target_count} meals and all meals must be meal_type={meal_type}.\n"
         "Each meal must include: id,title,meal_type,diet_tags,prep_time_minutes,estimated_calories,"
-        "budget_level,goal_tags,summary_short,ingredients,instructions,base_servings.\n"
+        "budget_level,goal_tags,summary_short,short_ingredients_preview,ingredients,instructions,base_servings.\n"
         "Ingredient object: name,quantity,unit,category,rounding where rounding is none or ceil.\n"
         "base_servings must always be 1.\n"
         "Do not repeat any meal from avoid_repeating_non_favorite_meals: same title (case-insensitive), "
@@ -821,6 +831,8 @@ def _openai_prompt(
 def _try_openai_library(
     preferences: Dict[str, Any],
     *,
+    meal_type: str,
+    target_count: int,
     avoid_meals: List[Dict[str, Any]],
     diversity_nonce: str,
 ) -> Tuple[Optional[List[Dict[str, Any]]], str]:
@@ -834,7 +846,7 @@ def _try_openai_library(
         print(f"[meals-generate] before openai call (timeout={OPENAI_TIMEOUT_SECONDS}s, retries={OPENAI_MAX_RETRIES})")
         response = client.responses.create(
             model=OPENAI_MODEL,
-            input=_openai_prompt(preferences, avoid_meals, diversity_nonce),
+            input=_openai_prompt(preferences, meal_type, target_count, avoid_meals, diversity_nonce),
             text={"format": {"type": "json_object"}},
             timeout=OPENAI_TIMEOUT_SECONDS,
         )
@@ -860,11 +872,99 @@ def _try_openai_library(
     if not isinstance(parsed, dict):
         print("[meals-generate] openai JSON not an object")
         return None, "openai_bad_shape"
-    library = _normalize_generated_library(parsed.get("meal_library"))
-    if not library or not _library_has_full_coverage(library):
+    library = _normalize_generated_library(parsed.get("meal_library"), target_counts={meal_type: target_count})
+    type_count = len([m for m in library if _safe_string(m.get("meal_type")) == meal_type])
+    if not library or type_count < target_count:
         print("[meals-generate] openai output invalid or incomplete after normalize")
         return None, "openai_invalid_or_incomplete"
     return library, ""
+
+
+def _next_meal_id(existing_ids: Set[str]) -> str:
+    idx = 1
+    while f"meal_{idx}" in existing_ids:
+        idx += 1
+    return f"meal_{idx}"
+
+
+def _merge_generated_for_selected_type(
+    *,
+    old_library: List[Dict[str, Any]],
+    favorite_ids: List[str],
+    generated_type_meals: List[Dict[str, Any]],
+    meal_type: str,
+    target_count: int,
+    preferences: Dict[str, Any],
+    seed: int,
+) -> List[Dict[str, Any]]:
+    fav_set = {fid.strip() for fid in favorite_ids if isinstance(fid, str) and fid.strip()}
+    untouched: List[Dict[str, Any]] = []
+    requested_old: List[Dict[str, Any]] = []
+    for meal in old_library:
+        if _safe_string(meal.get("meal_type")) == meal_type:
+            requested_old.append(meal)
+        else:
+            untouched.append(copy.deepcopy(meal))
+
+    preserved_favorites: List[Dict[str, Any]] = []
+    old_non_fav_keys: Set[str] = set()
+    for meal in requested_old:
+        meal_id = _safe_string(meal.get("id"))
+        if meal_id and meal_id in fav_set:
+            preserved_favorites.append(copy.deepcopy(meal))
+        else:
+            old_non_fav_keys.add(_meal_dedupe_key(meal))
+
+    generated_pool = [
+        copy.deepcopy(meal) for meal in generated_type_meals if _safe_string(meal.get("meal_type")) == meal_type
+    ]
+    selected_new: List[Dict[str, Any]] = []
+    seen_keys = {_meal_dedupe_key(meal) for meal in preserved_favorites}
+    for meal in generated_pool:
+        if len(selected_new) >= max(0, target_count - len(preserved_favorites)):
+            break
+        key = _meal_dedupe_key(meal)
+        if key in seen_keys or key in old_non_fav_keys:
+            continue
+        selected_new.append(meal)
+        seen_keys.add(key)
+
+    if len(selected_new) < max(0, target_count - len(preserved_favorites)):
+        fallback_pool = _build_fallback_library(
+            preferences,
+            seed=seed + 17,
+            avoid_keys=seen_keys | old_non_fav_keys,
+            target_counts={meal_type: target_count},
+        )
+        for meal in fallback_pool:
+            if _safe_string(meal.get("meal_type")) != meal_type:
+                continue
+            if len(selected_new) >= max(0, target_count - len(preserved_favorites)):
+                break
+            key = _meal_dedupe_key(meal)
+            if key in seen_keys or key in old_non_fav_keys:
+                continue
+            selected_new.append(copy.deepcopy(meal))
+            seen_keys.add(key)
+
+    existing_ids = {_safe_string(meal.get("id")) for meal in untouched + preserved_favorites if _safe_string(meal.get("id"))}
+    finalized_new: List[Dict[str, Any]] = []
+    for meal in selected_new:
+        item = copy.deepcopy(meal)
+        item["id"] = _next_meal_id(existing_ids)
+        existing_ids.add(item["id"])
+        finalized_new.append(item)
+
+    merged = untouched + preserved_favorites + finalized_new
+    order = {meal: idx for idx, meal in enumerate(VALID_MEAL_TYPES)}
+    return sorted(
+        merged,
+        key=lambda m: (
+            order.get(_safe_string(m.get("meal_type")), 99),
+            _safe_string(m.get("title")).lower(),
+            _safe_string(m.get("id")).lower(),
+        ),
+    )
 
 
 def _save_library(user_id: str, meal_library: List[Dict[str, Any]], favorite_meals: List[str], generated_at: str) -> None:
@@ -896,9 +996,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _json_response(401, {"message": "Missing Cognito user id (sub) in request."})
 
     try:
-        _parse_body(event)
+        payload = _parse_body(event)
     except json.JSONDecodeError:
         return _json_response(400, {"message": "Request body must be valid JSON."})
+    requested_meal_type = _normalize_meal_type((payload or {}).get("meal_type"))
+    if requested_meal_type not in VALID_MEAL_TYPES:
+        return _json_response(400, {"message": "meal_type must be one of Breakfast, Lunch, Dinner, Snack."})
 
     try:
         print("[meals-generate] loading preferences")
@@ -913,6 +1016,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         avoid_payload: List[Dict[str, Any]] = []
         avoid_keys: Set[str] = set()
         for m in old_library:
+            if _safe_string(m.get("meal_type")) != requested_meal_type:
+                continue
             mid = str(m.get("id", "")).strip()
             if mid in fav_set:
                 continue
@@ -925,33 +1030,48 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         seed = _generation_seed_int(user_id)
         openai_library, openai_reason = _try_openai_library(
             preferences,
+            meal_type=requested_meal_type,
+            target_count=GENERATE_TARGET_COUNT,
             avoid_meals=avoid_payload,
             diversity_nonce=str(seed),
         )
-        generation_warning: Optional[str] = None
         if openai_library:
             fresh_library = openai_library
             source = "openai"
         else:
             print(f"[meals-generate] fallback: openai did not return a valid library ({openai_reason})")
-            fresh_library = _build_fallback_library(preferences, seed=seed, avoid_keys=avoid_keys)
-            source = "fallback"
-            generation_warning = (
-                "AI meal generation was slow or unavailable. Showing a starter library you can refine in Meal Preferences."
+            fresh_library = _build_fallback_library(
+                preferences,
+                seed=seed,
+                avoid_keys=avoid_keys,
+                target_counts={requested_meal_type: GENERATE_TARGET_COUNT},
             )
+            source = "fallback"
             print("[meals-generate] fallback library built")
-        if not fresh_library or not _library_has_full_coverage(fresh_library):
-            print("[meals-generate] refuse save: fresh library empty or incomplete")
+        fresh_type_count = len([m for m in fresh_library if _safe_string(m.get("meal_type")) == requested_meal_type])
+        if not fresh_library or fresh_type_count < GENERATE_TARGET_COUNT:
+            print("[meals-generate] refuse save: fresh type library empty or incomplete")
             return _json_response(500, {"message": "Could not build a valid meal library."})
-        final_library = _merge_meals_preserve_favorites(
+        final_library = _merge_generated_for_selected_type(
             old_library=old_library,
             favorite_ids=favorite_meals,
-            fresh_library=fresh_library,
+            generated_type_meals=fresh_library,
+            meal_type=requested_meal_type,
+            target_count=GENERATE_TARGET_COUNT,
             preferences=preferences,
             seed=seed,
         )
-        if not final_library or not _library_has_full_coverage(final_library):
-            print("[meals-generate] refuse save: merged library empty or incomplete")
+        final_type_count = len([m for m in final_library if _safe_string(m.get("meal_type")) == requested_meal_type])
+        favorite_type_count = len(
+            [
+                m
+                for m in old_library
+                if _safe_string(m.get("meal_type")) == requested_meal_type and _safe_string(m.get("id")) in fav_set
+            ]
+        )
+        required_type_count = max(GENERATE_TARGET_COUNT, favorite_type_count)
+        if not final_library or final_type_count < required_type_count:
+            print("[meals-generate] refuse save: merged type library empty or incomplete")
             return _json_response(500, {"message": "Could not build a valid meal library."})
         generated_at = _iso_utc_now()
         print("[meals-generate] before dynamodb save")
@@ -964,9 +1084,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "library_source": "generated",
             "source": source,
             "model": OPENAI_MODEL,
+            "generated_meal_type": requested_meal_type,
         }
-        if generation_warning:
-            metadata["generation_warning"] = generation_warning
         return _json_response(
             200,
             {

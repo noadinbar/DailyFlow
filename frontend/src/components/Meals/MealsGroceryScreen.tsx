@@ -549,6 +549,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     () => Array.from(new Set(mealLibrary.flatMap((meal) => meal.diet_tags))).sort(),
     [mealLibrary]
   );
+  const selectedMealTypeForGenerate: MealType | null = selectedMealTypes.length === 1 ? selectedMealTypes[0] : null;
 
   const filteredMealLibrary = React.useMemo(() => {
     return mealLibrary.filter((meal) => {
@@ -788,6 +789,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     void (async () => {
       setMealsApiError('');
       setMealGenerationWarning('');
+      if (!selectedMealTypeForGenerate) return;
       setIsGeneratingMeals(true);
       try {
         const baseUrl = getApiBaseUrl();
@@ -798,13 +800,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ meal_type: selectedMealTypeForGenerate }),
         });
         let payload: {
           message?: string;
           meal_library?: MealLibraryItem[];
           favorite_meals?: string[];
-          metadata?: { generation_warning?: string };
         } = {};
         try {
           payload = (await response.json()) as typeof payload;
@@ -818,8 +819,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         const generatedLibrary = Array.isArray(payload.meal_library) ? payload.meal_library : [];
         if (generatedLibrary.length > 0) setMealLibrary(generatedLibrary);
         if (Array.isArray(payload.favorite_meals)) setFavoriteMealIds(payload.favorite_meals);
-        const warn = payload.metadata?.generation_warning;
-        setMealGenerationWarning(typeof warn === 'string' && warn.trim() ? warn.trim() : '');
+        setMealGenerationWarning('');
       } catch (err) {
         const anyErr = err as { message?: string };
         setMealsApiError(anyErr?.message || 'Could not generate meals right now.');
@@ -898,10 +898,15 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
               type="button"
               className="df-btn df-btnPrimary"
               onClick={runMockGenerate}
-              disabled={isGeneratingMeals}
+              disabled={isGeneratingMeals || !selectedMealTypeForGenerate}
             >
               {isGeneratingMeals ? 'Generating...' : 'Generate'}
             </button>
+            {!selectedMealTypeForGenerate && (
+              <span className="df-calendarLegend" style={{ marginInlineStart: 8 }}>
+                Select exactly one meal type to generate.
+              </span>
+            )}
             <button type="button" className="df-btn" onClick={() => setIsMealPreferencesOpen(true)}>
               Meal Preferences
             </button>
