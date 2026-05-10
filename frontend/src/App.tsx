@@ -50,6 +50,13 @@ export default function App() {
 
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
+    if (normalizedPath !== location.pathname) {
+      navigate(normalizedPath, { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  React.useEffect(() => {
+    const normalizedPath = normalizePathname(location.pathname);
     if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts' && normalizedPath !== '/meals') {
       setIsHydratingCalendarRoute(false);
       return;
@@ -202,7 +209,6 @@ export default function App() {
         }
       />
       {/* RR v7: "/meals/*" does not match the exact path "/meals"; register "/meals" explicitly. */}
-      <Route path="/meals/" element={<Navigate to="/meals" replace />} />
       <Route path="/meals" element={mealsRouteElement} />
       <Route path="/meals/*" element={mealsRouteElement} />
         <Route
