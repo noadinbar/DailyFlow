@@ -48,12 +48,6 @@ export default function App() {
     user: undefined,
   });
 
-  React.useLayoutEffect(() => {
-    if (location.pathname === '/meals/') {
-      navigate('/meals', { replace: true });
-    }
-  }, [location.pathname, navigate]);
-
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
     if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts' && normalizedPath !== '/meals') {
@@ -170,6 +164,15 @@ export default function App() {
 
   const showBlockingLoader = isCheckingOnboarding || isHydratingCalendarRoute;
 
+  const mealsRouteElement =
+    isHydratingCalendarRoute ? (
+      <></>
+    ) : screen === 'home' && authState.isAuthenticated ? (
+      <MealsGroceryScreen username={authState.user?.username} onLogout={() => handleLogout()} />
+    ) : (
+      <Navigate to="/" replace />
+    );
+
   return (
     <main className="df-page" style={{ position: 'relative' }}>
       {/* Keep Routes mounted during login/calendar hydration so navigate() updates the URL reliably. */}
@@ -198,19 +201,10 @@ export default function App() {
           )
         }
       />
+      {/* RR v7: "/meals/*" does not match the exact path "/meals"; register "/meals" explicitly. */}
       <Route path="/meals/" element={<Navigate to="/meals" replace />} />
-      <Route
-        path="/meals/*"
-        element={
-          isHydratingCalendarRoute ? (
-            <></>
-          ) : screen === 'home' && authState.isAuthenticated ? (
-            <MealsGroceryScreen username={authState.user?.username} onLogout={() => handleLogout()} />
-          ) : (
-            <Navigate to="/" replace />
-          )
-        }
-      />
+      <Route path="/meals" element={mealsRouteElement} />
+      <Route path="/meals/*" element={mealsRouteElement} />
         <Route
           path="*"
           element={
