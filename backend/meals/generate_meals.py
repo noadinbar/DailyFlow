@@ -84,6 +84,25 @@ def _table_from_env(env_name: str):
     return _dynamodb_resource().Table(table_name)
 
 
+def _to_dynamodb_safe(value: Any) -> Any:
+    """Recursively convert floats to Decimal for boto3 DynamoDB items. JSON responses use raw floats elsewhere."""
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, dict):
+        return {k: _to_dynamodb_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamodb_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_to_dynamodb_safe(v) for v in value]
+    return value
+
+
 def _safe_string(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -633,16 +652,15 @@ def _load_existing_favorites(user_id: str) -> List[str]:
 
 def _save_library(user_id: str, meal_library: List[Dict[str, Any]], favorite_meals: List[str], generated_at: str) -> None:
     table = _table_from_env("MEALS_TABLE")
-    table.put_item(
-        Item={
-            "user_id": user_id,
-            "record_key": "LIBRARY#current",
-            "meal_library": meal_library,
-            "favorite_meals": favorite_meals,
-            "generated_at": generated_at,
-            "updated_at": generated_at,
-        }
-    )
+    item = {
+        "user_id": user_id,
+        "record_key": "LIBRARY#current",
+        "meal_library": meal_library,
+        "favorite_meals": favorite_meals,
+        "generated_at": generated_at,
+        "updated_at": generated_at,
+    }
+    table.put_item(Item=_to_dynamodb_safe(item))
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

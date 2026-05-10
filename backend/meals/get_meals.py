@@ -145,6 +145,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         return _json_response(500, {"message": "Unexpected error while loading meals state."})
 
+    week_end_iso = (datetime.fromisoformat(week_start_iso).date() + timedelta(days=6)).isoformat()
+
     response_body = {
         "meal_preferences": {
             "allergies": _safe_string_list(pref_item.get("allergies")),
@@ -160,6 +162,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "checked_grocery_items": _safe_string_list(week_item.get("checked_grocery_items")),
         "metadata": {
             "week_record_key": week_key,
+            "week_start": week_start_iso,
+            "week_end": week_end_iso,
             "library_record_key": "LIBRARY#current",
             "updated_at": _safe_string(week_item.get("updated_at"))
             or _safe_string(library_item.get("updated_at"))

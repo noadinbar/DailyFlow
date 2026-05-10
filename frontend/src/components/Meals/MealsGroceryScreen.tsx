@@ -38,6 +38,9 @@ type MealLibraryItem = {
   short_ingredients_preview: string;
   base_servings: number;
   ingredients: MealIngredient[];
+  estimated_calories?: number | null;
+  summary_short?: string;
+  instructions?: string[];
 };
 
 type SavedMealItem = {
@@ -51,6 +54,8 @@ type SavedMealItem = {
   servings: number;
   ingredients: MealIngredient[];
   base_servings: number;
+  google_event_id?: string;
+  dailyflow_calendar_id?: string;
 };
 
 type GroceryItem = {
@@ -71,7 +76,26 @@ type MealsStateResponse = {
   meal_library?: MealLibraryItem[];
   favorite_meals?: string[];
   saved_meals_this_week?: SavedMealItem[];
+  grocery_list?: GroceryItem[];
   checked_grocery_items?: string[];
+  metadata?: {
+    week_record_key?: string;
+    week_start?: string;
+    week_end?: string;
+    library_record_key?: string;
+    updated_at?: string;
+  };
+};
+
+type MealsSavedPatchResponse = {
+  message?: string;
+  favorite_meals?: string[];
+  saved_meals_this_week?: SavedMealItem[];
+  grocery_list?: GroceryItem[];
+  checked_grocery_items?: string[];
+  saved_meal?: SavedMealItem;
+  updated_at?: string;
+  week_record_key?: string;
 };
 
 const SAMPLE_MEALS: MealLibraryItem[] = [
@@ -196,6 +220,39 @@ function formatQuantity(value: number): string {
   return value.toFixed(2).replace(/\.?0+$/, '');
 }
 
+function groupGroceryFromFlat(items: GroceryItem[]): Map<string, GroceryItem[]> {
+  const grouped = new Map<string, GroceryItem[]>();
+  for (const item of items) {
+    if (!grouped.has(item.category)) grouped.set(item.category, []);
+    grouped.get(item.category)?.push(item);
+  }
+  for (const [, list] of grouped.entries()) {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return grouped;
+}
+
+function groceryFromSavedMeals(savedMeals: SavedMealItem[]): GroceryItem[] {
+  const map = new Map<string, GroceryItem>();
+  for (const savedMeal of savedMeals) {
+    for (const ingredient of savedMeal.ingredients) {
+      const key = `${ingredient.category}::${ingredient.name.toLowerCase()}::${ingredient.unit}`;
+      const servingScale = savedMeal.servings / Math.max(1, savedMeal.base_servings);
+      const scaledQty = ingredient.quantity * servingScale;
+      const existing = map.get(key);
+      const nextQty = (existing?.quantity || 0) + scaledQty;
+      map.set(key, {
+        key,
+        name: ingredient.name,
+        unit: ingredient.unit,
+        category: ingredient.category,
+        quantity: ingredient.rounding === 'ceil' ? Math.ceil(nextQty) : Number(nextQty.toFixed(2)),
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
+
 export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const { username, onLogout } = props;
   const navigate = useNavigate();
@@ -214,12 +271,19 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [selectedMealTypes, setSelectedMealTypes] = React.useState<MealType[]>([]);
   const [selectedDietTags, setSelectedDietTags] = React.useState<string[]>([]);
   const [selectedPrepFilters, setSelectedPrepFilters] = React.useState<PrepTimeFilter[]>([]);
-  const [mealLibrary, setMealLibrary] = React.useState<MealLibraryItem[]>(SAMPLE_MEALS);
+  const [showFavoritesOnly, setShowFavoritesOnly] = React.useState<boolean>(false);
+  const [mealLibrary, setMealLibrary] = React.useState<MealLibraryItem[]>([]);
   const [favoriteMealIds, setFavoriteMealIds] = React.useState<string[]>([]);
   const [savedMeals, setSavedMeals] = React.useState<SavedMealItem[]>([]);
+  const [groceryListServer, setGroceryListServer] = React.useState<GroceryItem[]>([]);
+  const [weekRecordKey, setWeekRecordKey] = React.useState<string>('');
+  const [weekStartIso, setWeekStartIso] = React.useState<string>('');
+  const [weekEndIso, setWeekEndIso] = React.useState<string>('');
   const [checkedGroceryKeys, setCheckedGroceryKeys] = React.useState<string[]>([]);
   const [mealsApiError, setMealsApiError] = React.useState<string>('');
   const [mealGenerationWarning, setMealGenerationWarning] = React.useState<string>('');
+  const [mealDetail, setMealDetail] = React.useState<MealLibraryItem | null>(null);
+  const [isSavingMealCalendar, setIsSavingMealCalendar] = React.useState<boolean>(false);
 
   const [isMealPreferencesOpen, setIsMealPreferencesOpen] = React.useState<boolean>(false);
   const [allergiesInput, setAllergiesInput] = React.useState<string>('');
@@ -251,6 +315,46 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     const token = accessToken || idToken;
     if (!token) throw new Error('You need to be signed in.');
     return token;
+  }
+
+  function applyWeekPatchPayload(payload: MealsSavedPatchResponse) {
+    if (Array.isArray(payload.saved_meals_this_week)) setSavedMeals(payload.saved_meals_this_week);
+    if (Array.isArray(payload.grocery_list)) setGroceryListServer(payload.grocery_list);
+    if (Array.isArray(payload.checked_grocery_items)) setCheckedGroceryKeys(payload.checked_grocery_items);
+    if (typeof payload.week_record_key === 'string' && payload.week_record_key.startsWith('WEEK#')) {
+      setWeekRecordKey(payload.week_record_key);
+    }
+  }
+
+  async function patchMealsSaved(
+    body: Record<string, unknown>,
+    options?: { setGlobalError?: boolean }
+  ): Promise<{ ok: boolean; status: number; payload: MealsSavedPatchResponse }> {
+    const setGlobal = options?.setGlobalError !== false;
+    const baseUrl = getApiBaseUrl();
+    const token = await getAuthToken();
+    const response = await fetch(`${baseUrl}/meals/saved`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    let payload: MealsSavedPatchResponse = {};
+    try {
+      payload = (await response.json()) as MealsSavedPatchResponse;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok && setGlobal) {
+      setMealsApiError(
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Request failed (${response.status}).`
+      );
+    }
+    return { ok: response.ok, status: response.status, payload };
   }
 
   async function loadProfile(): Promise<{
@@ -454,41 +558,18 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       const prepMatch =
         selectedPrepFilters.length === 0 ||
         selectedPrepFilters.some((filter) => prepFilterMatch(meal.prep_time_minutes, filter));
-      return mealTypeMatch && dietMatch && prepMatch;
+      const favMatch = !showFavoritesOnly || favoriteMealIds.includes(meal.id);
+      return mealTypeMatch && dietMatch && prepMatch && favMatch;
     });
-  }, [mealLibrary, selectedMealTypes, selectedDietTags, selectedPrepFilters]);
+  }, [mealLibrary, selectedMealTypes, selectedDietTags, selectedPrepFilters, showFavoritesOnly, favoriteMealIds]);
 
   const groceryItemsByCategory = React.useMemo(() => {
-    const map = new Map<string, GroceryItem>();
-    for (const savedMeal of savedMeals) {
-      for (const ingredient of savedMeal.ingredients) {
-        const key = `${ingredient.category}::${ingredient.name.toLowerCase()}::${ingredient.unit}`;
-        const servingScale = savedMeal.servings / Math.max(1, savedMeal.base_servings);
-        const scaledQty = ingredient.quantity * servingScale;
-        const existing = map.get(key);
-        const nextQty = (existing?.quantity || 0) + scaledQty;
-        map.set(key, {
-          key,
-          name: ingredient.name,
-          unit: ingredient.unit,
-          category: ingredient.category,
-          quantity: ingredient.rounding === 'ceil' ? Math.ceil(nextQty) : Number(nextQty.toFixed(2)),
-        });
-      }
-    }
-    const grouped = new Map<string, GroceryItem[]>();
-    for (const item of map.values()) {
-      if (!grouped.has(item.category)) grouped.set(item.category, []);
-      grouped.get(item.category)?.push(item);
-    }
-    for (const [category, items] of grouped.entries()) {
-      grouped.set(
-        category,
-        items.sort((a, b) => a.name.localeCompare(b.name))
-      );
-    }
-    return grouped;
-  }, [savedMeals]);
+    const flat =
+      groceryListServer.length > 0 || savedMeals.length === 0
+        ? groceryListServer
+        : groceryFromSavedMeals(savedMeals);
+    return groupGroceryFromFlat(flat);
+  }, [groceryListServer, savedMeals]);
 
   function openAddMealModal(meal: MealLibraryItem) {
     setAddMealError('');
@@ -508,45 +589,93 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     setAddMealStartTime('');
   }
 
-  function saveMealToWeek() {
+  async function saveMealToWeek() {
     if (!addMealSource) return;
     if (!addMealDate || !addMealStartTime) {
       setAddMealError('Please select date and start time.');
       return;
     }
-    const endTime = calculateEndTime(addMealStartTime, addMealSource.prep_time_minutes);
-    const newSavedMeal: SavedMealItem = {
-      id: `saved-${Date.now()}`,
-      meal_id: addMealSource.id,
-      meal_name: addMealSource.title,
-      prep_time_minutes: addMealSource.prep_time_minutes,
-      date: addMealDate,
-      start_time: addMealStartTime,
-      end_time: endTime,
-      servings: 1,
-      ingredients: addMealSource.ingredients,
-      base_servings: addMealSource.base_servings,
-    };
-    setSavedMeals((prev) => [...prev, newSavedMeal]);
-    closeAddMealModal();
+    setAddMealError('');
+    setIsSavingMealCalendar(true);
+    try {
+      const { ok, status, payload } = await patchMealsSaved(
+        {
+          action: 'add_to_calendar',
+          meal_id: addMealSource.id,
+          date: addMealDate,
+          start_time: addMealStartTime,
+        },
+        { setGlobalError: false }
+      );
+      if (!ok) {
+        setAddMealError(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : status === 404
+              ? 'Connect Google Calendar in Calendar settings first.'
+              : 'Could not add meal to calendar.'
+        );
+        return;
+      }
+      applyWeekPatchPayload(payload);
+      closeAddMealModal();
+    } catch {
+      setAddMealError('Could not add meal to calendar right now.');
+    } finally {
+      setIsSavingMealCalendar(false);
+    }
   }
 
-  function updateServings(savedId: string, nextServings: number) {
-    setSavedMeals((prev) =>
-      prev.map((meal) => (meal.id === savedId ? { ...meal, servings: Math.max(1, nextServings) } : meal))
+  async function updateServings(savedId: string, nextServings: number) {
+    const n = Math.max(1, nextServings);
+    const { ok, payload } = await patchMealsSaved(
+      {
+        action: 'update_servings',
+        saved_meal_id: savedId,
+        servings: n,
+        week_record_key: weekRecordKey || undefined,
+      },
+      { setGlobalError: true }
     );
+    if (ok) applyWeekPatchPayload(payload);
   }
 
-  function removeSavedMeal(savedId: string) {
-    setSavedMeals((prev) => prev.filter((meal) => meal.id !== savedId));
+  async function removeSavedMeal(savedId: string) {
+    const { ok, payload } = await patchMealsSaved(
+      {
+        action: 'remove_saved_meal',
+        saved_meal_id: savedId,
+        week_record_key: weekRecordKey || undefined,
+      },
+      { setGlobalError: true }
+    );
+    if (ok) applyWeekPatchPayload(payload);
   }
 
-  function toggleGroceryChecked(key: string) {
-    setCheckedGroceryKeys((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
+  async function toggleGroceryChecked(key: string) {
+    const { ok, payload } = await patchMealsSaved(
+      {
+        action: 'toggle_grocery_item',
+        grocery_key: key,
+        week_record_key: weekRecordKey || undefined,
+      },
+      { setGlobalError: true }
+    );
+    if (ok) applyWeekPatchPayload(payload);
   }
 
-  function clearCheckedGroceryItems() {
-    setCheckedGroceryKeys([]);
+  async function clearCheckedGroceryItems() {
+    const { ok, payload } = await patchMealsSaved(
+      { action: 'clear_checked', week_record_key: weekRecordKey || undefined },
+      { setGlobalError: true }
+    );
+    if (ok) applyWeekPatchPayload(payload);
+  }
+
+  async function toggleFavoriteMeal(mealId: string) {
+    setMealsApiError('');
+    const { ok, payload } = await patchMealsSaved({ action: 'toggle_favorite', meal_id: mealId });
+    if (ok && Array.isArray(payload.favorite_meals)) setFavoriteMealIds(payload.favorite_meals);
   }
 
   async function loadMealsState(): Promise<void> {
@@ -563,15 +692,23 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       } catch {
         payload = {};
       }
-      if (!response.ok) return;
+      if (!response.ok) {
+        setMealLibrary(SAMPLE_MEALS);
+        return;
+      }
 
       const incomingLibrary = Array.isArray(payload.meal_library) ? payload.meal_library : [];
-      setMealLibrary(incomingLibrary.length > 0 ? incomingLibrary : SAMPLE_MEALS);
+      setMealLibrary(incomingLibrary);
       setFavoriteMealIds(Array.isArray(payload.favorite_meals) ? payload.favorite_meals : []);
       setSavedMeals(Array.isArray(payload.saved_meals_this_week) ? payload.saved_meals_this_week : []);
+      setGroceryListServer(Array.isArray(payload.grocery_list) ? payload.grocery_list : []);
       setCheckedGroceryKeys(
         Array.isArray(payload.checked_grocery_items) ? payload.checked_grocery_items : []
       );
+      const meta = payload.metadata || {};
+      if (typeof meta.week_record_key === 'string') setWeekRecordKey(meta.week_record_key);
+      if (typeof meta.week_start === 'string') setWeekStartIso(meta.week_start);
+      if (typeof meta.week_end === 'string') setWeekEndIso(meta.week_end);
 
       const pref = payload.meal_preferences || {};
       const prefAllergies = Array.isArray(pref.allergies)
@@ -594,7 +731,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         setGoalInput(['Balanced']);
       }
     } catch {
-      // Silent fallback to local sample meals for this step.
+      setMealLibrary(SAMPLE_MEALS);
     }
   }
 
@@ -847,44 +984,88 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                       </button>
                     ))}
                   </div>
+                  <div className="df-workoutFilterGroup">
+                    <span className="df-workoutFilterLabel">Library</span>
+                    <button
+                      type="button"
+                      className={`df-workoutFilterChip${showFavoritesOnly ? ' df-workoutFilterChipActive' : ''}`}
+                      onClick={() => setShowFavoritesOnly((prev) => !prev)}
+                    >
+                      Favorites
+                    </button>
+                  </div>
                 </div>
                 <div className="df-workoutLibraryGrid df-mealsLibraryGrid">
                   {filteredMealLibrary.map((meal) => (
-                    <article key={meal.id} className="df-workoutLibraryCard">
-                      <div className="df-workoutLibraryCardTop">
-                        <h3 className="df-workoutLibraryTitle" style={{ fontSize: 20 }}>
-                          {meal.title}
-                        </h3>
-                        <div className="df-weeklyPlanControls">
-                          <button
-                            type="button"
-                            className={`df-workoutFavoriteBtn${favoriteMealIds.includes(meal.id) ? ' df-workoutFavoriteBtnActive' : ''}`}
-                            aria-label={`Toggle favorite for ${meal.title}`}
-                            onClick={() =>
-                              setFavoriteMealIds((prev) =>
-                                prev.includes(meal.id) ? prev.filter((id) => id !== meal.id) : [...prev, meal.id]
-                              )
-                            }
-                          >
-                            ❤
-                          </button>
-                          <button
-                            type="button"
-                            className="df-workoutLibraryAdd"
-                            aria-label={`Add ${meal.title}`}
-                            onClick={() => openAddMealModal(meal)}
-                          >
-                            +
-                          </button>
+                    <article key={meal.id} className="df-mealLibraryCard">
+                      <div className="df-mealLibraryCardHeader">
+                        <h3 className="df-mealLibraryCardTitle">{meal.title}</h3>
+                        <button
+                          type="button"
+                          className={`df-mealLibraryCardHeart${favoriteMealIds.includes(meal.id) ? ' df-mealLibraryCardHeartActive' : ''}`}
+                          aria-label={`Toggle favorite for ${meal.title}`}
+                          onClick={() => void toggleFavoriteMeal(meal.id)}
+                        >
+                          {favoriteMealIds.includes(meal.id) ? '♥' : '♡'}
+                        </button>
+                      </div>
+                      <div
+                        className="df-mealLibraryCardBody"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setMealDetail(meal)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setMealDetail(meal);
+                          }
+                        }}
+                      >
+                        <div className="df-mealLibraryDietTags">
+                          {(meal.diet_tags.length ? meal.diet_tags : ['Balanced']).map((tag) => (
+                            <span key={`${meal.id}-${tag}`} className="df-mealLibraryDietPill">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="df-mealLibraryMetaRow">
+                          <span className="df-mealLibraryMetaItem" title="Prep time">
+                            <span aria-hidden>⏱</span> {meal.prep_time_minutes} min
+                          </span>
+                          {meal.estimated_calories != null && meal.estimated_calories > 0 ? (
+                            <span className="df-mealLibraryMetaItem" title="Estimated calories">
+                              <span aria-hidden>🔥</span> {meal.estimated_calories} kcal
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="df-mealLibraryIngredientsBlock">
+                          <div className="df-mealLibraryIngredientsLabel">Ingredients:</div>
+                          <div className="df-mealLibraryIngredientsPreview">{meal.short_ingredients_preview}</div>
                         </div>
                       </div>
-                      <div className="df-workoutTypePill">{meal.meal_type}</div>
-                      <div className="df-workoutMeta">{meal.diet_tags.join(' · ') || 'No tags'}</div>
-                      <div className="df-workoutMeta">{meal.prep_time_minutes} min prep</div>
-                      <div className="df-workoutMeta">{meal.short_ingredients_preview}</div>
+                      <button
+                        type="button"
+                        className="df-mealLibraryCalendarBtn"
+                        onClick={() => openAddMealModal(meal)}
+                      >
+                        <span aria-hidden className="df-mealLibraryCalendarBtnIcon">
+                          📅
+                        </span>
+                        Add to calendar
+                      </button>
                     </article>
                   ))}
                 </div>
+                {mealLibrary.length > 0 && filteredMealLibrary.length === 0 && (
+                  <div className="df-calendarLegend" style={{ marginTop: 10, color: '#6b7280' }}>
+                    No meals match these filters.
+                  </div>
+                )}
+                {mealLibrary.length === 0 && (
+                  <div className="df-calendarLegend" style={{ marginTop: 10, color: '#6b7280' }}>
+                    No meals in your library yet. Tap Generate to create one.
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -917,7 +1098,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                       <button
                         type="button"
                         className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
-                        onClick={() => removeSavedMeal(savedMeal.id)}
+                        onClick={() => void removeSavedMeal(savedMeal.id)}
                         aria-label={`Remove ${savedMeal.meal_name}`}
                       >
                         🗑
@@ -932,7 +1113,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                       <button
                         type="button"
                         className="df-weeklyPlanControlBtn"
-                        onClick={() => updateServings(savedMeal.id, savedMeal.servings - 1)}
+                        onClick={() => void updateServings(savedMeal.id, savedMeal.servings - 1)}
                       >
                         -
                       </button>
@@ -941,12 +1122,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         min={1}
                         value={savedMeal.servings}
                         className="df-input df-mealServingsInput"
-                        onChange={(event) => updateServings(savedMeal.id, Number(event.target.value) || 1)}
+                        onChange={(event) => void updateServings(savedMeal.id, Number(event.target.value) || 1)}
                       />
                       <button
                         type="button"
                         className="df-weeklyPlanControlBtn"
-                        onClick={() => updateServings(savedMeal.id, savedMeal.servings + 1)}
+                        onClick={() => void updateServings(savedMeal.id, savedMeal.servings + 1)}
                       >
                         +
                       </button>
@@ -955,7 +1136,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 ))}
                 {savedMeals.length === 0 && (
                   <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
-                    No meals saved yet. Use + in the Meal Library to add one.
+                    No meals saved yet. Use &quot;Add to calendar&quot; on a library meal to schedule one.
                   </div>
                 )}
               </div>
@@ -979,7 +1160,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 </h2>
               </button>
               <div>
-                <button type="button" className="df-btn" onClick={clearCheckedGroceryItems}>
+                <button type="button" className="df-btn" onClick={() => void clearCheckedGroceryItems()}>
                   Clear checked
                 </button>
               </div>
@@ -995,7 +1176,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                           <input
                             type="checkbox"
                             checked={checkedGroceryKeys.includes(item.key)}
-                            onChange={() => toggleGroceryChecked(item.key)}
+                            onChange={() => void toggleGroceryChecked(item.key)}
                           />
                           <span>
                             {item.name} - {formatQuantity(item.quantity)} {item.unit}
@@ -1146,6 +1327,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   type="date"
                   className="df-input"
                   value={addMealDate}
+                  min={weekStartIso || undefined}
+                  max={weekEndIso || undefined}
                   onChange={(event) => {
                     setAddMealDate(event.target.value);
                     setAddMealError('');
@@ -1172,11 +1355,101 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
               <div className="df-workoutMeta">Ingredients: {addMealSource.short_ingredients_preview}</div>
               {addMealError && <div className="df-errorText">{addMealError}</div>}
               <div className="df-weeklyPlanActions">
-                <button type="button" className="df-weeklyPlanActionBtn" onClick={saveMealToWeek}>
-                  Save
+                <button
+                  type="button"
+                  className="df-weeklyPlanActionBtn"
+                  onClick={() => void saveMealToWeek()}
+                  disabled={isSavingMealCalendar}
+                >
+                  {isSavingMealCalendar ? 'Saving…' : 'Save'}
                 </button>
-                <button type="button" className="df-weeklyPlanActionBtn" onClick={closeAddMealModal}>
+                <button
+                  type="button"
+                  className="df-weeklyPlanActionBtn"
+                  onClick={closeAddMealModal}
+                  disabled={isSavingMealCalendar}
+                >
                   Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mealDetail && (
+        <div
+          className="df-modalBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setMealDetail(null);
+          }}
+        >
+          <div className="df-modalPanel df-addWeeklyModal" role="dialog" aria-modal="true" aria-label="Meal details">
+            <div className="df-modalHeader">
+              <div className="df-modalTitle">{mealDetail.title}</div>
+              <button
+                type="button"
+                className="df-iconBtn"
+                onClick={() => setMealDetail(null)}
+                aria-label="Close meal details"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="df-settingsContent df-mealDetailModalBody">
+              <div className="df-mealDetailChips">
+                <span className="df-mealLibraryDietPill">{mealDetail.meal_type}</span>
+                {mealDetail.diet_tags.map((tag) => (
+                  <span key={`d-${tag}`} className="df-mealLibraryDietPill">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <div className="df-mealLibraryMetaRow" style={{ marginTop: 8 }}>
+                <span className="df-mealLibraryMetaItem">
+                  <span aria-hidden>⏱</span> {mealDetail.prep_time_minutes} min prep
+                </span>
+                {mealDetail.estimated_calories != null && mealDetail.estimated_calories > 0 ? (
+                  <span className="df-mealLibraryMetaItem">
+                    <span aria-hidden>🔥</span> {mealDetail.estimated_calories} kcal
+                  </span>
+                ) : null}
+              </div>
+              {mealDetail.summary_short ? (
+                <p className="df-mealDetailSummary">{mealDetail.summary_short}</p>
+              ) : null}
+              <h4 className="df-mealDetailSectionTitle">Ingredients</h4>
+              <ul className="df-mealDetailList">
+                {mealDetail.ingredients.map((ing, idx) => (
+                  <li key={`${mealDetail.id}-ing-${idx}`}>
+                    {ing.name}: {formatQuantity(ing.quantity)} {ing.unit}
+                  </li>
+                ))}
+              </ul>
+              {mealDetail.instructions && mealDetail.instructions.length > 0 ? (
+                <>
+                  <h4 className="df-mealDetailSectionTitle">Instructions</h4>
+                  <ol className="df-mealDetailList df-mealDetailSteps">
+                    {mealDetail.instructions.map((step, idx) => (
+                      <li key={`step-${idx}`}>{step}</li>
+                    ))}
+                  </ol>
+                </>
+              ) : null}
+              <div className="df-weeklyPlanActions" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="df-weeklyPlanActionBtn"
+                  onClick={() => {
+                    openAddMealModal(mealDetail);
+                    setMealDetail(null);
+                  }}
+                >
+                  Add to calendar
+                </button>
+                <button type="button" className="df-weeklyPlanActionBtn" onClick={() => setMealDetail(null)}>
+                  Close
                 </button>
               </div>
             </div>
