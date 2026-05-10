@@ -61,6 +61,46 @@ def _workout_dedupe_signature(item: Dict[str, Any]) -> str:
     return f"{type_key}|{duration}|{title.lower()}"
 
 
+def _library_summary_rows(library: List[Dict[str, Any]], limit: int = 10) -> List[str]:
+    rows: List[str] = []
+    for item in library[:limit]:
+        title = str(item.get("title", "")).strip()
+        workout_type = str(item.get("workout_type", "")).strip()
+        duration = _to_int(item.get("duration_minutes"), 0)
+        if not title:
+            continue
+        rows.append(f"{title}|{workout_type}|{duration}")
+    return rows
+
+
+def _relevant_type_keys(preferences: Dict[str, Any], library: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    preferred_types_raw = preferences.get("preferred_workout_types") or []
+    relevant: List[str] = []
+    for t in preferred_types_raw:
+        if isinstance(t, str) and t.strip():
+            key = _normalize_type_key(t)
+            if key not in relevant:
+                relevant.append(key)
+    if relevant:
+        return relevant
+    if library:
+        for item in library:
+            key = _normalize_type_key(str(item.get("workout_type", "")))
+            if key and key not in relevant:
+                relevant.append(key)
+    return relevant or ["walking", "strength", "yoga"]
+
+
+def _library_type_counts(library: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for item in library:
+        key = _normalize_type_key(str(item.get("workout_type", "")))
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _today_iso_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
@@ -341,6 +381,10 @@ def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
             }
         )
     return cleaned
+
+
+def _is_locked_plan_item(item: Dict[str, Any]) -> bool:
+    return bool(str(item.get("google_event_id", "")).strip() or str(item.get("dailyflow_calendar_id", "")).strip())
 
 
 def _next_plan_id(current_plan: List[Dict[str, Any]]) -> str:
@@ -783,9 +827,11 @@ def _generate_library_from_openai(
         raise ValueError("Missing OPENAI_API_KEY env var.")
     client = OpenAI(api_key=api_key)
     avoid_list = avoid_workouts or []
+    prompt = _openai_prompt_for_library(preferences, avoid_list, diversity_key)
+    print(f"[workouts-generate-debug] openai_prompt_length={len(prompt)} avoid_signatures_count={len(avoid_signatures or set())}")
     response = client.responses.create(
         model=OPENAI_MODEL,
-        input=_openai_prompt_for_library(preferences, avoid_list, diversity_key),
+        input=prompt,
         text={"format": {"type": "json_object"}},
     )
     text_out = getattr(response, "output_text", "")
@@ -797,14 +843,26 @@ def _generate_library_from_openai(
         return [], "Model returned malformed JSON."
     if not isinstance(parsed, dict):
         return [], "Model returned an unexpected JSON shape."
-    normalized = _normalize_generated_library(parsed.get("workout_library"))
+    raw_library = parsed.get("workout_library")
+    raw_count = len(raw_library) if isinstance(raw_library, list) else 0
+    normalized = _normalize_generated_library(raw_library)
+    print(
+        f"[workouts-generate-debug] openai_result raw_count={raw_count} "
+        f"normalized_count={len(normalized)} sample={_library_summary_rows(normalized, 10)}"
+    )
     if avoid_signatures:
         filtered: List[Dict[str, Any]] = []
+        skipped_due_to_avoid = 0
         for item in normalized:
             if _workout_dedupe_signature(item) in avoid_signatures:
+                skipped_due_to_avoid += 1
                 continue
             filtered.append(item)
         normalized = filtered
+        print(
+            f"[workouts-generate-debug] openai_filtered_by_avoid skipped={skipped_due_to_avoid} "
+            f"remaining={len(normalized)}"
+        )
     return normalized, ""
 
 
@@ -884,6 +942,7 @@ def _merge_generated_library_with_preserved_refs(
     saved_weekly_plan: List[Dict[str, Any]],
     favorite_workouts: List[Dict[str, Any]],
     generated_library: List[Dict[str, Any]],
+    debug_stats: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     referenced_ids = {
         str(item.get("library_workout_id", "")).strip()
@@ -899,6 +958,11 @@ def _merge_generated_library_with_preserved_refs(
             favorite_key_set.add(_favorite_key_from_item(fav))
 
     if not referenced_ids and not favorite_key_set:
+        if debug_stats is not None:
+            debug_stats["preserved_referenced_count"] = 0
+            debug_stats["preserved_favorite_count"] = 0
+            debug_stats["skipped_generated_duplicate_count"] = 0
+            debug_stats["merged_final_count"] = len(generated_library)
         return generated_library
 
     old_library = _normalize_saved_library(existing_item.get("workout_library"))
@@ -916,9 +980,11 @@ def _merge_generated_library_with_preserved_refs(
             preserved_sigs.add(_workout_dedupe_signature(item))
 
     merged = list(preserved_items)
+    skipped_generated_duplicate_count = 0
     for item in generated_library:
         sig = _workout_dedupe_signature(item)
         if sig in preserved_sigs:
+            skipped_generated_duplicate_count += 1
             continue
         next_item = dict(item)
         item_id = str(next_item.get("id", "")).strip()
@@ -928,7 +994,89 @@ def _merge_generated_library_with_preserved_refs(
         used_ids.add(item_id)
         preserved_sigs.add(sig)
         merged.append(next_item)
+    if debug_stats is not None:
+        preserved_ref_count = 0
+        preserved_fav_count = 0
+        for item in preserved_items:
+            iid = str(item.get("id", "")).strip()
+            fk = _favorite_key_from_item(item)
+            if iid in referenced_ids:
+                preserved_ref_count += 1
+            if fk in favorite_key_set:
+                preserved_fav_count += 1
+        debug_stats["preserved_referenced_count"] = preserved_ref_count
+        debug_stats["preserved_favorite_count"] = preserved_fav_count
+        debug_stats["skipped_generated_duplicate_count"] = skipped_generated_duplicate_count
+        debug_stats["merged_final_count"] = len(merged)
     return merged
+
+
+def _ensure_min_library_coverage_after_merge(
+    *,
+    preferences: Dict[str, Any],
+    library: List[Dict[str, Any]],
+    min_per_type: int = 3,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int], Dict[str, int]]:
+    relevant_keys = _relevant_type_keys(preferences, library)
+    before_counts = _library_type_counts(library)
+    missing_before = {
+        key: max(0, min_per_type - before_counts.get(key, 0))
+        for key in relevant_keys
+        if before_counts.get(key, 0) < min_per_type
+    }
+    if not missing_before:
+        return library, missing_before, {}
+
+    merged = list(library)
+    used_ids = {str(item.get("id", "")).strip() for item in merged if str(item.get("id", "")).strip()}
+    used_signatures = {_workout_dedupe_signature(item) for item in merged}
+    current_counts = dict(before_counts)
+
+    labels = ["Fresh", "Tempo", "Power", "Balanced", "Mobility", "Endurance", "Focus", "Skill"]
+    for type_key in relevant_keys:
+        while current_counts.get(type_key, 0) < min_per_type:
+            added = False
+            templates = list(_variant_templates_for_type(type_key))
+            for idx, (title, duration, intensity, location) in enumerate(templates):
+                candidate = _make_library_item(
+                    item_id="",
+                    title=title,
+                    workout_type_key=type_key,
+                    duration_minutes=duration,
+                    intensity=intensity,
+                    location=location,
+                )
+                sig = _workout_dedupe_signature(candidate)
+                if sig in used_signatures:
+                    alt_title = f"{labels[(current_counts.get(type_key, 0) + idx) % len(labels)]} {title}"
+                    candidate = _make_library_item(
+                        item_id="",
+                        title=alt_title,
+                        workout_type_key=type_key,
+                        duration_minutes=duration,
+                        intensity=intensity,
+                        location=location,
+                    )
+                    sig = _workout_dedupe_signature(candidate)
+                if sig in used_signatures:
+                    continue
+                candidate["id"] = _next_library_id(used_ids)
+                used_ids.add(candidate["id"])
+                used_signatures.add(sig)
+                merged.append(candidate)
+                current_counts[type_key] = current_counts.get(type_key, 0) + 1
+                added = True
+                break
+            if not added:
+                break
+
+    after_counts = _library_type_counts(merged)
+    missing_after = {
+        key: max(0, min_per_type - after_counts.get(key, 0))
+        for key in relevant_keys
+        if after_counts.get(key, 0) < min_per_type
+    }
+    return merged, missing_before, missing_after
 
 
 def _save_library(
@@ -1190,6 +1338,7 @@ def _derive_weekly_plan(
     eligible_windows: List[Dict[str, Any]],
     workouts_per_week: int,
     used_days_seed: Optional[set[str]] = None,
+    debug_stats: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     today_iso = _today_iso_utc()
     eligible_windows = [window for window in eligible_windows if str(window.get("date", "")).strip() >= today_iso]
@@ -1200,6 +1349,9 @@ def _derive_weekly_plan(
     plan: List[Dict[str, Any]] = []
     used_library_ids = set()
     used_days_global = {day for day in (used_days_seed or set()) if isinstance(day, str) and day.strip()}
+    adjacent_day_fallback_used = False
+    duplicate_day_fallback_used = False
+    non_adjacent_pass_count = 0
     available_days_sorted = sorted({window["date"] for window in eligible_windows})
 
     def choose_varied_start(window: Dict[str, Any], duration: int, slot_index_seed: int) -> Tuple[str, str]:
@@ -1223,6 +1375,18 @@ def _derive_weekly_plan(
         return f"{final_start // 60:02d}:{final_start % 60:02d}", f"{final_end // 60:02d}:{final_end % 60:02d}"
 
     def try_place_on_day(day: str) -> bool:
+        nonlocal adjacent_day_fallback_used, duplicate_day_fallback_used, non_adjacent_pass_count
+        existing_days = set(used_days_global)
+        is_duplicate_day = day in existing_days
+        is_adjacent = False
+        for existing_day in existing_days:
+            try:
+                delta = abs((date.fromisoformat(day) - date.fromisoformat(existing_day)).days)
+                if delta == 1:
+                    is_adjacent = True
+                    break
+            except Exception:
+                continue
         for library_item in workout_library:
             lib_id = str(library_item.get("id", "")).strip()
             duration = _to_int(library_item.get("duration_minutes"), 0)
@@ -1237,6 +1401,12 @@ def _derive_weekly_plan(
                 rec_start, rec_end = choose_varied_start(chosen_window, duration, len(plan))
                 used_library_ids.add(lib_id)
                 used_days_global.add(day)
+                if is_adjacent:
+                    adjacent_day_fallback_used = True
+                else:
+                    non_adjacent_pass_count += 1
+                if is_duplicate_day:
+                    duplicate_day_fallback_used = True
                 plan.append(
                     {
                         "id": f"plan_{len(plan)+1}",
@@ -1251,17 +1421,32 @@ def _derive_weekly_plan(
                 return True
         return False
 
-    # Pass 1 (hard day-first): at most one new workout per unused day in date order.
-    unused_days_sorted = sorted(
-        {str(window.get("date", "")).strip() for window in remaining_windows if str(window.get("date", "")).strip()}
-        - used_days_global
-    )
+    def _is_non_adjacent_to_used(day: str) -> bool:
+        for existing_day in used_days_global:
+            try:
+                if abs((date.fromisoformat(day) - date.fromisoformat(existing_day)).days) == 1:
+                    return False
+            except Exception:
+                continue
+        return True
+
+    # Pass 1: unused + non-adjacent days first (best spread).
+    all_days = sorted({str(window.get("date", "")).strip() for window in remaining_windows if str(window.get("date", "")).strip()})
+    unused_non_adjacent_days = [day for day in all_days if day not in used_days_global and _is_non_adjacent_to_used(day)]
+    for day in unused_non_adjacent_days:
+        if len(plan) >= max_items:
+            break
+        try_place_on_day(day)
+
+    # Pass 2: still missing -> unused days even if adjacent.
+    updated_all_days = sorted({str(window.get("date", "")).strip() for window in remaining_windows if str(window.get("date", "")).strip()})
+    unused_days_sorted = [day for day in updated_all_days if day not in used_days_global]
     for day in unused_days_sorted:
         if len(plan) >= max_items:
             break
         try_place_on_day(day)
 
-    # Pass 2: still missing -> prefer remaining unused days first, then allow used days.
+    # Pass 3: still missing -> allow used days, prefer non-adjacent first, then adjacent fallback.
     while len(plan) < max_items:
         progress = False
         remaining_days = {
@@ -1269,8 +1454,8 @@ def _derive_weekly_plan(
             for window in remaining_windows
             if str(window.get("date", "")).strip()
         }
-        unused_remaining_days = sorted(day for day in remaining_days if day not in used_days_global)
-        for day in unused_remaining_days:
+        candidate_non_adjacent = sorted(day for day in remaining_days if _is_non_adjacent_to_used(day))
+        for day in candidate_non_adjacent:
             if len(plan) >= max_items:
                 break
             if try_place_on_day(day):
@@ -1280,13 +1465,7 @@ def _derive_weekly_plan(
             break
         if progress:
             continue
-        used_or_any_days = sorted(
-            {
-                str(window.get("date", "")).strip()
-                for window in remaining_windows
-                if str(window.get("date", "")).strip()
-            }
-        )
+        used_or_any_days = sorted({str(window.get("date", "")).strip() for window in remaining_windows if str(window.get("date", "")).strip()})
         for day in used_or_any_days:
             if len(plan) >= max_items:
                 break
@@ -1302,6 +1481,13 @@ def _derive_weekly_plan(
         f"seed_used_days={sorted({day for day in (used_days_seed or set()) if isinstance(day, str) and day.strip()})} "
         f"generated_days={[item.get('recommended_day') for item in plan]}"
     )
+    if debug_stats is not None:
+        debug_stats["adjacent_day_fallback_used"] = adjacent_day_fallback_used
+        debug_stats["duplicate_day_fallback_used"] = duplicate_day_fallback_used
+        debug_stats["non_adjacent_pass_count"] = non_adjacent_pass_count
+        debug_stats["generated_new_days"] = sorted(
+            {str(item.get("recommended_day", "")).strip() for item in plan if str(item.get("recommended_day", "")).strip()}
+        )
     return plan
 
 
@@ -1370,6 +1556,7 @@ def _derive_weekly_plan_and_signatures(
     workout_library: List[Dict[str, Any]],
     workouts_per_week: int,
     preserved_weekly_plan: Optional[List[Dict[str, Any]]] = None,
+    debug_stats: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], str, str]:
     period = {"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()}
     preferences = _read_user_preferences(user_id)
@@ -1388,27 +1575,7 @@ def _derive_weekly_plan_and_signatures(
             if str(item.get("recommended_day", "")).strip() >= start_date_value.isoformat()
             and str(item.get("recommended_day", "")).strip() <= end_date_value.isoformat()
         ]
-    if keep_plan and len(keep_plan) > workouts_per_week:
-        prioritized = sorted(
-            keep_plan,
-            key=lambda x: (
-                0 if str(x.get("google_event_id", "")).strip() else 1,
-                str(x.get("recommended_day", "")),
-                str(x.get("recommended_start_time", "")),
-                str(x.get("recommended_end_time", "")),
-                str(x.get("id", "")),
-            ),
-        )
-        weekly_plan = sorted(
-            prioritized[:workouts_per_week],
-            key=lambda x: (
-                str(x.get("recommended_day", "")),
-                str(x.get("recommended_start_time", "")),
-                str(x.get("recommended_end_time", "")),
-                str(x.get("id", "")),
-            ),
-        )
-    elif keep_plan and len(keep_plan) >= workouts_per_week:
+    if keep_plan and len(keep_plan) >= workouts_per_week:
         weekly_plan = sorted(
             keep_plan,
             key=lambda x: (
@@ -1452,6 +1619,7 @@ def _derive_weekly_plan_and_signatures(
             return False
 
         free_windows = [window for window in eligible_windows if not _window_overlaps_kept(window)]
+        local_plan_debug: Dict[str, Any] = {}
         additional = _derive_weekly_plan(
             workout_library=remaining_library,
             eligible_windows=free_windows,
@@ -1461,6 +1629,7 @@ def _derive_weekly_plan_and_signatures(
                 for item in keep_plan
                 if str(item.get("recommended_day", "")).strip()
             },
+            debug_stats=local_plan_debug,
         )
         merged = list(keep_plan)
         for item in additional:
@@ -1476,11 +1645,33 @@ def _derive_weekly_plan_and_signatures(
                 str(x.get("id", "")),
             ),
         )
+        if debug_stats is not None:
+            debug_stats["adjacent_day_fallback_used"] = bool(local_plan_debug.get("adjacent_day_fallback_used", False))
+            debug_stats["duplicate_day_fallback_used"] = bool(local_plan_debug.get("duplicate_day_fallback_used", False))
+            debug_stats["non_adjacent_pass_count"] = int(local_plan_debug.get("non_adjacent_pass_count", 0))
+            debug_stats["generated_new_days"] = list(local_plan_debug.get("generated_new_days", []))
     else:
+        local_plan_debug = {}
         weekly_plan = _derive_weekly_plan(
             workout_library=workout_library,
             eligible_windows=eligible_windows,
             workouts_per_week=workouts_per_week,
+            debug_stats=local_plan_debug,
+        )
+        if debug_stats is not None:
+            debug_stats["adjacent_day_fallback_used"] = bool(local_plan_debug.get("adjacent_day_fallback_used", False))
+            debug_stats["duplicate_day_fallback_used"] = bool(local_plan_debug.get("duplicate_day_fallback_used", False))
+            debug_stats["non_adjacent_pass_count"] = int(local_plan_debug.get("non_adjacent_pass_count", 0))
+            debug_stats["generated_new_days"] = list(local_plan_debug.get("generated_new_days", []))
+    if debug_stats is not None:
+        debug_stats["preserved_plan_count"] = len(keep_plan)
+        debug_stats["final_current_week_plan_count"] = len(weekly_plan)
+        debug_stats["final_current_week_plan_days"] = sorted(
+            {
+                str(item.get("recommended_day", "")).strip()
+                for item in weekly_plan
+                if str(item.get("recommended_day", "")).strip()
+            }
         )
     return weekly_plan, _busyblocks_signature(busy_blocks), _library_signature(workout_library)
 
@@ -1562,8 +1753,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return {"statusCode": 200, "headers": dict(_CORS_HEADERS), "body": ""}
     if method != "POST":
         return _json_response(405, {"message": "Method not allowed."})
+    print("[workouts-generate-debug] request received")
 
     user_id = _extract_cognito_sub(event)
+    print(f"[workouts-generate-debug] user_id_present={bool(user_id)}")
     if not user_id:
         return _json_response(401, {"message": "Missing Cognito user id (sub) in request."})
 
@@ -1571,6 +1764,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if period_error:
         return _json_response(400, {"message": period_error})
     assert start_date_value is not None and end_date_value is not None
+    print(
+        f"[workouts-generate-debug] requested_period start={start_date_value.isoformat()} "
+        f"end={end_date_value.isoformat()}"
+    )
 
     try:
         if not _busyblocks_schema_ok():
@@ -1589,7 +1786,27 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             == end_date_value.isoformat()
         ):
             saved_weekly_plan = _normalize_saved_weekly_plan(existing_item.get("current_week_plan"))
+        locked_plan_items = [item for item in saved_weekly_plan if _is_locked_plan_item(item)]
+        replaceable_plan_items = [item for item in saved_weekly_plan if not _is_locked_plan_item(item)]
         old_library = _normalize_saved_library(existing_item.get("workout_library"))
+        print(
+            f"[workouts-generate-debug] pre_generation workouts_per_week={workouts_per_week} "
+            f"saved_weekly_plan_count={len(saved_weekly_plan)} favorite_workouts_count={len(favorite_workouts)} "
+            f"old_library_count={len(old_library)}"
+        )
+        remaining_needed = max(0, workouts_per_week - len(locked_plan_items))
+        locked_days = sorted(
+            {
+                str(item.get("recommended_day", "")).strip()
+                for item in locked_plan_items
+                if str(item.get("recommended_day", "")).strip()
+            }
+        )
+        print(
+            f"[workouts-generate-debug] locked_plan_count={len(locked_plan_items)} "
+            f"replaceable_plan_count={len(replaceable_plan_items)} remaining_needed={remaining_needed} "
+            f"locked_days={locked_days}"
+        )
         avoid_for_prompt = [
             {
                 "title": str(m.get("title", "")).strip(),
@@ -1602,6 +1819,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             and _to_int(m.get("duration_minutes"), 0) > 0
         ][:40]
         avoid_sig = {_workout_dedupe_signature(m) for m in old_library}
+        print(
+            f"[workouts-generate-debug] source_attempt=openai avoid_signatures_count={len(avoid_sig)} "
+            f"avoid_sample={list(avoid_sig)[:5]} prompt_avoid_items={len(avoid_for_prompt)}"
+        )
         seed = _generation_seed_int(user_id)
         workout_library, generation_warning = _generate_library_from_openai(
             preferences,
@@ -1610,23 +1831,82 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             diversity_key=str(seed),
         )
         if not workout_library:
+            print(f"[workouts-generate-debug] openai_failed reason={generation_warning}")
+            print("[workouts-generate-debug] source_attempt=fallback")
             workout_library = _fallback_library(preferences, seed=seed, avoid_signatures=avoid_sig)
+            print(
+                f"[workouts-generate-debug] fallback_result count={len(workout_library)} "
+                f"sample={_library_summary_rows(workout_library, 10)}"
+            )
         else:
+            print(
+                f"[workouts-generate-debug] openai_succeeded generated_count={len(workout_library)} "
+                f"sample={_library_summary_rows(workout_library, 10)}"
+            )
             workout_library = _ensure_library_coverage(preferences, workout_library, avoid_signatures=avoid_sig)
+            print(
+                f"[workouts-generate-debug] post_coverage_count={len(workout_library)} "
+                f"sample={_library_summary_rows(workout_library, 10)}"
+            )
+        merge_stats: Dict[str, Any] = {}
         workout_library = _merge_generated_library_with_preserved_refs(
             existing_item=existing_item,
-            saved_weekly_plan=saved_weekly_plan,
+            saved_weekly_plan=locked_plan_items,
             favorite_workouts=favorite_workouts,
             generated_library=workout_library,
+            debug_stats=merge_stats,
+        )
+        print(
+            f"[workouts-generate-debug] merge preserved_referenced_count={merge_stats.get('preserved_referenced_count', 0)} "
+            f"preserved_favorite_count={merge_stats.get('preserved_favorite_count', 0)} "
+            f"skipped_generated_duplicate_count={merge_stats.get('skipped_generated_duplicate_count', 0)} "
+            f"final_library_count={len(workout_library)} "
+            f"final_sample={_library_summary_rows(workout_library, 10)}"
+        )
+        relevant_types = _relevant_type_keys(preferences, workout_library)
+        min_required_library_count = 3 * len(relevant_types)
+        workout_library, missing_before_topup, missing_after_topup = _ensure_min_library_coverage_after_merge(
+            preferences=preferences,
+            library=workout_library,
+            min_per_type=3,
+        )
+        per_type_counts = _library_type_counts(workout_library)
+        print(
+            f"[workouts-generate-debug] relevant_workout_types={relevant_types} "
+            f"min_required_library_count={min_required_library_count} final_library_count={len(workout_library)} "
+            f"per_type_library_counts={per_type_counts} "
+            f"missing_type_coverage_before_topup={missing_before_topup} "
+            f"missing_type_coverage_after_topup={missing_after_topup}"
         )
         generated_at = _iso_utc_now()
+        plan_debug: Dict[str, Any] = {}
         weekly_plan, busy_sig, lib_sig = _derive_weekly_plan_and_signatures(
             user_id=user_id,
             start_date_value=start_date_value,
             end_date_value=end_date_value,
             workout_library=workout_library,
             workouts_per_week=workouts_per_week,
-            preserved_weekly_plan=saved_weekly_plan,
+            preserved_weekly_plan=locked_plan_items,
+            debug_stats=plan_debug,
+        )
+        weekly_days = sorted(
+            {
+                str(item.get("recommended_day", "")).strip()
+                for item in weekly_plan
+                if str(item.get("recommended_day", "")).strip()
+            }
+        )
+        print(
+            f"[workouts-generate-debug] weekly_plan generated_count={len(weekly_plan)} "
+            f"generated_days={weekly_days} preserved_plan_count={len(locked_plan_items)} "
+            f"final_current_week_plan_count={len(weekly_plan)}"
+        )
+        print(
+            f"[workouts-generate-debug] generated_new_days={plan_debug.get('generated_new_days', [])} "
+            f"final_current_week_plan_days={plan_debug.get('final_current_week_plan_days', weekly_days)} "
+            f"adjacent_day_fallback_used={bool(plan_debug.get('adjacent_day_fallback_used', False))} "
+            f"duplicate_day_fallback_used={bool(plan_debug.get('duplicate_day_fallback_used', False))} "
+            f"non_adjacent_pass_count={int(plan_debug.get('non_adjacent_pass_count', 0))}"
         )
         plan_updated_at = _save_library_with_current_week_plan(
             user_id=user_id,
@@ -1650,6 +1930,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         payload["metadata"]["weekly_plan_source"] = "generated_and_saved_current_week_plan"
         if generation_warning:
             payload["metadata"]["generation_warning"] = generation_warning
+        print(
+            f"[workouts-generate-debug] response workout_library_count={len(workout_library)} "
+            f"current_week_plan_count={len(weekly_plan)} metadata_library_source={payload.get('metadata', {}).get('library_source')}"
+        )
+        print("[workouts-generate-debug] completed")
         return _json_response(200, payload)
     except ValueError as err:
         return _json_response(500, {"message": str(err)})

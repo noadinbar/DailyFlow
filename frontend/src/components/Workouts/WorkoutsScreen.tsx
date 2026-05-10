@@ -64,6 +64,7 @@ type WeeklyPlanUpdateResponse = {
   already_scheduled?: boolean;
   google_event_id?: string;
   dailyflow_calendar_id?: string;
+  reconnect_required?: boolean;
   message?: string;
 };
 
@@ -76,6 +77,11 @@ type DayPlanModalState = {
   dayIso: string;
   dayLabel: string;
 };
+
+type GoogleCalendarStatus = 'checking' | 'connected' | 'not_connected' | 'reconnect_required' | 'error';
+
+const GOOGLE_RECONNECT_MESSAGE = 'Google connection expired, reconnect required';
+const GOOGLE_RECONNECT_MESSAGE_NEW = 'Google Calendar connection expired. Please reconnect.';
 
 type WeekDayCard = { dayLabel: string; dateIso: string };
 
@@ -151,6 +157,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState<boolean>(false);
   const [isSavingWeeklyPlan, setIsSavingWeeklyPlan] = React.useState<boolean>(false);
   const [isAddingAllToCalendar, setIsAddingAllToCalendar] = React.useState<boolean>(false);
+  const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
+  const [googleCalendarStatus, setGoogleCalendarStatus] = React.useState<GoogleCalendarStatus>('checking');
+  const [googleCalendarStatusMessage, setGoogleCalendarStatusMessage] = React.useState<string>('');
   const [addFromLibraryWorkout, setAddFromLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
   const [addFromLibraryDay, setAddFromLibraryDay] = React.useState<string>('');
   const [addFromLibraryStartTime, setAddFromLibraryStartTime] = React.useState<string>('18:00');
@@ -450,6 +459,89 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
   }
 
+  function handleConnectGoogleCalendarClick() {
+    setIsConnectingGoogleCalendar(true);
+    void (async () => {
+      try {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+        if (!baseUrl?.trim()) {
+          setGenerateError('Missing API base URL configuration (VITE_API_BASE_URL).');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        if (!accessToken) {
+          setGenerateError('You need to be signed in to connect Google Calendar.');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
+        window.location.assign(startUrl);
+      } catch (e) {
+        const anyErr = e as { message?: string };
+        setGenerateError(
+          typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to start Google Calendar connection.'
+        );
+        setIsConnectingGoogleCalendar(false);
+      }
+    })();
+  }
+
+  const refreshGoogleCalendarConnectionState = React.useCallback(async () => {
+    try {
+      setGoogleCalendarStatus('checking');
+      setGoogleCalendarStatusMessage('');
+      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      if (!baseUrl?.trim()) {
+        setGoogleCalendarStatus('error');
+        setGoogleCalendarStatusMessage('Missing API base URL (VITE_API_BASE_URL).');
+        return;
+      }
+      const token = await getAuthToken();
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/auth/google/calendars`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let payload: { message?: string } = {};
+      try {
+        payload = (await response.json()) as { message?: string };
+      } catch {
+        payload = {};
+      }
+      if (response.status === 404) {
+        setGoogleCalendarStatus('not_connected');
+        setGoogleCalendarStatusMessage('');
+        return;
+      }
+      if (
+        response.status === 403 &&
+        (payload.message === GOOGLE_RECONNECT_MESSAGE || payload.message === GOOGLE_RECONNECT_MESSAGE_NEW)
+      ) {
+        setGoogleCalendarStatus('reconnect_required');
+        setGoogleCalendarStatusMessage(payload.message || GOOGLE_RECONNECT_MESSAGE_NEW);
+        return;
+      }
+      if (!response.ok) {
+        setGoogleCalendarStatus('error');
+        setGoogleCalendarStatusMessage(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not load calendar connection (${response.status}).`
+        );
+        return;
+      }
+      setGoogleCalendarStatus('connected');
+      setGoogleCalendarStatusMessage('');
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setGoogleCalendarStatus('error');
+      setGoogleCalendarStatusMessage(
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to load Google Calendar connection.'
+      );
+    }
+  }, []);
+
   async function loadWorkoutsData(args: { mode: 'saved' | 'generate'; startDate: string; endDate: string }) {
     const { mode, startDate, endDate } = args;
     setGenerateError('');
@@ -548,6 +640,14 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         responsePayload = {};
       }
       if (!response.ok) {
+        const reconnectRequired =
+          responsePayload.reconnect_required === true ||
+          responsePayload.message === GOOGLE_RECONNECT_MESSAGE ||
+          responsePayload.message === GOOGLE_RECONNECT_MESSAGE_NEW;
+        if (reconnectRequired) {
+          setGoogleCalendarStatus('reconnect_required');
+          setGoogleCalendarStatusMessage(responsePayload.message || GOOGLE_RECONNECT_MESSAGE_NEW);
+        }
         throw new Error(
           typeof responsePayload.message === 'string' && responsePayload.message.trim()
             ? responsePayload.message
@@ -785,8 +885,21 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       } catch {
         // Keep username fallback when profile cannot be loaded.
       }
+      await refreshGoogleCalendarConnectionState();
     })();
-  }, []);
+  }, [refreshGoogleCalendarConnectionState]);
+
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const params = new URLSearchParams(url.search);
+    if (params.get('google_calendar_connected') === '1') {
+      params.delete('google_calendar_connected');
+      const nextSearch = params.toString();
+      const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash || ''}`;
+      window.history.replaceState({}, '', nextUrl);
+      void refreshGoogleCalendarConnectionState();
+    }
+  }, [refreshGoogleCalendarConnectionState]);
 
   return (
     <section className="df-calendarPage df-workoutsPage" aria-label="DailyFlow workouts screen">
@@ -878,6 +991,18 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             >
               {isAddingAllToCalendar ? 'Adding all...' : 'Add all to calendar'}
             </button>
+            {(googleCalendarStatus === 'not_connected' ||
+              googleCalendarStatus === 'reconnect_required' ||
+              googleCalendarStatus === 'error') && (
+              <button
+                type="button"
+                className="df-btn"
+                onClick={handleConnectGoogleCalendarClick}
+                disabled={isConnectingGoogleCalendar}
+              >
+                {isConnectingGoogleCalendar ? 'Connecting...' : 'Connect Google Calendar'}
+              </button>
+            )}
           </div>
           <div className="df-calendarTopbarRight">
             <button
@@ -892,6 +1017,21 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         </header>
 
         {generateError && <div className="df-errorText" style={{ padding: '6px 16px 0' }}>{generateError}</div>}
+        {googleCalendarStatus === 'reconnect_required' && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
+            {googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
+          </div>
+        )}
+        {googleCalendarStatus === 'not_connected' && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#6b7280' }}>
+            Connect Google Calendar to add workouts directly from Workouts.
+          </div>
+        )}
+        {googleCalendarStatus === 'error' && googleCalendarStatusMessage && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b91c1c' }} role="alert">
+            {googleCalendarStatusMessage}
+          </div>
+        )}
         {!generateError && generateHint && (
           <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#6b7280' }}>
             {generateHint}

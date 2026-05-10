@@ -34,6 +34,16 @@ def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {"statusCode": status_code, "headers": dict(_CORS_HEADERS), "body": json.dumps(body)}
 
 
+def _reconnect_required_response() -> Dict[str, Any]:
+    return _json_response(
+        403,
+        {
+            "message": "Google Calendar connection expired. Please reconnect.",
+            "reconnect_required": True,
+        },
+    )
+
+
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -243,6 +253,7 @@ def _google_request_json_with_refresh(
     method: str,
     url: str,
     body: Optional[Dict[str, Any]] = None,
+    debug_flags: Optional[Dict[str, bool]] = None,
 ) -> Dict[str, Any]:
     access_token = connection.get("access_token") or connection.get("accessToken")
     refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
@@ -251,14 +262,19 @@ def _google_request_json_with_refresh(
     try:
         return _google_request_json(method, url, access_token.strip(), body)
     except HTTPError as err:
-        if err.code != 401:
+        if err.code not in {401, 403}:
             raise
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_attempted"] = True
+            debug_flags["google_calendar_create_retry"] = True
         if not isinstance(refresh_token, str) or not refresh_token.strip():
             raise PermissionError("Google connection expired, reconnect required")
         new_tokens = _refresh_access_token(refresh_token.strip())
         if not new_tokens or not isinstance(new_tokens.get("access_token"), str):
             raise PermissionError("Google connection expired, reconnect required")
         _update_connection_access_token(user_id, connection, new_tokens)
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_success"] = True
         refreshed_access_token = connection.get("access_token") or connection.get("accessToken")
         if not isinstance(refreshed_access_token, str) or not refreshed_access_token.strip():
             raise PermissionError("Google connection expired, reconnect required")
@@ -271,6 +287,7 @@ def _google_request_no_content_with_refresh(
     connection: Dict[str, Any],
     method: str,
     url: str,
+    debug_flags: Optional[Dict[str, bool]] = None,
 ) -> None:
     access_token = connection.get("access_token") or connection.get("accessToken")
     refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
@@ -280,14 +297,19 @@ def _google_request_no_content_with_refresh(
         _google_request_no_content(method, url, access_token.strip())
         return
     except HTTPError as err:
-        if err.code != 401:
+        if err.code not in {401, 403}:
             raise
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_attempted"] = True
+            debug_flags["google_calendar_create_retry"] = True
         if not isinstance(refresh_token, str) or not refresh_token.strip():
             raise PermissionError("Google connection expired, reconnect required")
         new_tokens = _refresh_access_token(refresh_token.strip())
         if not new_tokens or not isinstance(new_tokens.get("access_token"), str):
             raise PermissionError("Google connection expired, reconnect required")
         _update_connection_access_token(user_id, connection, new_tokens)
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_success"] = True
         refreshed_access_token = connection.get("access_token") or connection.get("accessToken")
         if not isinstance(refreshed_access_token, str) or not refreshed_access_token.strip():
             raise PermissionError("Google connection expired, reconnect required")
@@ -349,13 +371,16 @@ def _dailyflow_calendar_id_from_list_payload(payload: Dict[str, Any]) -> str:
     return matching_ids[0]
 
 
-def _ensure_dailyflow_calendar(user_id: str, item: Dict[str, Any], connection: Dict[str, Any]) -> str:
+def _ensure_dailyflow_calendar(
+    user_id: str, item: Dict[str, Any], connection: Dict[str, Any], debug_flags: Optional[Dict[str, bool]] = None
+) -> str:
     selected_calendar_ids = _selected_calendar_ids_from_sources(item, connection)
     calendar_list_payload = _google_request_json_with_refresh(
         user_id=user_id,
         connection=connection,
         method="GET",
         url=GOOGLE_CALENDAR_LIST_URL,
+        debug_flags=debug_flags,
     )
     stored_calendar_id = str(connection.get("dailyflow_calendar_id", "")).strip()
     if not stored_calendar_id:
@@ -368,6 +393,7 @@ def _ensure_dailyflow_calendar(user_id: str, item: Dict[str, Any], connection: D
                 connection=connection,
                 method="GET",
                 url=check_url,
+                debug_flags=debug_flags,
             )
             _persist_dailyflow_calendar_id(user_id, stored_calendar_id, selected_calendar_ids)
             connection["selected_calendar_ids"] = (
@@ -396,6 +422,7 @@ def _ensure_dailyflow_calendar(user_id: str, item: Dict[str, Any], connection: D
         method="POST",
         url=GOOGLE_CALENDAR_CREATE_URL,
         body={"summary": DAILYFLOW_CALENDAR_SUMMARY, "timeZone": APP_TIMEZONE_ID},
+        debug_flags=debug_flags,
     )
     created_id = str(created.get("id", "")).strip()
     if not created_id:
@@ -854,12 +881,20 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
         return _json_response(400, {"message": "Selected workout library item does not exist."})
 
     stored_connection = _fetch_google_connection(user_id)
+    debug_flags: Dict[str, bool] = {
+        "google_integration_found": bool(stored_connection),
+        "access_token_refresh_attempted": False,
+        "access_token_refresh_success": False,
+        "google_calendar_create_retry": False,
+        "reconnect_required": False,
+    }
+    print(f"[workouts-weekly-plan-debug] google_integration_found={debug_flags['google_integration_found']}")
     if not stored_connection:
         return _json_response(404, {"message": "Google Calendar is not connected for this user."})
     _, connection = stored_connection
 
     try:
-        dailyflow_calendar_id = _ensure_dailyflow_calendar(user_id, item, connection)
+        dailyflow_calendar_id = _ensure_dailyflow_calendar(user_id, item, connection, debug_flags)
         create_event_url = GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE.format(
             calendar_id=quote(dailyflow_calendar_id, safe="")
         )
@@ -869,12 +904,21 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
             method="POST",
             url=create_event_url,
             body=_build_workout_event_payload(plan_item, library_item),
+            debug_flags=debug_flags,
         )
         created_event_id = str(created_event.get("id", "")).strip()
         if not created_event_id:
             return _json_response(502, {"message": "Google Calendar event creation failed."})
     except PermissionError as err:
-        return _json_response(403, {"message": str(err)})
+        debug_flags["reconnect_required"] = True
+        print(
+            "[workouts-weekly-plan-debug] "
+            f"access_token_refresh_attempted={debug_flags['access_token_refresh_attempted']} "
+            f"access_token_refresh_success={debug_flags['access_token_refresh_success']} "
+            f"google_calendar_create_retry={debug_flags['google_calendar_create_retry']} "
+            f"reconnect_required={debug_flags['reconnect_required']}"
+        )
+        return _reconnect_required_response()
     except HTTPError as err:
         return _json_response(
             502,
@@ -886,6 +930,13 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
         return _json_response(500, {"message": str(err)})
     except Exception:
         return _json_response(500, {"message": "Unexpected error while creating workout calendar event."})
+    print(
+        "[workouts-weekly-plan-debug] "
+        f"access_token_refresh_attempted={debug_flags['access_token_refresh_attempted']} "
+        f"access_token_refresh_success={debug_flags['access_token_refresh_success']} "
+        f"google_calendar_create_retry={debug_flags['google_calendar_create_retry']} "
+        f"reconnect_required={debug_flags['reconnect_required']}"
+    )
 
     updated_weekly_plan: List[Dict[str, Any]] = []
     for entry in weekly_plan:
