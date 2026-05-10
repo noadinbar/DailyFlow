@@ -4,6 +4,7 @@ PATCH /meals/saved — persist favorites, week plan, grocery checks, calendar sc
 import json
 import math
 import os
+import traceback
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
 DAILYFLOW_CALENDAR_SUMMARY = "DailyFlow"
 APP_TIMEZONE_ID = "Asia/Jerusalem"
@@ -107,6 +109,8 @@ def _to_dynamodb_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, bool)):
         return value
     if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return Decimal("0")
         return Decimal(str(value))
     if isinstance(value, int):
         return value
@@ -172,10 +176,27 @@ def _to_float(value: Any, default: float = 0.0) -> float:
     return default
 
 
+def _normalize_time_hh_mm(value: str) -> str:
+    """Accept HH:MM or HH:MM:SS (e.g. HTML time input) and return HH:MM for Google + slot checks."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    parts = raw.split(":")
+    if len(parts) >= 2:
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return f"{hour:02d}:{minute:02d}"
+        except ValueError:
+            pass
+    return raw[:5] if len(raw) >= 5 else raw
+
+
 def _parse_hh_mm(value: str) -> Optional[time]:
     if not isinstance(value, str):
         return None
-    raw = value.strip()
+    raw = _normalize_time_hh_mm(value.strip())
     if len(raw) < 5:
         return None
     try:
@@ -230,7 +251,12 @@ def _extract_google_connection(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fetch_google_connection(user_id: str) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
-    response = _integrations_table().get_item(Key={"user_id": user_id})
+    try:
+        response = _integrations_table().get_item(Key={"user_id": user_id})
+    except ClientError as err:
+        print(f"[meals-saved] Integrations get_item ClientError: {err}")
+        traceback.print_exc()
+        return None
     item = response.get("Item")
     if not isinstance(item, dict):
         return None
@@ -515,14 +541,23 @@ def _delete_dailyflow_event_row(*, user_id: str, plan_id: str) -> None:
 
 
 def _query_busy_blocks(user_id: str, start_date_iso: str, end_date_iso: str) -> List[Dict[str, Any]]:
-    table = _busy_blocks_table()
+    try:
+        table = _busy_blocks_table()
+    except ValueError as err:
+        print(f"[meals-saved] busy blocks table config error: {err}")
+        raise
     items: List[Dict[str, Any]] = []
     last_evaluated_key: Optional[Dict[str, Any]] = None
     while True:
         query_args: Dict[str, Any] = {"KeyConditionExpression": Key("user_id").eq(user_id)}
         if last_evaluated_key:
             query_args["ExclusiveStartKey"] = last_evaluated_key
-        response = table.query(**query_args)
+        try:
+            response = table.query(**query_args)
+        except ClientError as err:
+            print(f"[meals-saved] BusyBlocks query ClientError: {err}")
+            traceback.print_exc()
+            raise
         for item in response.get("Items") or []:
             if not isinstance(item, dict):
                 continue
@@ -574,7 +609,11 @@ def _slot_is_valid(
 
 
 def _format_google_event_datetime(date_iso: str, hhmm: str) -> str:
-    return f"{date_iso}T{hhmm}:00"
+    """RFC3339 local time; hhmm must be HH:MM only (seconds added once)."""
+    norm = _normalize_time_hh_mm(hhmm)
+    if len(norm) < 5:
+        norm = "09:00"
+    return f"{date_iso}T{norm}:00"
 
 
 def _normalize_ingredients(raw: Any) -> List[Dict[str, Any]]:
@@ -1008,14 +1047,19 @@ def _handle_remove_saved_meal(user_id: str, payload: Dict[str, Any]) -> Dict[str
 def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     meal_id = _safe_string(payload.get("meal_id"))
     date_iso = _safe_string(payload.get("date"))
-    start_time = _safe_string(payload.get("start_time"))
+    start_time = _normalize_time_hh_mm(_safe_string(payload.get("start_time")))
     if not meal_id or not date_iso or not start_time:
         return _json_response(400, {"message": "meal_id, date, and start_time are required."})
     week_start, week_end = _current_week_bounds_utc()
     if date_iso < week_start or date_iso > week_end:
         return _json_response(400, {"message": "Date must be within the current week."})
-    table = _meals_table()
-    lib = table.get_item(Key={"user_id": user_id, "record_key": "LIBRARY#current"}).get("Item") or {}
+    try:
+        table = _meals_table()
+        lib = table.get_item(Key={"user_id": user_id, "record_key": "LIBRARY#current"}).get("Item") or {}
+    except ClientError as err:
+        print(f"[meals-saved] Meals table read ClientError (library): {err}")
+        traceback.print_exc()
+        return _json_response(503, {"message": "Could not load meal library. Try again shortly."})
     meal_library = lib.get("meal_library")
     if not isinstance(meal_library, list):
         return _json_response(400, {"message": "Meal library is missing."})
@@ -1025,7 +1069,16 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
     prep = _to_int(library_meal.get("prep_time_minutes"), 0)
     if prep <= 0:
         return _json_response(400, {"message": "Invalid prep time for meal."})
-    busy = _query_busy_blocks(user_id, week_start, week_end)
+    try:
+        busy = _query_busy_blocks(user_id, week_start, week_end)
+    except ClientError:
+        return _json_response(
+            503,
+            {
+                "message": "Could not load busy blocks for conflict checking. "
+                "Ensure the meals Lambda can read BUSY_BLOCKS_TABLE (DynamoDB Query).",
+            },
+        )
     ok, end_hhmm, err_msg = _slot_is_valid(
         week_start=week_start,
         week_end=week_end,
@@ -1036,11 +1089,37 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
     )
     if not ok:
         return _json_response(409, {"message": err_msg or "Time slot not available."})
-    stored = _fetch_google_connection(user_id)
-    if not stored:
-        return _json_response(404, {"message": "Google Calendar is not connected for this user."})
-    item, connection = stored
+
+    try:
+        integ_resp = _integrations_table().get_item(Key={"user_id": user_id})
+    except ClientError as err:
+        print(f"[meals-saved] Integrations get_item ClientError (add meal): {err}")
+        traceback.print_exc()
+        code = err.response.get("Error", {}).get("Code", "")
+        return _json_response(
+            503,
+            {"message": f"Could not verify Google Calendar connection ({code}). Try again or reconnect Google."},
+        )
+    item = integ_resp.get("Item")
+    if not isinstance(item, dict):
+        return _json_response(
+            404,
+            {
+                "message": "Google Calendar is not connected. Open Calendar in DailyFlow, connect Google, then try again.",
+            },
+        )
+    connection = _extract_google_connection(item)
+    access_token = connection.get("access_token") or connection.get("accessToken")
+    if not isinstance(access_token, str) or not access_token.strip():
+        return _json_response(
+            404,
+            {
+                "message": "Google Calendar is not connected or the session expired. Reconnect Google from Calendar, then try again.",
+            },
+        )
+
     meal_name = _safe_string(library_meal.get("title")) or "Meal"
+    print(f"[meals-saved] add_to_calendar: before Google (user={user_id[:8]}…, meal={meal_id})")
     try:
         dailyflow_calendar_id = _ensure_dailyflow_calendar(user_id, item, connection)
         create_event_url = GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE.format(
@@ -1062,17 +1141,28 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
         )
         created_event_id = str(created_event.get("id", "")).strip()
         if not created_event_id:
-            return _json_response(502, {"message": "Google Calendar event creation failed."})
+            print("[meals-saved] Google create event returned no id", created_event)
+            return _json_response(502, {"message": "Google Calendar event creation failed (no event id)."})
+        print(f"[meals-saved] add_to_calendar: Google event created id={created_event_id[:16]}…")
     except PermissionError as err:
+        print(f"[meals-saved] Google PermissionError: {err}")
         return _json_response(403, {"message": str(err)})
     except HTTPError as err:
+        print(f"[meals-saved] Google HTTPError: {err}")
+        traceback.print_exc()
         return _json_response(502, {"message": f"Google Calendar API request failed with status {err.code}."})
-    except (URLError, TimeoutError):
+    except (URLError, TimeoutError) as err:
+        print(f"[meals-saved] Google network error: {err}")
+        traceback.print_exc()
         return _json_response(502, {"message": "Failed to reach Google Calendar API."})
-    except ValueError as err:
-        return _json_response(500, {"message": str(err)})
+    except (json.JSONDecodeError, ValueError) as err:
+        print(f"[meals-saved] Google parse/ValueError: {err}")
+        traceback.print_exc()
+        return _json_response(502, {"message": "Unexpected response from Google Calendar. Try again."})
     except Exception:
-        return _json_response(500, {"message": "Unexpected error creating calendar event."})
+        print("[meals-saved] add_to_calendar: unexpected error in Google phase")
+        traceback.print_exc()
+        return _json_response(502, {"message": "Unexpected error while creating the calendar event."})
 
     saved_meal_id = f"meal_saved_{uuid.uuid4().hex[:12]}"
     ingredients = _normalize_ingredients(library_meal.get("ingredients"))
@@ -1094,12 +1184,27 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
         "dailyflow_calendar_id": dailyflow_calendar_id,
     }
     week_key = _week_key_for_date_iso(date_iso)
-    week = _load_week_item(user_id, week_key)
-    existing = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
-    next_saved = [*existing, new_entry]
-    checked = _safe_string_list(week.get("checked_grocery_items"))
-    grocery = _aggregate_grocery(next_saved)
-    updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
+    try:
+        week = _load_week_item(user_id, week_key)
+        existing = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
+        next_saved = [*existing, new_entry]
+        checked = _safe_string_list(week.get("checked_grocery_items"))
+        grocery = _aggregate_grocery(next_saved)
+        print(f"[meals-saved] add_to_calendar: before DynamoDB week save key={week_key}")
+        updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
+        print("[meals-saved] add_to_calendar: after DynamoDB week save")
+    except ClientError as err:
+        print(f"[meals-saved] DynamoDB save week ClientError: {err}")
+        traceback.print_exc()
+        code = err.response.get("Error", {}).get("Code", "")
+        return _json_response(
+            502,
+            {
+                "message": f"Calendar event was created but saving your week failed ({code}). "
+                "Try removing the event from Google Calendar or contact support.",
+            },
+        )
+
     _persist_meal_dailyflow_event_row(
         user_id=user_id,
         saved_meal_id=saved_meal_id,
@@ -1161,6 +1266,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         return fn(user_id, payload)
     except ValueError as err:
+        print(f"[meals-saved] ValueError: {err}")
+        traceback.print_exc()
         return _json_response(500, {"message": str(err)})
+    except ClientError as err:
+        print(f"[meals-saved] ClientError: {err}")
+        traceback.print_exc()
+        code = err.response.get("Error", {}).get("Code", "")
+        return _json_response(502, {"message": f"Database error ({code}). Try again."})
     except Exception:
+        print("[meals-saved] Unexpected error in action handler")
+        traceback.print_exc()
         return _json_response(500, {"message": "Unexpected error while updating meals."})

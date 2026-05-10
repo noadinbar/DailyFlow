@@ -1571,6 +1571,12 @@ select.df-input {
   cursor: pointer;
 }
 
+.df-mealsLibrarySectionToggle {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
 .df-sectionChevron {
   font-size: 13px;
   color: #6b7280;

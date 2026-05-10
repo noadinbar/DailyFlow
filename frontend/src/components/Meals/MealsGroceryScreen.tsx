@@ -608,13 +608,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         { setGlobalError: false }
       );
       if (!ok) {
-        setAddMealError(
+        const msg =
           typeof payload.message === 'string' && payload.message.trim()
-            ? payload.message
+            ? payload.message.trim()
             : status === 404
-              ? 'Connect Google Calendar in Calendar settings first.'
-              : 'Could not add meal to calendar.'
-        );
+              ? 'Google Calendar is not connected. Connect Google from Calendar, then try again.'
+              : `Could not add meal to calendar (${status}).`;
+        setAddMealError(msg);
         return;
       }
       applyWeekPatchPayload(payload);
@@ -925,7 +925,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             <div className="df-workoutsSectionHeader">
               <button
                 type="button"
-                className="df-sectionToggle"
+                className="df-sectionToggle df-mealsLibrarySectionToggle"
                 onClick={() => setMealLibraryOpen((prev) => !prev)}
                 aria-expanded={mealLibraryOpen}
                 aria-controls="meals-library-section"
@@ -936,6 +936,15 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
                   Meal Library
                 </h2>
+              </button>
+              <button
+                type="button"
+                className={`df-workoutFavoriteToggle${showFavoritesOnly ? ' df-workoutFavoriteToggleActive' : ''}`}
+                onClick={() => setShowFavoritesOnly((prev) => !prev)}
+                aria-label={showFavoritesOnly ? 'Show all meals' : 'Show favorite meals only'}
+                title={showFavoritesOnly ? 'Showing favorites' : 'Show favorites'}
+              >
+                ❤
               </button>
             </div>
             {mealLibraryOpen && (
@@ -983,16 +992,6 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         {item.label}
                       </button>
                     ))}
-                  </div>
-                  <div className="df-workoutFilterGroup">
-                    <span className="df-workoutFilterLabel">Library</span>
-                    <button
-                      type="button"
-                      className={`df-workoutFilterChip${showFavoritesOnly ? ' df-workoutFilterChipActive' : ''}`}
-                      onClick={() => setShowFavoritesOnly((prev) => !prev)}
-                    >
-                      Favorites
-                    </button>
                   </div>
                 </div>
                 <div className="df-workoutLibraryGrid df-mealsLibraryGrid">
