@@ -31,11 +31,32 @@ _CORS_HEADERS = {
 }
 
 
+def _to_json_safe(value: Any) -> Any:
+    """Recursively convert DynamoDB-friendly Decimals (and nested structures) for json.dumps."""
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, Decimal):
+        if value % 1 == 0:
+            return int(value)
+        return float(value)
+    if isinstance(value, float):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, dict):
+        return {k: _to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_to_json_safe(v) for v in value]
+    return value
+
+
 def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
         "headers": dict(_CORS_HEADERS),
-        "body": json.dumps(body),
+        "body": json.dumps(_to_json_safe(body)),
     }
 
 

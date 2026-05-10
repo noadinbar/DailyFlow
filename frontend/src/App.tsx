@@ -48,6 +48,12 @@ export default function App() {
     user: undefined,
   });
 
+  React.useLayoutEffect(() => {
+    if (location.pathname === '/meals/') {
+      navigate('/meals', { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
     if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts' && normalizedPath !== '/meals') {
@@ -192,6 +198,7 @@ export default function App() {
           )
         }
       />
+      <Route path="/meals/" element={<Navigate to="/meals" replace />} />
       <Route
         path="/meals/*"
         element={
