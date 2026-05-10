@@ -891,7 +891,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         </nav>
       </aside>
 
-      <div className="df-calendarMain">
+      <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
             <button
@@ -1194,6 +1194,18 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             )}
           </section>
         </div>
+
+        {isGeneratingMeals && (
+          <div className="df-workoutsLoadingOverlay" role="status" aria-live="polite" aria-label="Generating meals">
+            <div className="df-workoutsLoadingShade" aria-hidden />
+            <div className="df-workoutsLoadingCenter">
+              <div className="df-workoutsLoadingCard">
+                <div className="df-workoutsBasicSpinner" aria-hidden />
+                <div className="df-workoutsLoadingText">Generating new meal library...</div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <ProfileSettingsModal
