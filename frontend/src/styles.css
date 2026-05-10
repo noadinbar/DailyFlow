@@ -1358,6 +1358,13 @@ select.df-input {
   }
 }
 
+.df-mealsGenerateNotice {
+  padding: 8px 16px 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--df-muted);
+}
+
 .df-mealsLibraryGrid {
   max-height: 340px;
 }

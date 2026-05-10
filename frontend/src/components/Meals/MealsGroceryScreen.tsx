@@ -219,6 +219,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [savedMeals, setSavedMeals] = React.useState<SavedMealItem[]>([]);
   const [checkedGroceryKeys, setCheckedGroceryKeys] = React.useState<string[]>([]);
   const [mealsApiError, setMealsApiError] = React.useState<string>('');
+  const [mealGenerationWarning, setMealGenerationWarning] = React.useState<string>('');
 
   const [isMealPreferencesOpen, setIsMealPreferencesOpen] = React.useState<boolean>(false);
   const [allergiesInput, setAllergiesInput] = React.useState<string>('');
@@ -649,6 +650,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     event?.stopPropagation();
     void (async () => {
       setMealsApiError('');
+      setMealGenerationWarning('');
       setIsGeneratingMeals(true);
       try {
         const baseUrl = getApiBaseUrl();
@@ -661,7 +663,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
           },
           body: JSON.stringify({}),
         });
-        let payload: { message?: string; meal_library?: MealLibraryItem[]; favorite_meals?: string[] } = {};
+        let payload: {
+          message?: string;
+          meal_library?: MealLibraryItem[];
+          favorite_meals?: string[];
+          metadata?: { generation_warning?: string };
+        } = {};
         try {
           payload = (await response.json()) as typeof payload;
         } catch {
@@ -674,6 +681,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         const generatedLibrary = Array.isArray(payload.meal_library) ? payload.meal_library : [];
         if (generatedLibrary.length > 0) setMealLibrary(generatedLibrary);
         if (Array.isArray(payload.favorite_meals)) setFavoriteMealIds(payload.favorite_meals);
+        const warn = payload.metadata?.generation_warning;
+        setMealGenerationWarning(typeof warn === 'string' && warn.trim() ? warn.trim() : '');
       } catch (err) {
         const anyErr = err as { message?: string };
         setMealsApiError(anyErr?.message || 'Could not generate meals right now.');
@@ -768,6 +777,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         </header>
 
         {mealsApiError && <div className="df-errorText" style={{ padding: '8px 16px 0' }}>{mealsApiError}</div>}
+        {mealGenerationWarning && (
+          <div className="df-mealsGenerateNotice" role="status">
+            {mealGenerationWarning}
+          </div>
+        )}
 
         <div className="df-workoutsContent">
           <section className="df-workoutsSection">
