@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import traceback
 from hashlib import sha1
 from datetime import date, datetime, time, timedelta, timezone
@@ -46,6 +47,18 @@ def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _generation_seed_int(user_id: str) -> int:
+    material = f"{user_id}|{_iso_utc_now()}".encode("utf-8")
+    return int.from_bytes(sha1(material).digest()[:8], "big", signed=False)
+
+
+def _workout_dedupe_signature(item: Dict[str, Any]) -> str:
+    title = str(item.get("title", "")).strip()
+    duration = _to_int(item.get("duration_minutes"), 0)
+    type_key = _normalize_type_key(str(item.get("workout_type", "")))
+    return f"{type_key}|{duration}|{title.lower()}"
 
 
 def _today_iso_utc() -> str:
@@ -176,19 +189,30 @@ def _safe_string_list(value: Any) -> List[str]:
     return []
 
 
-def _openai_prompt_for_library(preferences: Dict[str, Any]) -> str:
+def _openai_prompt_for_library(
+    preferences: Dict[str, Any],
+    avoid_workouts: List[Dict[str, Any]],
+    diversity_nonce: str,
+) -> str:
     compact = {
         "preferences": preferences,
+        "avoid_repeating_workouts": avoid_workouts[:40],
+        "generation_hint": diversity_nonce,
         "rules": {
             "return_unique_workouts_only": True,
             "no_duplicates_by_type_duration_title": True,
             "generate_compact_workout_flow_steps": True,
             "language": "English",
+            "fresh_alternatives": True,
         },
     }
     return (
         "Generate a workout library JSON only.\n"
         "No markdown.\n"
+        "Do not repeat workouts from avoid_repeating_workouts (same title case-insensitive + same workout_type + "
+        "same duration_minutes). Favorites may reappear only if the client merges them; your output should be new "
+        "candidates. Use generation_hint to vary movement patterns, emphasis, and session structure—not the same "
+        "titles as before.\n"
         "Schema:\n"
         "{\n"
         '  "workout_library":[{\n'
@@ -341,7 +365,9 @@ def _normalize_generated_library(raw: Any) -> List[Dict[str, Any]]:
         duration = _to_int(entry.get("duration_minutes"), 0)
         if not title or not workout_type or duration <= 0:
             continue
-        dedupe_key = f"{workout_type.lower()}|{duration}|{title.lower()}"
+        dedupe_key = _workout_dedupe_signature(
+            {"title": title, "workout_type": workout_type, "duration_minutes": duration}
+        )
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
@@ -631,7 +657,13 @@ def _reindex_library_ids(library: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return reindexed
 
 
-def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _ensure_library_coverage(
+    preferences: Dict[str, Any],
+    library: List[Dict[str, Any]],
+    *,
+    avoid_signatures: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    avoid = avoid_signatures or set()
     preferred_types_raw = preferences.get("preferred_workout_types") or []
     preferred_type_keys: List[str] = []
     for t in preferred_types_raw:
@@ -653,8 +685,8 @@ def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str
         duration = _to_int(item.get("duration_minutes"), 0)
         if not title or duration <= 0:
             continue
-        signature = f"{item_type_key}|{duration}|{title.lower()}"
-        if signature in used_signatures:
+        signature = _workout_dedupe_signature(item)
+        if signature in used_signatures or signature in avoid:
             continue
         used_signatures.add(signature)
         by_type.setdefault(item_type_key, []).append(item)
@@ -679,20 +711,19 @@ def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str
         for title, duration, intensity, location in templates:
             if needed <= 0:
                 break
-            signature = f"{type_key}|{duration}|{title.lower()}"
-            if signature in used_signatures:
+            temp_item = _make_library_item(
+                item_id="",
+                title=title,
+                workout_type_key=type_key,
+                duration_minutes=duration,
+                intensity=intensity,
+                location=location,
+            )
+            signature = _workout_dedupe_signature(temp_item)
+            if signature in used_signatures or signature in avoid:
                 continue
             used_signatures.add(signature)
-            by_type.setdefault(type_key, []).append(
-                _make_library_item(
-                    item_id="",
-                    title=title,
-                    workout_type_key=type_key,
-                    duration_minutes=duration,
-                    intensity=intensity,
-                    location=location,
-                )
-            )
+            by_type.setdefault(type_key, []).append(temp_item)
             needed -= 1
 
         # ensure duration-bucket diversity for each selected type
@@ -715,20 +746,19 @@ def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str
                 midpoint = (min_m + max_m) // 2
                 picked = (f"{_type_display_name(type_key)} workout", midpoint, "Moderate", "Home")
             title, duration, intensity, location = picked
-            signature = f"{type_key}|{duration}|{title.lower()}"
-            if signature in used_signatures:
+            temp_item = _make_library_item(
+                item_id="",
+                title=title,
+                workout_type_key=type_key,
+                duration_minutes=duration,
+                intensity=intensity,
+                location=location,
+            )
+            signature = _workout_dedupe_signature(temp_item)
+            if signature in used_signatures or signature in avoid:
                 continue
             used_signatures.add(signature)
-            by_type.setdefault(type_key, []).append(
-                _make_library_item(
-                    item_id="",
-                    title=title,
-                    workout_type_key=type_key,
-                    duration_minutes=duration,
-                    intensity=intensity,
-                    location=location,
-                )
-            )
+            by_type.setdefault(type_key, []).append(temp_item)
 
     merged: List[Dict[str, Any]] = []
     for type_key in preferred_type_keys:
@@ -741,14 +771,21 @@ def _ensure_library_coverage(preferences: Dict[str, Any], library: List[Dict[str
     return _reindex_library_ids(merged)
 
 
-def _generate_library_from_openai(preferences: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+def _generate_library_from_openai(
+    preferences: Dict[str, Any],
+    *,
+    avoid_workouts: Optional[List[Dict[str, Any]]] = None,
+    avoid_signatures: Optional[set] = None,
+    diversity_key: str = "",
+) -> Tuple[List[Dict[str, Any]], str]:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise ValueError("Missing OPENAI_API_KEY env var.")
     client = OpenAI(api_key=api_key)
+    avoid_list = avoid_workouts or []
     response = client.responses.create(
         model=OPENAI_MODEL,
-        input=_openai_prompt_for_library(preferences),
+        input=_openai_prompt_for_library(preferences, avoid_list, diversity_key),
         text={"format": {"type": "json_object"}},
     )
     text_out = getattr(response, "output_text", "")
@@ -760,7 +797,15 @@ def _generate_library_from_openai(preferences: Dict[str, Any]) -> Tuple[List[Dic
         return [], "Model returned malformed JSON."
     if not isinstance(parsed, dict):
         return [], "Model returned an unexpected JSON shape."
-    return _normalize_generated_library(parsed.get("workout_library")), ""
+    normalized = _normalize_generated_library(parsed.get("workout_library"))
+    if avoid_signatures:
+        filtered: List[Dict[str, Any]] = []
+        for item in normalized:
+            if _workout_dedupe_signature(item) in avoid_signatures:
+                continue
+            filtered.append(item)
+        normalized = filtered
+    return normalized, ""
 
 
 def _read_user_preferences(user_id: str) -> Dict[str, Any]:
@@ -837,6 +882,7 @@ def _merge_generated_library_with_preserved_refs(
     *,
     existing_item: Dict[str, Any],
     saved_weekly_plan: List[Dict[str, Any]],
+    favorite_workouts: List[Dict[str, Any]],
     generated_library: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     referenced_ids = {
@@ -844,27 +890,43 @@ def _merge_generated_library_with_preserved_refs(
         for item in saved_weekly_plan
         if str(item.get("library_workout_id", "")).strip()
     }
-    if not referenced_ids:
+    favorite_key_set: set = set()
+    for fav in favorite_workouts:
+        fk = str(fav.get("favorite_key", "")).strip()
+        if fk:
+            favorite_key_set.add(fk)
+        else:
+            favorite_key_set.add(_favorite_key_from_item(fav))
+
+    if not referenced_ids and not favorite_key_set:
         return generated_library
+
     old_library = _normalize_saved_library(existing_item.get("workout_library"))
-    preserved_items = [
-        dict(item)
-        for item in old_library
-        if str(item.get("id", "")).strip() in referenced_ids
-    ]
-    used_ids = {
-        str(item.get("id", "")).strip()
-        for item in preserved_items
-        if str(item.get("id", "")).strip()
-    }
+    preserved_items: List[Dict[str, Any]] = []
+    preserved_sigs: set = set()
+    used_ids: set = set()
+
+    for item in old_library:
+        iid = str(item.get("id", "")).strip()
+        fk = _favorite_key_from_item(item)
+        if iid in referenced_ids or fk in favorite_key_set:
+            preserved_items.append(dict(item))
+            if iid:
+                used_ids.add(iid)
+            preserved_sigs.add(_workout_dedupe_signature(item))
+
     merged = list(preserved_items)
     for item in generated_library:
+        sig = _workout_dedupe_signature(item)
+        if sig in preserved_sigs:
+            continue
         next_item = dict(item)
         item_id = str(next_item.get("id", "")).strip()
         if not item_id or item_id in used_ids:
             item_id = _next_library_id(used_ids)
             next_item["id"] = item_id
         used_ids.add(item_id)
+        preserved_sigs.add(sig)
         merged.append(next_item)
     return merged
 
@@ -1423,40 +1485,73 @@ def _derive_weekly_plan_and_signatures(
     return weekly_plan, _busyblocks_signature(busy_blocks), _library_signature(workout_library)
 
 
-def _fallback_library(preferences: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _fallback_library(
+    preferences: Dict[str, Any],
+    *,
+    seed: int = 0,
+    avoid_signatures: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    rng = random.Random(seed)
+    avoid = set(avoid_signatures or [])
     preferred_types = preferences.get("preferred_workout_types") or []
     if not isinstance(preferred_types, list) or not preferred_types:
         preferred_types = ["walking", "strength", "yoga"]
-    durations = [20, 30, 40]
+
+    labels = [
+        "Fresh",
+        "Quick",
+        "Power",
+        "Steady",
+        "Skill",
+        "Tempo",
+        "Balanced",
+        "Endurance",
+        "Mobility",
+        "Core",
+    ]
     library: List[Dict[str, Any]] = []
-    counter = 1
+    used_local = set(avoid)
+
     for workout_type in preferred_types:
         if not isinstance(workout_type, str) or not workout_type.strip():
             continue
-        for duration in durations:
-            if counter > 9:
+        if len(library) >= 9:
+            break
+        clean_type = workout_type.strip().replace("_", " ")
+        type_key = _normalize_type_key(clean_type)
+        templates = list(_variant_templates_for_type(type_key))
+        rng.shuffle(templates)
+        durations = [20, 30, 40]
+        for i, duration in enumerate(durations):
+            if len(library) >= 9:
                 break
-            clean_type = workout_type.strip().replace("_", " ")
-            title = f"{clean_type.title()} workout"
+            title_base, _tmpl_dur, intensity, location = templates[i % len(templates)]
+            label = labels[(seed + len(library) * 7 + i * 3) % len(labels)]
+            title = f"{label} {title_base}"
+            attempt = 0
+            sig = ""
+            while attempt < 14:
+                sig = _workout_dedupe_signature(
+                    {"title": title, "workout_type": _type_display_name(type_key), "duration_minutes": duration}
+                )
+                if sig not in used_local:
+                    break
+                attempt += 1
+                title = f"{label} {title_base} — v{attempt + rng.randint(1, 99)}"
+            if not sig or sig in used_local:
+                continue
+            used_local.add(sig)
             library.append(
-                {
-                    "id": f"lib_{counter}",
-                    "title": title,
-                    "workout_type": clean_type.title(),
-                    "duration_minutes": duration,
-                    "intensity": "Moderate",
-                    "location": "Home",
-                    "summary_short": f"{clean_type.title()} in {duration} minutes.",
-                    "workout_flow": _build_concrete_workout_flow(
-                        title=title,
-                        workout_type_key=clean_type,
-                        duration_minutes=duration,
-                        intensity="Moderate",
-                    ),
-                }
+                _make_library_item(
+                    item_id=f"lib_{len(library)+1}",
+                    title=title,
+                    workout_type_key=type_key,
+                    duration_minutes=duration,
+                    intensity=intensity,
+                    location=location,
+                )
             )
-            counter += 1
-    return _ensure_library_coverage(preferences, library)
+    return _ensure_library_coverage(preferences, library, avoid_signatures=used_local)
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -1494,14 +1589,34 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             == end_date_value.isoformat()
         ):
             saved_weekly_plan = _normalize_saved_weekly_plan(existing_item.get("current_week_plan"))
-        workout_library, generation_warning = _generate_library_from_openai(preferences)
+        old_library = _normalize_saved_library(existing_item.get("workout_library"))
+        avoid_for_prompt = [
+            {
+                "title": str(m.get("title", "")).strip(),
+                "workout_type": str(m.get("workout_type", "")).strip(),
+                "duration_minutes": _to_int(m.get("duration_minutes"), 0),
+            }
+            for m in old_library
+            if str(m.get("title", "")).strip()
+            and str(m.get("workout_type", "")).strip()
+            and _to_int(m.get("duration_minutes"), 0) > 0
+        ][:40]
+        avoid_sig = {_workout_dedupe_signature(m) for m in old_library}
+        seed = _generation_seed_int(user_id)
+        workout_library, generation_warning = _generate_library_from_openai(
+            preferences,
+            avoid_workouts=avoid_for_prompt,
+            avoid_signatures=avoid_sig,
+            diversity_key=str(seed),
+        )
         if not workout_library:
-            workout_library = _fallback_library(preferences)
+            workout_library = _fallback_library(preferences, seed=seed, avoid_signatures=avoid_sig)
         else:
-            workout_library = _ensure_library_coverage(preferences, workout_library)
+            workout_library = _ensure_library_coverage(preferences, workout_library, avoid_signatures=avoid_sig)
         workout_library = _merge_generated_library_with_preserved_refs(
             existing_item=existing_item,
             saved_weekly_plan=saved_weekly_plan,
+            favorite_workouts=favorite_workouts,
             generated_library=workout_library,
         )
         generated_at = _iso_utc_now()
