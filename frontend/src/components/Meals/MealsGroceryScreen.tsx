@@ -193,7 +193,6 @@ const ALLOWED_DIET_TAG_ORDER = [
   'Gluten-Free',
   'High-Protein',
   'Low-Carb',
-  'Plant-Based',
 ] as const;
 
 type AllowedDietTag = (typeof ALLOWED_DIET_TAG_ORDER)[number];
@@ -211,9 +210,6 @@ const DIET_TAG_CANONICAL_MAP: Record<string, AllowedDietTag> = {
   'lowcarb': 'Low-Carb',
   'low-carb': 'Low-Carb',
   low_carb: 'Low-Carb',
-  'plantbased': 'Plant-Based',
-  'plant-based': 'Plant-Based',
-  plant_based: 'Plant-Based',
 };
 
 function normalizeDietTag(tag: string): AllowedDietTag | null {
