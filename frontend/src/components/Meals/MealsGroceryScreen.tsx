@@ -186,6 +186,52 @@ const MEAL_GOAL_OPTIONS: MealGoal[] = [
   'Meal prep',
 ];
 
+const ALLOWED_DIET_TAG_ORDER = [
+  'Kosher',
+  'Vegan',
+  'Vegetarian',
+  'Gluten-Free',
+  'High-Protein',
+  'Low-Carb',
+  'Plant-Based',
+] as const;
+
+type AllowedDietTag = (typeof ALLOWED_DIET_TAG_ORDER)[number];
+
+const DIET_TAG_CANONICAL_MAP: Record<string, AllowedDietTag> = {
+  kosher: 'Kosher',
+  vegan: 'Vegan',
+  vegetarian: 'Vegetarian',
+  'glutenfree': 'Gluten-Free',
+  'gluten-free': 'Gluten-Free',
+  gluten_free: 'Gluten-Free',
+  'highprotein': 'High-Protein',
+  'high-protein': 'High-Protein',
+  high_protein: 'High-Protein',
+  'lowcarb': 'Low-Carb',
+  'low-carb': 'Low-Carb',
+  low_carb: 'Low-Carb',
+  'plantbased': 'Plant-Based',
+  'plant-based': 'Plant-Based',
+  plant_based: 'Plant-Based',
+};
+
+function normalizeDietTag(tag: string): AllowedDietTag | null {
+  const cleaned = tag.trim().toLowerCase();
+  if (!cleaned) return null;
+  const compact = cleaned.replace(/[\s_-]+/g, '');
+  return DIET_TAG_CANONICAL_MAP[cleaned] ?? DIET_TAG_CANONICAL_MAP[compact] ?? null;
+}
+
+function normalizedMealDietTags(tags: string[]): AllowedDietTag[] {
+  const set = new Set<AllowedDietTag>();
+  for (const tag of tags) {
+    const normalized = normalizeDietTag(tag);
+    if (normalized && ALLOWED_DIET_TAG_ORDER.includes(normalized)) set.add(normalized);
+  }
+  return ALLOWED_DIET_TAG_ORDER.filter((tag) => set.has(tag));
+}
+
 function prepFilterMatch(prepTime: number, prepFilter: PrepTimeFilter): boolean {
   if (prepFilter === 'lt20') return prepTime < 20;
   if (prepFilter === '20to40') return prepTime >= 20 && prepTime <= 40;
@@ -269,7 +315,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [groceryOpen, setGroceryOpen] = React.useState<boolean>(true);
 
   const [selectedMealTypes, setSelectedMealTypes] = React.useState<MealType[]>([]);
-  const [selectedDietTags, setSelectedDietTags] = React.useState<string[]>([]);
+  const [selectedDietTags, setSelectedDietTags] = React.useState<AllowedDietTag[]>([]);
   const [selectedPrepFilters, setSelectedPrepFilters] = React.useState<PrepTimeFilter[]>([]);
   const [showFavoritesOnly, setShowFavoritesOnly] = React.useState<boolean>(false);
   const [mealLibrary, setMealLibrary] = React.useState<MealLibraryItem[]>([]);
@@ -535,7 +581,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     setSelectedMealTypes((prev) => (prev.includes(type) ? prev.filter((item) => item !== type) : [...prev, type]));
   }
 
-  function toggleDietTagFilter(tag: string) {
+  function toggleDietTagFilter(tag: AllowedDietTag) {
     setSelectedDietTags((prev) => (prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]));
   }
 
@@ -546,7 +592,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }
 
   const availableDietTags = React.useMemo(
-    () => Array.from(new Set(mealLibrary.flatMap((meal) => meal.diet_tags))).sort(),
+    () => {
+      const set = new Set<AllowedDietTag>();
+      for (const meal of mealLibrary) {
+        for (const tag of normalizedMealDietTags(meal.diet_tags)) set.add(tag);
+      }
+      return ALLOWED_DIET_TAG_ORDER.filter((tag) => set.has(tag));
+    },
     [mealLibrary]
   );
   const selectedMealTypeForGenerate: MealType | null = selectedMealTypes.length === 1 ? selectedMealTypes[0] : null;
@@ -554,8 +606,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const filteredMealLibrary = React.useMemo(() => {
     return mealLibrary.filter((meal) => {
       const mealTypeMatch = selectedMealTypes.length === 0 || selectedMealTypes.includes(meal.meal_type);
+      const mealDietTags = normalizedMealDietTags(meal.diet_tags);
       const dietMatch =
-        selectedDietTags.length === 0 || selectedDietTags.every((tag) => meal.diet_tags.includes(tag));
+        selectedDietTags.length === 0 || selectedDietTags.every((tag) => mealDietTags.includes(tag));
       const prepMatch =
         selectedPrepFilters.length === 0 ||
         selectedPrepFilters.some((filter) => prepFilterMatch(meal.prep_time_minutes, filter));
@@ -1026,7 +1079,10 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         }}
                       >
                         <div className="df-mealLibraryDietTags">
-                          {(meal.diet_tags.length ? meal.diet_tags : ['Balanced']).map((tag) => (
+                          {(normalizedMealDietTags(meal.diet_tags).length
+                            ? normalizedMealDietTags(meal.diet_tags)
+                            : ['Balanced']
+                          ).map((tag) => (
                             <span key={`${meal.id}-${tag}`} className="df-mealLibraryDietPill">
                               {tag}
                             </span>
@@ -1416,7 +1472,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             <div className="df-settingsContent df-mealDetailModalBody">
               <div className="df-mealDetailChips">
                 <span className="df-mealLibraryDietPill">{mealDetail.meal_type}</span>
-                {mealDetail.diet_tags.map((tag) => (
+                {normalizedMealDietTags(mealDetail.diet_tags).map((tag) => (
                   <span key={`d-${tag}`} className="df-mealLibraryDietPill">
                     {tag}
                   </span>
