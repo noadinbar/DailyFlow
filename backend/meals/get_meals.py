@@ -81,25 +81,8 @@ def _safe_string_list(value: Any) -> List[str]:
     return output
 
 
-def _safe_budget_level(value: Any) -> str:
-    if not isinstance(value, str):
-        return "Medium"
-    cleaned = value.strip()
-    if cleaned in {"Low", "Medium", "High"}:
-        return cleaned
-    return "Medium"
-
-
 def _safe_string(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
-
-
-def _safe_goals(value: Any, fallback_goal: Any = "") -> List[str]:
-    goals = _safe_string_list(value)
-    if goals:
-        return goals
-    single = _safe_string(fallback_goal)
-    return [single] if single else []
 
 
 def _safe_list_of_dicts(value: Any) -> List[Dict[str, Any]]:
@@ -112,12 +95,11 @@ def _safe_list_of_dicts(value: Any) -> List[Dict[str, Any]]:
     return output
 
 
-def _load_records_for_user(user_id: str, week_key: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+def _load_records_for_user(user_id: str, week_key: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     table = _meals_table()
-    pref = table.get_item(Key={"user_id": user_id, "record_key": "PREFERENCES"}).get("Item") or {}
     library = table.get_item(Key={"user_id": user_id, "record_key": "LIBRARY#current"}).get("Item") or {}
     week = table.get_item(Key={"user_id": user_id, "record_key": week_key}).get("Item") or {}
-    return pref, library, week
+    return library, week
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -139,7 +121,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     week_key = f"WEEK#{week_start_iso}"
 
     try:
-        pref_item, library_item, week_item = _load_records_for_user(user_id, week_key)
+        library_item, week_item = _load_records_for_user(user_id, week_key)
     except ValueError as err:
         return _json_response(500, {"message": str(err)})
     except Exception:
@@ -148,13 +130,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     week_end_iso = (datetime.fromisoformat(week_start_iso).date() + timedelta(days=6)).isoformat()
 
     response_body = {
-        "meal_preferences": {
-            "allergies": _safe_string_list(pref_item.get("allergies")),
-            "budget_level": _safe_budget_level(pref_item.get("budget_level")),
-            "goals": _safe_goals(pref_item.get("goals"), pref_item.get("goal")),
-            "goal": _safe_string(pref_item.get("goal")),
-            "updated_at": _safe_string(pref_item.get("updated_at")),
-        },
         "meal_library": _safe_list_of_dicts(library_item.get("meal_library")),
         "favorite_meals": _safe_string_list(library_item.get("favorite_meals")),
         "saved_meals_this_week": _safe_list_of_dicts(week_item.get("saved_meals_this_week")),
@@ -167,7 +142,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "library_record_key": "LIBRARY#current",
             "updated_at": _safe_string(week_item.get("updated_at"))
             or _safe_string(library_item.get("updated_at"))
-            or _safe_string(pref_item.get("updated_at"))
             or _iso_utc_now(),
         },
     }

@@ -160,14 +160,6 @@ def _safe_budget_level(value: Any) -> str:
     return "Medium"
 
 
-def _safe_goals(value: Any, fallback_goal: Any = "") -> List[str]:
-    goals = _safe_string_list(value)
-    if goals:
-        return goals
-    single = _safe_string(fallback_goal)
-    return [single] if single else []
-
-
 def _to_number(value: Any, default: float = 0.0) -> float:
     try:
         if isinstance(value, Decimal):
@@ -491,15 +483,10 @@ def _build_fallback_library(
     target_counts: Optional[Dict[str, int]] = None,
 ) -> List[Dict[str, Any]]:
     """Varied 12-meal library when OpenAI is unavailable or returns invalid output."""
-    budget_level = _safe_budget_level(preferences.get("budget_level"))
-    meal_goals = _safe_string_list(preferences.get("goals"))
+    budget_level = "Medium"
     profile_goals = _safe_string_list(preferences.get("main_goal"))
-    goal_tags = list(dict.fromkeys([*meal_goals, *profile_goals]))
-    if not goal_tags:
-        goal_tags = ["Balanced"]
+    goal_tags = list(dict.fromkeys(profile_goals)) if profile_goals else ["Balanced"]
     diet_tags = _diet_tags_from_preferences(preferences)
-    allergies = _safe_string_list(preferences.get("allergies"))
-    allergy_note = f" Check labels; avoid: {', '.join(allergies)}." if allergies else ""
 
     def ing(name: str, qty: float, unit: str, category: str, rounding: str) -> Dict[str, Any]:
         return {
@@ -816,7 +803,7 @@ def _build_fallback_library(
 
     meals: List[Dict[str, Any]] = []
     for idx, (meal_type, title, prep_min, kcal, ingredients, instructions) in enumerate(selected, start=1):
-        summary = f"{title} — quick plan-friendly meal.{allergy_note}".strip()
+        summary = f"{title} — quick plan-friendly meal.".strip()
         meals.append(
             {
                 "id": f"meal_{idx}",
@@ -830,7 +817,7 @@ def _build_fallback_library(
                 "summary_short": summary,
                 "short_ingredients_preview": ", ".join([i["name"] for i in ingredients[:4]]),
                 "ingredients": ingredients,
-                "instructions": [s + allergy_note if allergy_note else s for s in instructions],
+                "instructions": instructions,
                 "base_servings": 1,
             }
         )
@@ -839,14 +826,10 @@ def _build_fallback_library(
 
 
 def _read_generation_preferences(user_id: str) -> Dict[str, Any]:
-    meals_table = _table_from_env("MEALS_TABLE")
+    """Profile/onboarding fields only (Users table). Meal-specific PREFERENCES record is not used."""
     users_table = _table_from_env("USERS_TABLE")
-    pref_item = meals_table.get_item(Key={"user_id": user_id, "record_key": "PREFERENCES"}).get("Item") or {}
     user_item = users_table.get_item(Key={"user_id": user_id}, ConsistentRead=True).get("Item") or {}
     return {
-        "allergies": _safe_string_list(pref_item.get("allergies")),
-        "budget_level": _safe_budget_level(pref_item.get("budget_level")),
-        "goals": _safe_goals(pref_item.get("goals"), pref_item.get("goal")),
         "dietary_preferences": _safe_string_list(user_item.get("dietary_preferences")),
         "main_goal": _safe_string_list(user_item.get("main_goal")),
         "activity_considerations": _safe_string_list(user_item.get("activity_considerations")),
@@ -951,8 +934,6 @@ def _merge_generated_for_selected_type(
     generated_type_meals: List[Dict[str, Any]],
     meal_type: str,
     target_count: int,
-    preferences: Dict[str, Any],
-    seed: int,
 ) -> List[Dict[str, Any]]:
     fav_set = {fid.strip() for fid in favorite_ids if isinstance(fid, str) and fid.strip()}
     untouched: List[Dict[str, Any]] = []
@@ -1110,8 +1091,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             generated_type_meals=fresh_library,
             meal_type=requested_meal_type,
             target_count=GENERATE_TARGET_COUNT,
-            preferences=preferences,
-            seed=seed,
         )
         final_type_count = len([m for m in final_library if _safe_string(m.get("meal_type")) == requested_meal_type])
         favorite_type_count = len(

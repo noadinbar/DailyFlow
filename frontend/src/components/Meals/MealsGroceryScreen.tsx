@@ -645,6 +645,47 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     return groupGroceryFromFlat(flat);
   }, [groceryListServer, savedMeals]);
 
+  const groceryItemTotal = React.useMemo(() => {
+    let total = 0;
+    for (const items of groceryItemsByCategory.values()) total += items.length;
+    return total;
+  }, [groceryItemsByCategory]);
+
+  function buildGroceryExportText(): string {
+    const lines: string[] = ['DailyFlow Grocery List', ''];
+    const checkedSet = new Set(checkedGroceryKeys);
+    for (const [rawCategory, items] of groceryItemsByCategory.entries()) {
+      if (!items || items.length === 0) continue;
+      const categoryLabel = (typeof rawCategory === 'string' && rawCategory.trim()) ? rawCategory.trim() : 'Other';
+      lines.push(categoryLabel);
+      for (const item of items) {
+        const name = (item.name && item.name.trim()) || 'Item';
+        const qty = Number.isFinite(item.quantity) ? formatQuantity(item.quantity) : '';
+        const unit = (item.unit && item.unit.trim()) || '';
+        const qtyPart = [qty, unit].filter((part) => part.length > 0).join(' ');
+        const checkbox = checkedSet.has(item.key) ? '[x]' : '[ ]';
+        lines.push(qtyPart ? `${checkbox} ${name} — ${qtyPart}` : `${checkbox} ${name}`);
+      }
+      lines.push('');
+    }
+    while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    return lines.join('\n') + '\n';
+  }
+
+  function handleExportGroceryList() {
+    if (groceryItemTotal === 0) return;
+    const content = buildGroceryExportText();
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'dailyflow-grocery-list.txt';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }
+
   function openAddMealModal(meal: MealLibraryItem) {
     setAddMealError('');
     setAddMealSource(meal);
@@ -1183,7 +1224,16 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   Grocery List
                 </h2>
               </button>
-              <div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="df-btn"
+                  onClick={handleExportGroceryList}
+                  disabled={groceryItemTotal === 0}
+                  title={groceryItemTotal === 0 ? 'No grocery items to export.' : 'Export grocery list as .txt'}
+                >
+                  Export
+                </button>
                 <button type="button" className="df-btn" onClick={() => void clearCheckedGroceryItems()}>
                   Clear checked
                 </button>
