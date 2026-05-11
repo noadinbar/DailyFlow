@@ -1,4 +1,5 @@
 import React from 'react';
+import { jsPDF } from 'jspdf';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
@@ -651,39 +652,70 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     return total;
   }, [groceryItemsByCategory]);
 
-  function buildGroceryExportText(): string {
-    const lines: string[] = ['DailyFlow Grocery List', ''];
+  function handleExportGroceryListPdf() {
+    if (groceryItemTotal === 0) return;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const margin = 14;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxWidth = pageWidth - 2 * margin;
+    const lineHeight = 6;
+    const categoryGap = 5;
+    let y = margin;
     const checkedSet = new Set(checkedGroceryKeys);
+
+    const ensureSpace = (neededMm: number) => {
+      if (y + neededMm > pageHeight - margin) {
+        doc.addPage();
+        y = margin;
+      }
+    };
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    ensureSpace(lineHeight * 2);
+    doc.text('DailyFlow Grocery List', margin, y);
+    y += lineHeight * 2;
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+
     for (const [rawCategory, items] of groceryItemsByCategory.entries()) {
       if (!items || items.length === 0) continue;
-      const categoryLabel = (typeof rawCategory === 'string' && rawCategory.trim()) ? rawCategory.trim() : 'Other';
-      lines.push(categoryLabel);
+      const categoryLabel =
+        typeof rawCategory === 'string' && rawCategory.trim() ? rawCategory.trim() : 'Other';
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      const categoryLines = doc.splitTextToSize(categoryLabel, maxWidth);
+      for (const line of categoryLines) {
+        ensureSpace(lineHeight);
+        doc.text(line, margin, y);
+        y += lineHeight;
+      }
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+
       for (const item of items) {
         const name = (item.name && item.name.trim()) || 'Item';
         const qty = Number.isFinite(item.quantity) ? formatQuantity(item.quantity) : '';
         const unit = (item.unit && item.unit.trim()) || '';
         const qtyPart = [qty, unit].filter((part) => part.length > 0).join(' ');
         const checkbox = checkedSet.has(item.key) ? '[x]' : '[ ]';
-        lines.push(qtyPart ? `${checkbox} ${name} — ${qtyPart}` : `${checkbox} ${name}`);
+        const itemLine = qtyPart ? `${checkbox} ${name} — ${qtyPart}` : `${checkbox} ${name}`;
+        const wrapped = doc.splitTextToSize(itemLine, maxWidth);
+        for (const line of wrapped) {
+          ensureSpace(lineHeight);
+          doc.text(line, margin, y);
+          y += lineHeight;
+        }
       }
-      lines.push('');
-    }
-    while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-    return lines.join('\n') + '\n';
-  }
 
-  function handleExportGroceryList() {
-    if (groceryItemTotal === 0) return;
-    const content = buildGroceryExportText();
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'dailyflow-grocery-list.txt';
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+      y += categoryGap;
+    }
+
+    doc.save('dailyflow-grocery-list.pdf');
   }
 
   function openAddMealModal(meal: MealLibraryItem) {
@@ -1228,11 +1260,13 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <button
                   type="button"
                   className="df-btn"
-                  onClick={handleExportGroceryList}
+                  onClick={handleExportGroceryListPdf}
                   disabled={groceryItemTotal === 0}
-                  title={groceryItemTotal === 0 ? 'No grocery items to export.' : 'Export grocery list as .txt'}
+                  title={
+                    groceryItemTotal === 0 ? 'No grocery items to export.' : 'Export grocery list as PDF'
+                  }
                 >
-                  Export
+                  Export PDF
                 </button>
                 <button type="button" className="df-btn" onClick={() => void clearCheckedGroceryItems()}>
                   Clear checked
