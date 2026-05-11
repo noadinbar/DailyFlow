@@ -991,20 +991,18 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             >
               {isAddingAllToCalendar ? 'Adding all...' : 'Add all to calendar'}
             </button>
-            {(googleCalendarStatus === 'not_connected' ||
-              googleCalendarStatus === 'reconnect_required' ||
-              googleCalendarStatus === 'error') && (
+          </div>
+          <div className="df-calendarTopbarRight">
+            {googleCalendarStatus === 'reconnect_required' && (
               <button
                 type="button"
-                className="df-btn"
+                className="df-btn df-btnPrimary"
                 onClick={handleConnectGoogleCalendarClick}
                 disabled={isConnectingGoogleCalendar}
               >
                 {isConnectingGoogleCalendar ? 'Connecting...' : 'Connect Google Calendar'}
               </button>
             )}
-          </div>
-          <div className="df-calendarTopbarRight">
             <button
               type="button"
               className="df-btn"

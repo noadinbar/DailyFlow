@@ -880,12 +880,6 @@ body {
   padding-inline-end: 4px;
 }
 
-.df-selectMulti {
-  width: 100%;
-  max-height: 140px;
-  font-size: 13px;
-}
-
 select.df-input {
   padding: 8px 10px;
 }

@@ -11,15 +11,10 @@ type MealsGroceryScreenProps = {
 type IngredientRounding = 'none' | 'ceil';
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 type PrepTimeFilter = 'lt20' | '20to40' | 'gt40';
-type BudgetLevel = 'Low' | 'Medium' | 'High';
-type MealGoal =
-  | 'Balanced'
-  | 'Quick & easy'
-  | 'High protein'
-  | 'Budget friendly'
-  | 'Family friendly'
-  | 'Light meals'
-  | 'Meal prep';
+type GoogleCalendarStatus = 'connected' | 'reconnect_required';
+
+const GOOGLE_RECONNECT_MESSAGE = 'Google connection expired, reconnect required';
+const GOOGLE_RECONNECT_MESSAGE_NEW = 'Google Calendar connection expired. Please reconnect.';
 
 type MealIngredient = {
   name: string;
@@ -67,12 +62,6 @@ type GroceryItem = {
 };
 
 type MealsStateResponse = {
-  meal_preferences?: {
-    allergies?: string[];
-    budget_level?: string;
-    goals?: string[];
-    goal?: string;
-  };
   meal_library?: MealLibraryItem[];
   favorite_meals?: string[];
   saved_meals_this_week?: SavedMealItem[];
@@ -96,6 +85,7 @@ type MealsSavedPatchResponse = {
   saved_meal?: SavedMealItem;
   updated_at?: string;
   week_record_key?: string;
+  reconnect_required?: boolean;
 };
 
 const SAMPLE_MEALS: MealLibraryItem[] = [
@@ -174,16 +164,6 @@ const SAMPLE_MEALS: MealLibraryItem[] = [
       { name: 'Rolled oats', quantity: 20, unit: 'g', category: 'Pantry / Dry Goods', rounding: 'none' },
     ],
   },
-];
-
-const MEAL_GOAL_OPTIONS: MealGoal[] = [
-  'Balanced',
-  'Quick & easy',
-  'High protein',
-  'Budget friendly',
-  'Family friendly',
-  'Light meals',
-  'Meal prep',
 ];
 
 const ALLOWED_DIET_TAG_ORDER = [
@@ -327,12 +307,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [mealDetail, setMealDetail] = React.useState<MealLibraryItem | null>(null);
   const [isSavingMealCalendar, setIsSavingMealCalendar] = React.useState<boolean>(false);
 
-  const [isMealPreferencesOpen, setIsMealPreferencesOpen] = React.useState<boolean>(false);
-  const [allergiesInput, setAllergiesInput] = React.useState<string>('');
-  const [budgetLevel, setBudgetLevel] = React.useState<BudgetLevel>('Medium');
-  const [goalInput, setGoalInput] = React.useState<MealGoal[]>(['Balanced']);
-  const [isSavingMealPreferences, setIsSavingMealPreferences] = React.useState<boolean>(false);
   const [isGeneratingMeals, setIsGeneratingMeals] = React.useState<boolean>(false);
+
+  const [googleCalendarStatus, setGoogleCalendarStatus] = React.useState<GoogleCalendarStatus>('connected');
+  const [googleCalendarStatusMessage, setGoogleCalendarStatusMessage] = React.useState<string>('');
+  const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
 
   const [addMealSource, setAddMealSource] = React.useState<MealLibraryItem | null>(null);
   const [addMealDate, setAddMealDate] = React.useState<string>('');
@@ -368,6 +347,14 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     }
   }
 
+  function detectReconnectRequired(payload: MealsSavedPatchResponse, status: number): boolean {
+    if (payload && payload.reconnect_required === true) return true;
+    const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+    if (!message) return false;
+    if (status !== 401 && status !== 403) return false;
+    return message === GOOGLE_RECONNECT_MESSAGE || message === GOOGLE_RECONNECT_MESSAGE_NEW;
+  }
+
   async function patchMealsSaved(
     body: Record<string, unknown>,
     options?: { setGlobalError?: boolean }
@@ -389,14 +376,51 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     } catch {
       payload = {};
     }
-    if (!response.ok && setGlobal) {
-      setMealsApiError(
-        typeof payload.message === 'string' && payload.message.trim()
-          ? payload.message
-          : `Request failed (${response.status}).`
-      );
+    if (!response.ok) {
+      if (detectReconnectRequired(payload, response.status)) {
+        setGoogleCalendarStatus('reconnect_required');
+        setGoogleCalendarStatusMessage(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : GOOGLE_RECONNECT_MESSAGE_NEW
+        );
+      }
+      if (setGlobal) {
+        setMealsApiError(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Request failed (${response.status}).`
+        );
+      }
+    } else if (googleCalendarStatus !== 'connected') {
+      setGoogleCalendarStatus('connected');
+      setGoogleCalendarStatusMessage('');
     }
     return { ok: response.ok, status: response.status, payload };
+  }
+
+  function handleConnectGoogleCalendarClick() {
+    setIsConnectingGoogleCalendar(true);
+    void (async () => {
+      try {
+        const baseUrl = getApiBaseUrl();
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        if (!accessToken) {
+          setMealsApiError('You need to be signed in to connect Google Calendar.');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+        const startUrl = `${baseUrl}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
+        window.location.assign(startUrl);
+      } catch (err) {
+        const anyErr = err as { message?: string };
+        setMealsApiError(
+          typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to start Google Calendar connection.'
+        );
+        setIsConnectingGoogleCalendar(false);
+      }
+    })();
   }
 
   async function loadProfile(): Promise<{
@@ -759,76 +783,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       if (typeof meta.week_record_key === 'string') setWeekRecordKey(meta.week_record_key);
       if (typeof meta.week_start === 'string') setWeekStartIso(meta.week_start);
       if (typeof meta.week_end === 'string') setWeekEndIso(meta.week_end);
-
-      const pref = payload.meal_preferences || {};
-      const prefAllergies = Array.isArray(pref.allergies)
-        ? pref.allergies.filter((value): value is string => typeof value === 'string')
-        : [];
-      const prefBudget =
-        pref.budget_level === 'Low' || pref.budget_level === 'Medium' || pref.budget_level === 'High'
-          ? pref.budget_level
-          : 'Medium';
-      setAllergiesInput(prefAllergies.join(', '));
-      setBudgetLevel(prefBudget);
-      const incomingGoals = Array.isArray(pref.goals)
-        ? pref.goals.filter((goal): goal is MealGoal => MEAL_GOAL_OPTIONS.includes(goal as MealGoal))
-        : [];
-      if (incomingGoals.length > 0) {
-        setGoalInput(incomingGoals);
-      } else if (typeof pref.goal === 'string' && MEAL_GOAL_OPTIONS.includes(pref.goal as MealGoal)) {
-        setGoalInput([pref.goal as MealGoal]);
-      } else {
-        setGoalInput(['Balanced']);
-      }
     } catch {
       setMealLibrary(SAMPLE_MEALS);
-    }
-  }
-
-  async function saveMealPreferences() {
-    setMealsApiError('');
-    let baseUrl = '';
-    try {
-      baseUrl = getApiBaseUrl();
-    } catch {
-      setMealsApiError('Missing API base URL configuration.');
-      return;
-    }
-    setIsSavingMealPreferences(true);
-    try {
-      const token = await getAuthToken();
-      const allergies = allergiesInput
-        .split(',')
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0);
-      const response = await fetch(`${baseUrl}/meals/preferences`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          allergies,
-          budget_level: budgetLevel,
-          goals: goalInput,
-          goal: goalInput[0] || '',
-        }),
-      });
-      let payload: { message?: string } = {};
-      try {
-        payload = (await response.json()) as { message?: string };
-      } catch {
-        payload = {};
-      }
-      if (!response.ok) {
-        setMealsApiError(payload.message || `Could not save meal preferences (${response.status}).`);
-        return;
-      }
-      setIsMealPreferencesOpen(false);
-    } catch {
-      setMealsApiError('Could not save meal preferences right now.');
-    } finally {
-      setIsSavingMealPreferences(false);
     }
   }
 
@@ -956,11 +912,18 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 Select exactly one meal type to generate.
               </span>
             )}
-            <button type="button" className="df-btn" onClick={() => setIsMealPreferencesOpen(true)}>
-              Meal Preferences
-            </button>
           </div>
           <div className="df-calendarTopbarRight">
+            {googleCalendarStatus === 'reconnect_required' && (
+              <button
+                type="button"
+                className="df-btn df-btnPrimary"
+                onClick={handleConnectGoogleCalendarClick}
+                disabled={isConnectingGoogleCalendar}
+              >
+                {isConnectingGoogleCalendar ? 'Connecting...' : 'Connect Google Calendar'}
+              </button>
+            )}
             <button type="button" className="df-btn" onClick={() => void handleLogoutClick()} disabled={isLoggingOut}>
               {isLoggingOut ? 'Signing out...' : 'Log out'}
             </button>
@@ -968,6 +931,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         </header>
 
         {mealsApiError && <div className="df-errorText" style={{ padding: '8px 16px 0' }}>{mealsApiError}</div>}
+        {googleCalendarStatus === 'reconnect_required' && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
+            {googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
+          </div>
+        )}
         {mealGenerationWarning && (
           <div className="df-mealsGenerateNotice" role="status">
             {mealGenerationWarning}
@@ -1277,96 +1245,6 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         onSaveQuestionnaire={saveQuestionnairePreferences}
         onClose={() => setIsProfileSettingsOpen(false)}
       />
-
-      {isMealPreferencesOpen && (
-        <div
-          className="df-modalBackdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setIsMealPreferencesOpen(false);
-          }}
-        >
-          <div className="df-modalPanel df-addWeeklyModal" role="dialog" aria-modal="true" aria-label="Meal preferences">
-            <div className="df-modalHeader">
-              <div className="df-modalTitle">Meal Preferences</div>
-              <button
-                type="button"
-                className="df-iconBtn"
-                onClick={() => setIsMealPreferencesOpen(false)}
-                aria-label="Close meal preferences"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 12 }}>
-              <label className="df-field">
-                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
-                  Allergies
-                </div>
-                <input
-                  type="text"
-                  className="df-input"
-                  placeholder="e.g. peanuts, shellfish"
-                  value={allergiesInput}
-                  onChange={(event) => setAllergiesInput(event.target.value)}
-                />
-              </label>
-              <label className="df-field">
-                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
-                  Budget level
-                </div>
-                <select
-                  className="df-select"
-                  value={budgetLevel}
-                  onChange={(event) => setBudgetLevel(event.target.value as BudgetLevel)}
-                >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
-                </select>
-              </label>
-              <label className="df-field">
-                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
-                  Goal
-                </div>
-                <select
-                  className="df-select df-selectMulti"
-                  value={goalInput}
-                  multiple
-                  onChange={(event) => {
-                    const selected = Array.from(event.target.selectedOptions).map((option) => option.value as MealGoal);
-                    setGoalInput(selected);
-                  }}
-                >
-                  {MEAL_GOAL_OPTIONS.map((goal) => (
-                    <option key={goal} value={goal}>
-                      {goal}
-                    </option>
-                  ))}
-                </select>
-                <div className="df-settingsHint">You can select multiple goals (Ctrl/Cmd + click).</div>
-              </label>
-              <div className="df-weeklyPlanActions">
-                <button
-                  type="button"
-                  className="df-weeklyPlanActionBtn"
-                  onClick={() => void saveMealPreferences()}
-                  disabled={isSavingMealPreferences}
-                >
-                  {isSavingMealPreferences ? 'Saving...' : 'Save'}
-                </button>
-                <button
-                  type="button"
-                  className="df-weeklyPlanActionBtn"
-                  onClick={() => setIsMealPreferencesOpen(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {addMealSource && (
         <div
