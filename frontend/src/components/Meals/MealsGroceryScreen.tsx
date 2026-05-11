@@ -654,65 +654,176 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
 
   function handleExportGroceryListPdf() {
     if (groceryItemTotal === 0) return;
+
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const margin = 14;
-    const pageHeight = doc.internal.pageSize.getHeight();
     const pageWidth = doc.internal.pageSize.getWidth();
-    const maxWidth = pageWidth - 2 * margin;
-    const lineHeight = 6;
-    const categoryGap = 5;
-    let y = margin;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 16;
+    const contentLeft = margin;
+    const contentRight = pageWidth - margin;
+    const contentWidth = contentRight - contentLeft;
     const checkedSet = new Set(checkedGroceryKeys);
 
+    const COLOR_HEADER_BG: [number, number, number] = [244, 228, 226];
+    const COLOR_HEADER_ACCENT: [number, number, number] = [201, 158, 156];
+    const COLOR_CATEGORY_BG: [number, number, number] = [250, 236, 233];
+    const COLOR_CATEGORY_TEXT: [number, number, number] = [120, 70, 70];
+    const COLOR_TEXT: [number, number, number] = [60, 45, 45];
+    const COLOR_MUTED: [number, number, number] = [140, 120, 120];
+    const COLOR_DOTTED: [number, number, number] = [200, 180, 180];
+
+    const headerHeight = 34;
+    const categoryBandHeight = 9;
+    const itemRowHeight = 8;
+    const bulletRadius = 1.7;
+    const sectionGap = 5;
+    const footerHeight = 10;
+
+    let y = 0;
+
+    const drawHeader = () => {
+      doc.setFillColor(...COLOR_HEADER_BG);
+      doc.rect(0, 0, pageWidth, headerHeight, 'F');
+      doc.setDrawColor(...COLOR_HEADER_ACCENT);
+      doc.setLineWidth(0.4);
+      doc.line(margin, headerHeight, pageWidth - margin, headerHeight);
+
+      doc.setTextColor(...COLOR_TEXT);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.text('DailyFlow Grocery List', contentLeft, 16);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(...COLOR_MUTED);
+      doc.text('Generated from your saved weekly meals', contentLeft, 22);
+
+      const exportDate = new Date().toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const dateLabel = `Date: ${exportDate}`;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(...COLOR_TEXT);
+      const dateWidth = doc.getTextWidth(dateLabel);
+      doc.text(dateLabel, contentRight - dateWidth, 22);
+
+      y = headerHeight + 8;
+    };
+
+    const startNewPage = () => {
+      doc.addPage();
+      drawHeader();
+    };
+
     const ensureSpace = (neededMm: number) => {
-      if (y + neededMm > pageHeight - margin) {
-        doc.addPage();
-        y = margin;
+      if (y + neededMm > pageHeight - footerHeight - margin / 2) {
+        startNewPage();
       }
     };
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    ensureSpace(lineHeight * 2);
-    doc.text('DailyFlow Grocery List', margin, y);
-    y += lineHeight * 2;
+    const drawCategoryBand = (label: string) => {
+      ensureSpace(categoryBandHeight + itemRowHeight);
+      doc.setFillColor(...COLOR_CATEGORY_BG);
+      const bandRadius = 2.5;
+      const bandY = y;
+      if (typeof (doc as unknown as { roundedRect?: Function }).roundedRect === 'function') {
+        doc.roundedRect(contentLeft, bandY, contentWidth, categoryBandHeight, bandRadius, bandRadius, 'F');
+      } else {
+        doc.rect(contentLeft, bandY, contentWidth, categoryBandHeight, 'F');
+      }
+      doc.setTextColor(...COLOR_CATEGORY_TEXT);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(label.toUpperCase(), contentLeft + 4, bandY + categoryBandHeight - 3);
+      y += categoryBandHeight + 3;
+    };
 
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
+    const drawDottedLine = (x1: number, x2: number, lineY: number) => {
+      doc.setDrawColor(...COLOR_DOTTED);
+      doc.setLineWidth(0.3);
+      const segment = 0.6;
+      const gap = 1.4;
+      let cursor = x1;
+      while (cursor < x2) {
+        const end = Math.min(cursor + segment, x2);
+        doc.line(cursor, lineY, end, lineY);
+        cursor = end + gap;
+      }
+    };
+
+    const drawBullet = (cx: number, cy: number, checked: boolean) => {
+      doc.setDrawColor(...COLOR_HEADER_ACCENT);
+      doc.setLineWidth(0.4);
+      if (checked) {
+        doc.setFillColor(...COLOR_HEADER_ACCENT);
+        doc.circle(cx, cy, bulletRadius, 'FD');
+        doc.setDrawColor(255, 255, 255);
+        doc.setLineWidth(0.5);
+        const r = bulletRadius - 0.5;
+        doc.line(cx - r, cy, cx - r / 3, cy + r / 1.4);
+        doc.line(cx - r / 3, cy + r / 1.4, cx + r, cy - r / 1.4);
+      } else {
+        doc.circle(cx, cy, bulletRadius, 'S');
+      }
+    };
+
+    const drawItem = (item: GroceryItem) => {
+      const name = (item.name && item.name.trim()) || 'Item';
+      const qty = Number.isFinite(item.quantity) ? formatQuantity(item.quantity) : '';
+      const unit = (item.unit && item.unit.trim()) || '';
+      const qtyPart = [qty, unit].filter((part) => part.length > 0).join(' ');
+      const checked = checkedSet.has(item.key);
+      const bracket = checked ? '[x]' : '[ ]';
+      const fullLine = qtyPart ? `${bracket} ${name} — ${qtyPart}` : `${bracket} ${name}`;
+
+      const bulletX = contentLeft + 3;
+      const textX = bulletX + 5;
+      const textWidth = contentRight - textX - 2;
+      const wrapped = doc.splitTextToSize(fullLine, textWidth) as string[];
+      const blockHeight = Math.max(itemRowHeight, wrapped.length * 5 + 3);
+      ensureSpace(blockHeight);
+
+      const baseY = y;
+      drawBullet(bulletX, baseY + 2.5, checked);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(...COLOR_TEXT);
+      let lineCursor = baseY + 3;
+      for (const line of wrapped) {
+        doc.text(line, textX, lineCursor);
+        lineCursor += 5;
+      }
+
+      drawDottedLine(textX, contentRight, baseY + blockHeight - 2);
+      y += blockHeight;
+    };
+
+    drawHeader();
 
     for (const [rawCategory, items] of groceryItemsByCategory.entries()) {
       if (!items || items.length === 0) continue;
       const categoryLabel =
         typeof rawCategory === 'string' && rawCategory.trim() ? rawCategory.trim() : 'Other';
+      drawCategoryBand(categoryLabel);
+      for (const item of items) drawItem(item);
+      y += sectionGap;
+    }
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      const categoryLines = doc.splitTextToSize(categoryLabel, maxWidth);
-      for (const line of categoryLines) {
-        ensureSpace(lineHeight);
-        doc.text(line, margin, y);
-        y += lineHeight;
+    const totalPages = doc.getNumberOfPages();
+    if (totalPages > 1) {
+      for (let pageIdx = 1; pageIdx <= totalPages; pageIdx += 1) {
+        doc.setPage(pageIdx);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(...COLOR_MUTED);
+        const footerLabel = `Page ${pageIdx} / ${totalPages}`;
+        const labelWidth = doc.getTextWidth(footerLabel);
+        doc.text(footerLabel, (pageWidth - labelWidth) / 2, pageHeight - 7);
       }
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-
-      for (const item of items) {
-        const name = (item.name && item.name.trim()) || 'Item';
-        const qty = Number.isFinite(item.quantity) ? formatQuantity(item.quantity) : '';
-        const unit = (item.unit && item.unit.trim()) || '';
-        const qtyPart = [qty, unit].filter((part) => part.length > 0).join(' ');
-        const checkbox = checkedSet.has(item.key) ? '[x]' : '[ ]';
-        const itemLine = qtyPart ? `${checkbox} ${name} — ${qtyPart}` : `${checkbox} ${name}`;
-        const wrapped = doc.splitTextToSize(itemLine, maxWidth);
-        for (const line of wrapped) {
-          ensureSpace(lineHeight);
-          doc.text(line, margin, y);
-          y += lineHeight;
-        }
-      }
-
-      y += categoryGap;
     }
 
     doc.save('dailyflow-grocery-list.pdf');
