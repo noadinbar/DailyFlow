@@ -219,13 +219,13 @@ function formatDateTime(date: string, time: string): string {
   if (!date || !time) return 'Not scheduled';
   const base = new Date(`${date}T${time}:00`);
   if (!Number.isFinite(base.getTime())) return `${date} ${time}`;
-  return base.toLocaleString(undefined, {
+  const datePart = base.toLocaleDateString(undefined, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
   });
+  const timePart = `${String(base.getHours()).padStart(2, '0')}:${String(base.getMinutes()).padStart(2, '0')}`;
+  return `${datePart} ${timePart}`;
 }
 
 function calculateEndTime(startTime: string, durationMinutes: number): string {
@@ -772,17 +772,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
 
     const drawItem = (item: GroceryItem) => {
       const name = (item.name && item.name.trim()) || 'Item';
-      const qty = Number.isFinite(item.quantity) ? formatQuantity(item.quantity) : '';
-      const unit = (item.unit && item.unit.trim()) || '';
-      const qtyPart = [qty, unit].filter((part) => part.length > 0).join(' ');
       const checked = checkedSet.has(item.key);
-      const bracket = checked ? '[x]' : '[ ]';
-      const fullLine = qtyPart ? `${bracket} ${name} — ${qtyPart}` : `${bracket} ${name}`;
 
       const bulletX = contentLeft + 3;
       const textX = bulletX + 5;
       const textWidth = contentRight - textX - 2;
-      const wrapped = doc.splitTextToSize(fullLine, textWidth) as string[];
+      const wrapped = doc.splitTextToSize(name, textWidth) as string[];
       const blockHeight = Math.max(itemRowHeight, wrapped.length * 5 + 3);
       ensureSpace(blockHeight);
 
@@ -1397,9 +1392,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                             checked={checkedGroceryKeys.includes(item.key)}
                             onChange={() => void toggleGroceryChecked(item.key)}
                           />
-                          <span>
-                            {item.name} - {formatQuantity(item.quantity)} {item.unit}
-                          </span>
+                          <span>{(item.name && item.name.trim()) || 'Item'}</span>
                         </label>
                       ))}
                     </div>
