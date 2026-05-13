@@ -1,7 +1,7 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from './ProfileSettingsModal';
-import AppSidebar, { useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import AppSidebar, { useSidebarCollapsed, PencilIcon, SaveIcon } from '../Sidebar/AppSidebar';
 
 type HomeScreenProps = {
   username?: string;
@@ -1182,9 +1182,17 @@ export default function HomeScreen(props: HomeScreenProps) {
                     onClick={handleEditCalendarsClick}
                     disabled={isSavingCalendarSelection}
                     aria-label="Edit calendars"
-                    style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: 12,
+                      lineHeight: 1.2,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
                   >
-                    ✏️ Edit
+                    <PencilIcon size={14} />
+                    Edit
                   </button>
                 )}
                 {calendarSidebarState === 'ready' && isEditingCalendars && (
@@ -1194,9 +1202,17 @@ export default function HomeScreen(props: HomeScreenProps) {
                     onClick={() => void handleSaveCalendarSelectionClick()}
                     disabled={isSavingCalendarSelection}
                     aria-label="Save calendars"
-                    style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1.2 }}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: 12,
+                      lineHeight: 1.2,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
                   >
-                    {isSavingCalendarSelection ? 'Saving...' : '💾 Save'}
+                    <SaveIcon size={14} />
+                    {isSavingCalendarSelection ? 'Saving...' : 'Save'}
                   </button>
                 )}
               </div>
