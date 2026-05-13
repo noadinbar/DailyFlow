@@ -1,6 +1,9 @@
 :root {
-  /* Soft "presentation" dusty-rose background. Cards stay white so contrast is preserved. */
-  --df-bg: #fbf2ef;
+  /* Soft "presentation" dusty-blush background, used on every visible app surface
+     except cards/panels (which stay white for readability). */
+  --df-bg: #fdeee9;
+  /* Slightly lighter blush for nested nav/side panels so they harmonize with --df-bg. */
+  --df-bg-soft: #fef6f3;
   --df-card: #ffffff;
   --df-text: #111827;
   --df-muted: #6b7280;
@@ -221,6 +224,12 @@ body {
   display: flex;
   flex-direction: column;
   padding: 36px;
+  /* Drop the white card backdrop so the page-wide blush is the actual background.
+     Inputs/toggle buttons stay white so contrast is preserved. */
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .df-authHeader {
@@ -232,13 +241,28 @@ body {
 }
 
 .df-authLogo {
-  width: 420px;
+  width: 460px;
+  max-width: 100%;
   height: auto;
   display: block;
-  margin-bottom: 8px;
-  /* Soft radial fade so the rectangular image blends into the page background. */
-  -webkit-mask-image: radial-gradient(ellipse at center, #000 55%, rgba(0, 0, 0, 0) 95%);
-  mask-image: radial-gradient(ellipse at center, #000 55%, rgba(0, 0, 0, 0) 95%);
+  margin: 0 auto 8px;
+  /* The source PNG has a white backdrop baked in. mix-blend-mode multiplies the
+     image with the pink page so white pixels become the page color and the swirl
+     keeps its hues — no hard rectangle remains. The radial mask softens the
+     outermost edges even further for a clean fade. */
+  mix-blend-mode: multiply;
+  -webkit-mask-image: radial-gradient(
+    ellipse 78% 82% at center,
+    #000 55%,
+    rgba(0, 0, 0, 0.6) 80%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 78% 82% at center,
+    #000 55%,
+    rgba(0, 0, 0, 0.6) 80%,
+    rgba(0, 0, 0, 0) 100%
+  );
 }
 
 .df-authTitle {
@@ -346,7 +370,9 @@ body {
   min-height: 86vh;
   border: 1px solid var(--df-border);
   border-radius: 16px;
-  background: #fff;
+  /* Use the page-wide blush so the screen visually reads pink across the whole
+     content area. Inner cards/panels keep their own backgrounds. */
+  background: var(--df-bg);
   display: grid;
   grid-template-columns: 220px 1fr;
   overflow: hidden;
@@ -360,27 +386,38 @@ body {
 .df-calendarLeftNav {
   border-right: 1px solid var(--df-border);
   padding: 18px 14px;
-  background: #fafafb;
+  background: var(--df-bg-soft);
 }
 
 .df-calendarBrand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   font-size: 22px;
   font-weight: 800;
   color: var(--df-brand-text);
   margin-bottom: 14px;
   min-width: 0;
+  line-height: 1;
 }
 
 .df-calendarBrandLogo {
   flex: none;
-  width: 30px;
-  height: 30px;
+  /* Sized to match the wordmark presence (line-height ~1 of 22px font = ~22px cap height,
+     but the emblem includes generous transparent padding so it visually balances at ~44px). */
+  width: 44px;
+  height: 44px;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
+  /* Use multiply so any near-white halo in the PNG blends into the soft blush sidebar. */
+  mix-blend-mode: multiply;
+}
+
+.df-calendarLeftNavCollapsed .df-calendarBrandLogo {
+  /* In collapsed mode the wordmark is hidden; let the emblem fill the row a bit more. */
+  width: 40px;
+  height: 40px;
 }
 
 .df-calendarProfile {
@@ -783,7 +820,7 @@ body {
 
 .df-calendarSidebar {
   padding: 14px 12px;
-  background: #fbfbfc;
+  background: var(--df-bg-soft);
   display: flex;
   flex-direction: column;
   gap: 14px;

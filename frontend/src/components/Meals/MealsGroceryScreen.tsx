@@ -1225,7 +1225,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                           aria-label={`Toggle favorite for ${meal.title}`}
                           onClick={() => void toggleFavoriteMeal(meal.id)}
                         >
-                          {favoriteMealIds.includes(meal.id) ? '♥' : '♡'}
+                          {favoriteMealIds.includes(meal.id) ? '❤' : '♡'}
                         </button>
                       </div>
                       <div
