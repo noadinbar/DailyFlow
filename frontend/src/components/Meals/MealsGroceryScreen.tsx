@@ -2,7 +2,7 @@ import React from 'react';
 import { jsPDF } from 'jspdf';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
-import AppSidebar, { CalendarPlusIcon, ClockIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import AppSidebar, { CalendarPlusIcon, ClockIcon, FireIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
 
 type MealsGroceryScreenProps = {
@@ -1263,6 +1263,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                           </span>
                           {meal.estimated_calories != null && meal.estimated_calories > 0 ? (
                             <span className="df-mealLibraryMetaItem" title="Estimated calories">
+                              <span className="df-inlineIcon df-inlineIconMuted" aria-hidden>
+                                <FireIcon size={13} />
+                              </span>
                               {meal.estimated_calories} kcal
                             </span>
                           ) : null}
@@ -1597,6 +1600,9 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 </span>
                 {mealDetail.estimated_calories != null && mealDetail.estimated_calories > 0 ? (
                   <span className="df-mealLibraryMetaItem">
+                    <span className="df-inlineIcon df-inlineIconMuted" aria-hidden>
+                      <FireIcon size={14} />
+                    </span>
                     {mealDetail.estimated_calories} kcal
                   </span>
                 ) : null}

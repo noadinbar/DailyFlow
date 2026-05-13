@@ -1,10 +1,12 @@
 :root {
-  --df-bg: #f7f7f8;
+  /* Soft "presentation" dusty-rose background. Cards stay white so contrast is preserved. */
+  --df-bg: #fbf2ef;
   --df-card: #ffffff;
   --df-text: #111827;
   --df-muted: #6b7280;
   --df-border: #e5e7eb;
   --df-primary: #2563eb;
+  --df-brand-text: #2a2566;
 }
 
 html,
@@ -234,6 +236,9 @@ body {
   height: auto;
   display: block;
   margin-bottom: 8px;
+  /* Soft radial fade so the rectangular image blends into the page background. */
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 55%, rgba(0, 0, 0, 0) 95%);
+  mask-image: radial-gradient(ellipse at center, #000 55%, rgba(0, 0, 0, 0) 95%);
 }
 
 .df-authTitle {
@@ -359,9 +364,23 @@ body {
 }
 
 .df-calendarBrand {
-  font-size: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
   font-weight: 800;
+  color: var(--df-brand-text);
   margin-bottom: 14px;
+  min-width: 0;
+}
+
+.df-calendarBrandLogo {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: transparent;
 }
 
 .df-calendarProfile {
@@ -503,16 +522,12 @@ body {
   height: 22px;
 }
 
-.df-sidebarToggleLabel {
-  font-weight: 600;
-  font-size: 13px;
-  color: #6b7280;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .df-calendarBrandLabel {
   display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .df-calendarProfileInfo {
@@ -532,13 +547,12 @@ body {
 
 .df-calendarLeftNavCollapsed .df-calendarBrandLabel,
 .df-calendarLeftNavCollapsed .df-calendarProfileInfo,
-.df-calendarLeftNavCollapsed .df-sidebarToggleLabel,
 .df-calendarLeftNavCollapsed .df-calendarMenuItemLabel {
   display: none;
 }
 
 .df-calendarLeftNavCollapsed .df-calendarBrand {
-  text-align: center;
+  justify-content: center;
   margin-bottom: 10px;
 }
 
@@ -949,6 +963,12 @@ body {
   flex-direction: column;
 }
 
+/* Settings popup: fix outer footprint so switching Profile <-> Preferences
+   does NOT resize the shell. Internal content scrolls instead. */
+.df-modalPanel:has(.df-settingsLayout) {
+  height: min(86vh, 720px);
+}
+
 .df-addWeeklyModal {
   width: min(460px, 100%);
 }
@@ -971,7 +991,7 @@ body {
 .df-settingsLayout {
   display: flex;
   flex: 1 1 auto;
-  min-height: 460px;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
@@ -1003,9 +1023,10 @@ body {
 }
 
 .df-settingsContent {
-  flex: 1;
+  flex: 1 1 auto;
   padding: 14px;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -1015,8 +1036,8 @@ body {
 }
 
 .df-preferencesSection {
-  max-height: min(70vh, 520px);
-  overflow-y: auto;
+  /* Outer modal now owns the height; inner section can flow naturally
+     and scrolls via .df-settingsContent. Keeps Profile/Preferences shells identical. */
   padding-inline-end: 4px;
 }
 
@@ -1730,6 +1751,13 @@ select.df-input {
   color: currentColor;
   opacity: 0.85;
   margin-inline-end: 4px;
+}
+
+/* Subtle muted variant — for soft indicators (e.g. calories fire icon)
+   so they stay quiet next to the value and don't read as emoji. */
+.df-inlineIconMuted {
+  color: #9ca3af;
+  opacity: 0.85;
 }
 
 /* Pastel tag chip. Background/color are supplied inline via pastelTagStyle() */

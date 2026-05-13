@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import dailyflowLogoUrl from '../../../visuals/small_logo.png';
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'dailyflow_sidebar_collapsed';
 
@@ -81,10 +82,15 @@ export default function AppSidebar(props: AppSidebarProps) {
         <span className="df-sidebarToggleIcon" aria-hidden>
           <HamburgerIcon />
         </span>
-        <span className="df-sidebarToggleLabel">Menu</span>
       </button>
 
       <div className="df-calendarBrand">
+        <img
+          src={dailyflowLogoUrl}
+          alt=""
+          aria-hidden
+          className="df-calendarBrandLogo"
+        />
         <span className="df-calendarBrandLabel">DailyFlow</span>
       </div>
 
@@ -179,11 +185,23 @@ function CalendarIcon() {
 
 function MealsIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 3v8a3 3 0 0 0 3 3v7" />
-      <path d="M7 3v8" />
-      <path d="M10 3v8a3 3 0 0 1-3 3" />
-      <path d="M17 3c-1.7 0-3 2.7-3 6s1.3 4 3 4v8" />
+    <svg
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <ellipse cx="7.5" cy="6.5" rx="2.5" ry="3" />
+      <line x1="7.5" y1="9.5" x2="7.5" y2="20" />
+      <line x1="14" y1="4" x2="14" y2="8" />
+      <line x1="16.5" y1="4" x2="16.5" y2="8" />
+      <line x1="19" y1="4" x2="19" y2="8" />
+      <path d="M14 8h5v2a2.5 2.5 0 0 1-2.5 2.5L16.5 20" />
     </svg>
   );
 }
@@ -238,6 +256,27 @@ export function ClockIcon(props: { size?: number; className?: string }) {
     >
       <circle cx="12" cy="12" r="9" />
       <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
+
+export function FireIcon(props: { size?: number; className?: string }) {
+  const size = props.size ?? 14;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+      aria-hidden
+    >
+      <path d="M12 3c.6 2.3 2 3.6 3.4 5 1.6 1.6 2.6 3.4 2.6 5.5a6 6 0 0 1-12 0c0-1.3.4-2.5 1.2-3.6.5.9 1.3 1.4 2.2 1.4-.2-2 .6-4.4 2.6-8.3z" />
+      <path d="M12 14.5c.4.9 1 1.4 1.8 1.6-.3.9-1 1.4-1.8 1.4s-1.5-.5-1.8-1.4c.8-.2 1.4-.7 1.8-1.6z" />
     </svg>
   );
 }

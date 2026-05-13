@@ -169,6 +169,14 @@ function isValidHHmm(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
+/** Display dd-mm-yyyy (day, month, year). Falls back to the raw value if not ISO. */
+function formatWeeklyPlanDay(value: string): string {
+  if (typeof value !== 'string') return '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const [year, month, day] = value.split('-');
+  return `${day}-${month}-${year}`;
+}
+
 function sanitizeHHmmTyping(raw: string): string {
   const digits = raw.replace(/\D/g, '').slice(0, 4);
   if (digits.length <= 2) return digits;
@@ -1095,7 +1103,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                           <span className="df-inlineIcon" aria-hidden>
                             <ClockIcon size={14} />
                           </span>
-                          {item.recommended_day} {item.recommended_start_time}-{item.recommended_end_time}
+                          {formatWeeklyPlanDay(item.recommended_day)} {item.recommended_start_time}-{item.recommended_end_time}
                         </div>
                         <div className="df-weeklyPlanControls">
                           <button
