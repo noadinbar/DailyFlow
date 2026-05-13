@@ -517,7 +517,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           setIsConnectingGoogleCalendar(false);
           return;
         }
-        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
+        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}&return_to=${encodeURIComponent('/workouts')}`;
         window.location.assign(startUrl);
       } catch (e) {
         const anyErr = e as { message?: string };

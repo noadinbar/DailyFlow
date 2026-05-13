@@ -9,19 +9,31 @@ from urllib.request import Request, urlopen
 import boto3
 
 try:
-    from .google_oauth_state import parse_lambda_query_params, verify_oauth_state
+    from .google_oauth_state import (
+        DEFAULT_RETURN_PATH,
+        parse_lambda_query_params,
+        safe_return_to,
+        verify_oauth_state,
+    )
 except ImportError:
     # Lambda zip with `lambda_function.py` at root (no package): sibling modules only.
-    from google_oauth_state import parse_lambda_query_params, verify_oauth_state
+    from google_oauth_state import (
+        DEFAULT_RETURN_PATH,
+        parse_lambda_query_params,
+        safe_return_to,
+        verify_oauth_state,
+    )
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
-def _frontend_calendar_url() -> str:
+def _frontend_url(return_to: str) -> str:
+    """Build a frontend URL for the given (already-sanitized) internal path."""
+    path = safe_return_to(return_to)
     base = os.getenv("FRONTEND_APP_URL", "").strip().rstrip("/")
     if not base:
-        return "/calendar"
-    return f"{base}/calendar"
+        return path
+    return f"{base}{path}"
 
 
 def _redirect(status_code: int, location: str) -> Dict[str, Any]:
@@ -118,27 +130,34 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "").strip()
-    frontend = _frontend_calendar_url()
+    # Errors detected before the signed state can be verified must use the
+    # safe default so a tampered state never leaks the user to another path.
+    default_frontend = _frontend_url(DEFAULT_RETURN_PATH)
 
     if not client_id or not client_secret or not redirect_uri:
-        target = f"{frontend}?google_oauth_error=config"
+        target = f"{default_frontend}?google_oauth_error=config"
         return _redirect(302, target)
 
     params = parse_lambda_query_params(event)
     if params.get("error"):
-        target = f"{frontend}?google_oauth_error=access_denied"
+        target = f"{default_frontend}?google_oauth_error=access_denied"
         return _redirect(302, target)
 
     code = (params.get("code") or "").strip()
     state = (params.get("state") or "").strip()
     if not code or not state:
-        target = f"{frontend}?google_oauth_error=missing_params"
+        target = f"{default_frontend}?google_oauth_error=missing_params"
         return _redirect(302, target)
 
-    user_id = verify_oauth_state(state, client_secret)
-    if not user_id:
-        target = f"{frontend}?google_oauth_error=invalid_state"
+    state_payload = verify_oauth_state(state, client_secret)
+    if not state_payload:
+        target = f"{default_frontend}?google_oauth_error=invalid_state"
         return _redirect(302, target)
+
+    user_id = state_payload["sub"]
+    # `return_to` is already sanitized by verify_oauth_state, but _frontend_url
+    # re-runs safe_return_to defensively.
+    frontend = _frontend_url(state_payload.get("return_to") or DEFAULT_RETURN_PATH)
 
     try:
         tokens = _exchange_code_for_tokens(code, client_id, client_secret, redirect_uri)

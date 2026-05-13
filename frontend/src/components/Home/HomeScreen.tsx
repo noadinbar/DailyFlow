@@ -361,7 +361,7 @@ export default function HomeScreen(props: HomeScreenProps) {
         // access_token is required so the API can resolve Cognito sub (browser navigation cannot send Authorization).
         // Do not use a GET <form action="...?access_token=...">: with no fields, browsers drop the action query and
         // navigate to /auth/google/start? only. Assign the full URL instead.
-        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
+        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}&return_to=${encodeURIComponent('/calendar')}`;
         window.location.assign(startUrl);
       } catch (e) {
         const anyErr = e as any;

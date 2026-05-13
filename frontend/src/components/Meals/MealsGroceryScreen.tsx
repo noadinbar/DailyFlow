@@ -462,7 +462,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
           setIsConnectingGoogleCalendar(false);
           return;
         }
-        const startUrl = `${baseUrl}/auth/google/start?access_token=${encodeURIComponent(accessToken)}`;
+        const startUrl = `${baseUrl}/auth/google/start?access_token=${encodeURIComponent(accessToken)}&return_to=${encodeURIComponent('/meals')}`;
         window.location.assign(startUrl);
       } catch (err) {
         const anyErr = err as { message?: string };

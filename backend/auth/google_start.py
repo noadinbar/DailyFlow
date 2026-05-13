@@ -5,9 +5,17 @@ from urllib.parse import urlencode
 import boto3
 
 try:
-    from .google_oauth_state import build_oauth_state, parse_lambda_query_params
+    from .google_oauth_state import (
+        build_oauth_state,
+        parse_lambda_query_params,
+        safe_return_to,
+    )
 except ImportError:
-    from google_oauth_state import build_oauth_state, parse_lambda_query_params
+    from google_oauth_state import (
+        build_oauth_state,
+        parse_lambda_query_params,
+        safe_return_to,
+    )
 
 GOOGLE_AUTH_BASE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_CALENDAR_SCOPE = " ".join(
@@ -81,6 +89,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     qs = parse_lambda_query_params(event)
     access_token = (qs.get("access_token") or "").strip()
+    return_to = safe_return_to(qs.get("return_to"))
 
     user_id = _extract_cognito_sub(event)
     if not user_id and access_token:
@@ -92,7 +101,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             _frontend_calendar_url_with_query("?google_oauth_error=start_auth"),
         )
 
-    state = build_oauth_state(user_id, client_secret)
+    state = build_oauth_state(user_id, client_secret, return_to=return_to)
     query = urlencode(
         {
             "client_id": client_id,
