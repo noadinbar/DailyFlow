@@ -1270,8 +1270,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                     </span>
                     {item.duration_minutes} min
                   </div>
-                  <div className="df-workoutMeta">{item.intensity} · {item.location}</div>
-                  <div className="df-workoutMeta">{item.summary_short}</div>
+                  <div className="df-workoutMeta df-workoutLibraryMetaLine">{item.intensity} · {item.location}</div>
+                  <div className="df-workoutMeta df-workoutLibrarySummary">{item.summary_short}</div>
                   <button
                     type="button"
                     className="df-mealLibraryCalendarBtn df-workoutLibraryActionBtn"
