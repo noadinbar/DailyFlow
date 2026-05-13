@@ -15,7 +15,8 @@
 }
 
 html,
-body {
+body,
+#root {
   height: 100%;
 }
 
@@ -23,21 +24,29 @@ body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
     'Apple Color Emoji', 'Segoe UI Emoji';
-  background: var(--df-bg);
+  /* App is edge-to-edge: keep the base surface white so no gray border shows
+     around centered content panels (auth, onboarding). The main app screens
+     paint their own backgrounds on top. */
+  background: #fff;
   color: var(--df-text);
   /* Guard against accidental horizontal scroll from oversized children. */
   overflow-x: hidden;
 }
 
 .df-page {
-  /* Use 100dvh on supporting browsers so mobile URL bar collapses don't leave a
-     visible band of background; fall back to 100vh elsewhere. */
+  /* Full-bleed app shell — no outer padding so children can reach the
+     browser viewport edges. Children that span the full screen (auth wrap,
+     calendar page) set their own width/height; narrower content (onboarding,
+     loader) is centered horizontally on the white surface. Uses 100dvh on
+     supporting browsers so the mobile URL-bar collapse doesn't leave a
+     visible band of background. */
+  width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: 0;
   box-sizing: border-box;
 }
 
@@ -50,14 +59,23 @@ body {
   padding: 20px;
 }
 
-/* Onboarding questionnaire shell — definite height so different steps don't
-   resize the outer card. The current step's .df-question fills the middle
-   area and scrolls internally when its content is taller than the shell. */
+/* Onboarding questionnaire shell — sits as a centered content column on top
+   of the full-screen white app surface. No visible card chrome (the .df-card
+   base border/radius/background are overridden) so it doesn't look like a
+   floating document. Definite height keeps different steps from resizing the
+   outer footprint; the current step's .df-question fills the middle area
+   and scrolls internally when its content is taller than the shell. */
 .df-onboardingCard {
+  width: 100%;
+  max-width: 720px;
   height: min(86vh, 720px);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .df-onboardingCard > header {
@@ -257,20 +275,38 @@ body {
 }
 
 .df-authWrap {
+  /* Auth screen is full-bleed: the wrap occupies the entire viewport and the
+     centered content column lives inside. No gray outer gap. */
   width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
+  align-items: center;
   justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #fff;
 }
 
 .df-authCard {
-  max-width: 1100px;
-  /* Use a definite height (not min-height) so the card keeps the same outer
-     footprint when toggling between Log in (2 fields) and Sign up (4 fields).
-     The form area inside scrolls internally if needed on short viewports. */
-  height: min(86vh, 720px);
+  /* The auth "card" is just a stable-sized centered content column on top of
+     the full-screen white wrap — no border, no rounded corners, no separate
+     card surface. Wider than the form column so the slightly larger logo can
+     render at its full size; the form itself (.df-authForm) is still
+     max-width: 420px centered. Inner form scrolls internally on short
+     viewports so the outer footprint stays the same between Log in and
+     Sign up. */
+  width: 100%;
+  max-width: 560px;
+  max-height: 100%;
+  height: min(86vh, 640px);
   display: flex;
   flex-direction: column;
-  padding: 36px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   box-sizing: border-box;
 }
 
@@ -283,7 +319,9 @@ body {
 }
 
 .df-authLogo {
-  width: 420px;
+  /* Slightly larger than before (was 420px) — more visually present without
+     overwhelming the form. Aspect ratio preserved via height: auto. */
+  width: 500px;
   max-width: 100%;
   height: auto;
   display: block;
@@ -393,16 +431,19 @@ body {
 }
 
 .df-calendarPage {
-  width: min(1400px, 100%);
-  /* Fill the viewport (minus the .df-page 12px top/bottom padding) so the
-     app shell snaps to the visible browser area without leaving an extra
-     band of background below the card. Internal scroll areas (calendar
-     week grid, meals/workouts content, sidebar nav) handle overflow. */
-  height: calc(100vh - 24px);
-  height: calc(100dvh - 24px);
+  /* Full-bleed app shell: fills the entire browser viewport edge-to-edge.
+     No max-width / border / rounded corners — the sidebar touches the top,
+     bottom, and left edges; the main column touches the top, bottom, and
+     right edges. Internal scroll areas (calendar week grid, meals/workouts
+     content, sidebar nav) handle overflow so the page never gets double
+     scrollbars. */
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
   min-height: 0;
-  border: 1px solid var(--df-border);
-  border-radius: 16px;
+  border: 0;
+  border-radius: 0;
   background: #fff;
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -992,8 +1033,8 @@ body {
        fall back to a natural height with page-level scroll instead of trying
        to cram both into a single viewport. */
     height: auto;
-    min-height: calc(100vh - 24px);
-    min-height: calc(100dvh - 24px);
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   .df-calendarLeftNav {
