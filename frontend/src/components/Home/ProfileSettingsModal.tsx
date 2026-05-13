@@ -413,11 +413,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
             {activeTab === 'preferences' && (
               <div className="df-settingsSection df-preferencesSection">
-                <p className="df-settingsHint" style={{ marginTop: 0 }}>
-                  Your onboarding answers. Single-choice fields allow one option; multi-select fields
-                  allow several (see hints for exclusive options).
-                </p>
-
                 <div className="df-field">
                   <span className="df-fieldLabel">Age range</span>
                   <div className="df-prefOptionsWrap" role="radiogroup" aria-label="Age range">
@@ -530,9 +525,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
                 <div className="df-field">
                   <span className="df-fieldLabel">Activity considerations</span>
-                  <span className="df-settingsHint" style={{ display: 'block', marginBottom: 6 }}>
-                    &quot;None&quot; cannot combine with other options.
-                  </span>
                   <div
                     className="df-prefOptionsWrap"
                     role="group"
@@ -587,9 +579,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
                 <div className="df-field">
                   <span className="df-fieldLabel">Preferred workout times</span>
-                  <span className="df-settingsHint" style={{ display: 'block', marginBottom: 6 }}>
-                    &quot;Any time&quot; cannot combine with other times.
-                  </span>
                   <div
                     className="df-prefOptionsWrap"
                     role="group"
@@ -663,9 +652,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
 
                 <div className="df-field">
                   <span className="df-fieldLabel">Dietary preferences</span>
-                  <span className="df-settingsHint" style={{ display: 'block', marginBottom: 6 }}>
-                    &quot;No preferences&quot; cannot combine with other options.
-                  </span>
                   <div
                     className="df-prefOptionsWrap"
                     role="group"

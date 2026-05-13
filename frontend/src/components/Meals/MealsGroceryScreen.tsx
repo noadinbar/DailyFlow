@@ -1,8 +1,9 @@
 import React from 'react';
 import { jsPDF } from 'jspdf';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { useLocation, useNavigate } from 'react-router-dom';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
+import AppSidebar, { CalendarPlusIcon, ClockIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import { pastelTagStyle } from '../shared/pastelTags';
 
 type MealsGroceryScreenProps = {
   username?: string;
@@ -323,8 +324,7 @@ function groceryFromSavedMeals(savedMeals: SavedMealItem[]): GroceryItem[] {
 
 export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const { username, onLogout } = props;
-  const navigate = useNavigate();
-  const location = useLocation();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useSidebarCollapsed();
 
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
@@ -370,8 +370,6 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   );
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
-  const initials = (effectiveName || 'N').slice(0, 2).toUpperCase();
-  const isMealsRoute = location.pathname.startsWith('/meals');
 
   function getApiBaseUrl(): string {
     const rawBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -1075,55 +1073,17 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   }, []);
 
   return (
-    <section className="df-calendarPage df-workoutsPage" aria-label="DailyFlow meals and grocery screen">
-      <aside className="df-calendarLeftNav">
-        <div className="df-calendarBrand">DailyFlow</div>
-        <div className="df-calendarProfile">
-          <div className="df-calendarProfileAvatar">
-            {profileImageUrl ? (
-              <img key={profileImageUrl} src={profileImageUrl} alt="" className="df-calendarProfileAvatarImg" />
-            ) : (
-              initials
-            )}
-          </div>
-          <div>
-            <div className="df-calendarProfileName">{effectiveName}</div>
-            <div className="df-calendarProfileHint">Plan your week</div>
-          </div>
-          <button
-            type="button"
-            className="df-iconBtn"
-            onClick={() => setIsProfileSettingsOpen(true)}
-            aria-label="Open profile settings"
-            title="Settings"
-            style={{ marginInlineStart: 'auto' }}
-          >
-            ⚙️
-          </button>
-        </div>
-
-        <nav className="df-calendarMenu" aria-label="Main sections">
-          <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/calendar')}>
-            Calendar
-          </button>
-          <button
-            type="button"
-            className={`df-calendarMenuItem${isMealsRoute ? ' df-calendarMenuItemActive' : ''}`}
-            onClick={() => navigate('/meals')}
-          >
-            Meals & Grocery
-          </button>
-          <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/workouts')}>
-            Workouts
-          </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
-            Stress & Breaks
-          </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
-            Overview
-          </button>
-        </nav>
-      </aside>
+    <section
+      className={`df-calendarPage df-workoutsPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      aria-label="DailyFlow meals and grocery screen"
+    >
+      <AppSidebar
+        displayName={effectiveName}
+        profileImageUrl={profileImageUrl}
+        onOpenSettings={() => setIsProfileSettingsOpen(true)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
+      />
 
       <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
@@ -1285,18 +1245,25 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                             ? normalizedMealDietTags(meal.diet_tags)
                             : ['Balanced']
                           ).map((tag) => (
-                            <span key={`${meal.id}-${tag}`} className="df-mealLibraryDietPill">
+                            <span
+                              key={`${meal.id}-${tag}`}
+                              className="df-mealLibraryDietPill"
+                              style={pastelTagStyle(tag)}
+                            >
                               {tag}
                             </span>
                           ))}
                         </div>
                         <div className="df-mealLibraryMetaRow">
                           <span className="df-mealLibraryMetaItem" title="Prep time">
-                            <span aria-hidden>⏱</span> {meal.prep_time_minutes} min
+                            <span className="df-inlineIcon" aria-hidden>
+                              <ClockIcon size={14} />
+                            </span>
+                            {meal.prep_time_minutes} min
                           </span>
                           {meal.estimated_calories != null && meal.estimated_calories > 0 ? (
                             <span className="df-mealLibraryMetaItem" title="Estimated calories">
-                              <span aria-hidden>🔥</span> {meal.estimated_calories} kcal
+                              {meal.estimated_calories} kcal
                             </span>
                           ) : null}
                         </div>
@@ -1310,8 +1277,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         className="df-mealLibraryCalendarBtn"
                         onClick={() => openAddMealModal(meal)}
                       >
-                        <span aria-hidden className="df-mealLibraryCalendarBtnIcon">
-                          📅
+                        <span className="df-mealLibraryCalendarBtnIcon df-inlineIcon" aria-hidden>
+                          <CalendarPlusIcon size={16} />
                         </span>
                         Add to calendar
                       </button>
@@ -1605,20 +1572,32 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             </div>
             <div className="df-settingsContent df-mealDetailModalBody">
               <div className="df-mealDetailChips">
-                <span className="df-mealLibraryDietPill">{mealDetail.meal_type}</span>
+                <span
+                  className="df-mealLibraryDietPill"
+                  style={pastelTagStyle(mealDetail.meal_type)}
+                >
+                  {mealDetail.meal_type}
+                </span>
                 {normalizedMealDietTags(mealDetail.diet_tags).map((tag) => (
-                  <span key={`d-${tag}`} className="df-mealLibraryDietPill">
+                  <span
+                    key={`d-${tag}`}
+                    className="df-mealLibraryDietPill"
+                    style={pastelTagStyle(tag)}
+                  >
                     {tag}
                   </span>
                 ))}
               </div>
               <div className="df-mealLibraryMetaRow" style={{ marginTop: 8 }}>
                 <span className="df-mealLibraryMetaItem">
-                  <span aria-hidden>⏱</span> {mealDetail.prep_time_minutes} min prep
+                  <span className="df-inlineIcon" aria-hidden>
+                    <ClockIcon size={14} />
+                  </span>
+                  {mealDetail.prep_time_minutes} min prep
                 </span>
                 {mealDetail.estimated_calories != null && mealDetail.estimated_calories > 0 ? (
                   <span className="df-mealLibraryMetaItem">
-                    <span aria-hidden>🔥</span> {mealDetail.estimated_calories} kcal
+                    {mealDetail.estimated_calories} kcal
                   </span>
                 ) : null}
               </div>

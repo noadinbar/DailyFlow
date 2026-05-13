@@ -1,7 +1,7 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { useLocation, useNavigate } from 'react-router-dom';
 import ProfileSettingsModal from './ProfileSettingsModal';
+import AppSidebar, { useSidebarCollapsed } from '../Sidebar/AppSidebar';
 
 type HomeScreenProps = {
   username?: string;
@@ -107,8 +107,6 @@ function isBusySyncFresh(lastBusySyncAt: string | undefined): boolean {
 
 export default function HomeScreen(props: HomeScreenProps) {
   const { username, onLogout } = props;
-  const navigate = useNavigate();
-  const location = useLocation();
   const [errorMessage, setErrorMessage] = React.useState<string>('');
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [displayName, setDisplayName] = React.useState<string>('');
@@ -882,68 +880,20 @@ export default function HomeScreen(props: HomeScreenProps) {
   }, [viewMode, selectedDate, weekStartDate, miniCalendarMonthDate]);
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
-  const isCalendarRoute = location.pathname.startsWith('/calendar');
-  const isMealsRoute = location.pathname.startsWith('/meals');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useSidebarCollapsed();
 
   return (
-    <section className="df-calendarPage" aria-label="DailyFlow calendar screen">
-      <aside className="df-calendarLeftNav">
-        <div className="df-calendarBrand">DailyFlow</div>
-        <div className="df-calendarProfile">
-          <div className="df-calendarProfileAvatar">
-            {profileImageUrl ? (
-              <img
-                key={profileImageUrl}
-                src={profileImageUrl}
-                alt=""
-                className="df-calendarProfileAvatarImg"
-              />
-            ) : (
-              (effectiveName || 'N').slice(0, 2).toUpperCase()
-            )}
-          </div>
-          <div>
-            <div className="df-calendarProfileName">{effectiveName}</div>
-            <div className="df-calendarProfileHint">Plan your week</div>
-          </div>
-          <button
-            type="button"
-            className="df-iconBtn"
-            onClick={() => setIsProfileSettingsOpen(true)}
-            aria-label="Open profile settings"
-            title="Settings"
-            style={{ marginInlineStart: 'auto' }}
-          >
-            ⚙️
-          </button>
-        </div>
-
-        <nav className="df-calendarMenu" aria-label="Main sections">
-          <button
-            type="button"
-            className={`df-calendarMenuItem${isCalendarRoute ? ' df-calendarMenuItemActive' : ''}`}
-            onClick={() => navigate('/calendar')}
-          >
-            Calendar
-          </button>
-          <button
-            type="button"
-            className={`df-calendarMenuItem${isMealsRoute ? ' df-calendarMenuItemActive' : ''}`}
-            onClick={() => navigate('/meals')}
-          >
-            Meals & Grocery
-          </button>
-          <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/workouts')}>
-            Workouts
-          </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
-            Stress & Breaks
-          </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
-            Overview
-          </button>
-        </nav>
-      </aside>
+    <section
+      className={`df-calendarPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      aria-label="DailyFlow calendar screen"
+    >
+      <AppSidebar
+        displayName={effectiveName}
+        profileImageUrl={profileImageUrl}
+        onOpenSettings={() => setIsProfileSettingsOpen(true)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
+      />
 
       <div className="df-calendarMain">
         <header className="df-calendarTopbar">

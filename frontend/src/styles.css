@@ -345,6 +345,11 @@ body {
   display: grid;
   grid-template-columns: 220px 1fr;
   overflow: hidden;
+  transition: grid-template-columns 180ms ease;
+}
+
+.df-calendarPage.df-calendarPageNavCollapsed {
+  grid-template-columns: 72px 1fr;
 }
 
 .df-calendarLeftNav {
@@ -411,16 +416,144 @@ body {
   padding: 10px 12px;
   font-weight: 600;
   color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.df-calendarMenuItem:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.df-calendarMenuItem:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
 }
 
 .df-calendarMenuItem:disabled {
-  opacity: 0.9;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.df-calendarMenuItemIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: currentColor;
+}
+
+.df-calendarMenuItemLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .df-calendarMenuItemActive {
   background: #eef2ff;
-  border-color: #dbeafe;
+  border-color: #c7d2fe;
   color: #1d4ed8;
+}
+
+.df-calendarMenuItemActive:hover:not(:disabled) {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
+}
+
+/* Sidebar hamburger toggle */
+.df-sidebarToggle {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: #374151;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.df-sidebarToggle:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.df-sidebarToggle:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.df-sidebarToggleIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+}
+
+.df-sidebarToggleLabel {
+  font-weight: 600;
+  font-size: 13px;
+  color: #6b7280;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.df-calendarBrandLabel {
+  display: inline-block;
+}
+
+.df-calendarProfileInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.df-calendarProfileSettings {
+  margin-inline-start: auto;
+}
+
+/* Collapsed-sidebar variants */
+.df-calendarLeftNavCollapsed {
+  padding-inline: 8px;
+}
+
+.df-calendarLeftNavCollapsed .df-calendarBrandLabel,
+.df-calendarLeftNavCollapsed .df-calendarProfileInfo,
+.df-calendarLeftNavCollapsed .df-sidebarToggleLabel,
+.df-calendarLeftNavCollapsed .df-calendarMenuItemLabel {
+  display: none;
+}
+
+.df-calendarLeftNavCollapsed .df-calendarBrand {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.df-calendarLeftNavCollapsed .df-calendarProfile {
+  justify-content: center;
+}
+
+.df-calendarLeftNavCollapsed .df-calendarProfileSettings {
+  display: none;
+}
+
+.df-calendarLeftNavCollapsed .df-sidebarToggle,
+.df-calendarLeftNavCollapsed .df-calendarMenuItem {
+  justify-content: center;
+  padding-inline: 0;
 }
 
 .df-calendarMain {
@@ -806,11 +939,14 @@ body {
 
 .df-modalPanel {
   width: min(740px, 100%);
+  max-height: min(86vh, 760px);
   background: #fff;
   border: 1px solid var(--df-border);
   border-radius: 14px;
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .df-addWeeklyModal {
@@ -834,7 +970,10 @@ body {
 
 .df-settingsLayout {
   display: flex;
-  min-height: 320px;
+  flex: 1 1 auto;
+  min-height: 460px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .df-settingsMenu {
@@ -867,6 +1006,7 @@ body {
   flex: 1;
   padding: 14px;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .df-settingsSection {
@@ -1579,5 +1719,30 @@ select.df-input {
 
 .df-sectionChevronOpen {
   transform: rotate(90deg);
+}
+
+/* Small reusable inline icon, sized to flow with text. */
+.df-inlineIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -2px;
+  color: currentColor;
+  opacity: 0.85;
+  margin-inline-end: 4px;
+}
+
+/* Pastel tag chip. Background/color are supplied inline via pastelTagStyle() */
+/* so each tag value gets a stable, distinct pastel. The :where() selectors    */
+/* below intentionally lower specificity so inline style wins over the         */
+/* default background defined on existing pill classes.                        */
+.df-pastelTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 

@@ -1,7 +1,8 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { useLocation, useNavigate } from 'react-router-dom';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
+import AppSidebar, { ClockIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import { pastelTagStyle } from '../shared/pastelTags';
 
 type WorkoutsScreenProps = {
   username?: string;
@@ -176,8 +177,7 @@ function sanitizeHHmmTyping(raw: string): string {
 
 export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const { username, onLogout } = props;
-  const navigate = useNavigate();
-  const location = useLocation();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useSidebarCollapsed();
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
   const [displayName, setDisplayName] = React.useState<string>('');
@@ -208,9 +208,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>({});
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
-  const initials = (effectiveName || 'N').slice(0, 2).toUpperCase();
-  const isWorkoutsRoute = location.pathname.startsWith('/workouts');
-  const isMealsRoute = location.pathname.startsWith('/meals');
   const weekCards = React.useMemo(() => buildWeekCards(weekStartDate), [weekStartDate]);
   const addFromLibraryDayOptions = React.useMemo(
     () => (addFromLibraryWorkout ? buildAddPopupDayOptions(new Date()) : []),
@@ -947,64 +944,17 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }, [refreshGoogleCalendarConnectionState]);
 
   return (
-    <section className="df-calendarPage df-workoutsPage" aria-label="DailyFlow workouts screen">
-      <aside className="df-calendarLeftNav">
-        <div className="df-calendarBrand">DailyFlow</div>
-        <div className="df-calendarProfile">
-          <div className="df-calendarProfileAvatar">
-            {profileImageUrl ? (
-              <img
-                key={profileImageUrl}
-                src={profileImageUrl}
-                alt=""
-                className="df-calendarProfileAvatarImg"
-              />
-            ) : (
-              initials
-            )}
-          </div>
-          <div>
-            <div className="df-calendarProfileName">{effectiveName}</div>
-            <div className="df-calendarProfileHint">Plan your week</div>
-          </div>
-          <button
-            type="button"
-            className="df-iconBtn"
-            onClick={() => setIsProfileSettingsOpen(true)}
-            aria-label="Open profile settings"
-            title="Settings"
-            style={{ marginInlineStart: 'auto' }}
-          >
-            ⚙️
-          </button>
-        </div>
-
-        <nav className="df-calendarMenu" aria-label="Main sections">
-          <button type="button" className="df-calendarMenuItem" onClick={() => navigate('/calendar')}>
-            Calendar
-          </button>
-          <button
-            type="button"
-            className={`df-calendarMenuItem${isMealsRoute ? ' df-calendarMenuItemActive' : ''}`}
-            onClick={() => navigate('/meals')}
-          >
-            Meals & Grocery
-          </button>
-          <button
-            type="button"
-            className={`df-calendarMenuItem${isWorkoutsRoute ? ' df-calendarMenuItemActive' : ''}`}
-            onClick={() => navigate('/workouts')}
-          >
-            Workouts
-          </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
-            Stress & Breaks
-          </button>
-          <button type="button" className="df-calendarMenuItem" disabled>
-            Overview
-          </button>
-        </nav>
-      </aside>
+    <section
+      className={`df-calendarPage df-workoutsPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      aria-label="DailyFlow workouts screen"
+    >
+      <AppSidebar
+        displayName={effectiveName}
+        profileImageUrl={profileImageUrl}
+        onOpenSettings={() => setIsProfileSettingsOpen(true)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
+      />
 
       <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
@@ -1126,16 +1076,25 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                       <div className="df-workoutRestDay">{isGeneratingPlan ? 'Loading...' : 'Rest day'}</div>
                     ) : (
                       <>
-                        <div className="df-workoutTypePill">
+                        <div
+                          className="df-workoutTypePill"
+                          style={pastelTagStyle(libraryWorkout?.workout_type || 'Workout')}
+                        >
                           {libraryWorkout?.workout_type || 'Workout'}
                         </div>
-                        <div className="df-workoutMeta">
+                        <div className="df-workoutMeta df-workoutMetaTime">
+                          <span className="df-inlineIcon" aria-hidden>
+                            <ClockIcon size={14} />
+                          </span>
                           {libraryWorkout ? `${libraryWorkout.duration_minutes} min` : 'Duration'}
                         </div>
                         <div className="df-workoutMeta">
                           {libraryWorkout?.intensity || item.recommended_time_label}
                         </div>
                         <div className="df-workoutSlot">
+                          <span className="df-inlineIcon" aria-hidden>
+                            <ClockIcon size={14} />
+                          </span>
                           {item.recommended_day} {item.recommended_start_time}-{item.recommended_end_time}
                         </div>
                         <div className="df-weeklyPlanControls">
@@ -1304,8 +1263,13 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                       +
                     </button>
                   </div>
-                  <div className="df-workoutTypePill">{item.workout_type}</div>
-                  <div className="df-workoutMeta">
+                  <div className="df-workoutTypePill" style={pastelTagStyle(item.workout_type)}>
+                    {item.workout_type}
+                  </div>
+                  <div className="df-workoutMeta df-workoutMetaTime">
+                    <span className="df-inlineIcon" aria-hidden>
+                      <ClockIcon size={14} />
+                    </span>
                     {item.duration_minutes} min
                   </div>
                   <div className="df-workoutMeta">{item.intensity} · {item.location}</div>
@@ -1371,8 +1335,16 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             </div>
 
             <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
-              <div className="df-workoutTypePill">{selectedLibraryWorkout.workout_type}</div>
-              <div className="df-workoutMeta">
+              <div
+                className="df-workoutTypePill"
+                style={pastelTagStyle(selectedLibraryWorkout.workout_type)}
+              >
+                {selectedLibraryWorkout.workout_type}
+              </div>
+              <div className="df-workoutMeta df-workoutMetaTime">
+                <span className="df-inlineIcon" aria-hidden>
+                  <ClockIcon size={14} />
+                </span>
                 {selectedLibraryWorkout.duration_minutes} min · {selectedLibraryWorkout.intensity} ·{' '}
                 {selectedLibraryWorkout.location}
               </div>
@@ -1580,8 +1552,16 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         </button>
                       </div>
                     </div>
-                    <div className="df-workoutTypePill">{planWorkout?.workout_type || 'Workout'}</div>
-                    <div className="df-workoutMeta">
+                    <div
+                      className="df-workoutTypePill"
+                      style={pastelTagStyle(planWorkout?.workout_type || 'Workout')}
+                    >
+                      {planWorkout?.workout_type || 'Workout'}
+                    </div>
+                    <div className="df-workoutMeta df-workoutMetaTime">
+                      <span className="df-inlineIcon" aria-hidden>
+                        <ClockIcon size={14} />
+                      </span>
                       {(planWorkout ? `${planWorkout.duration_minutes} min` : 'Duration')} ·{' '}
                       {planWorkout?.intensity || planItem.recommended_time_label}
                     </div>
