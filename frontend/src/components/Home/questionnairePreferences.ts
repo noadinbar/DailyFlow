@@ -11,7 +11,6 @@ export type QuestionnaireForm = {
   preferred_workout_types: string[];
   dietary_preferences: string[];
   break_meditation_interest: string;
-  auto_schedule_to_calendar: string;
 };
 
 export const EMPTY_QUESTIONNAIRE: QuestionnaireForm = {
@@ -25,7 +24,6 @@ export const EMPTY_QUESTIONNAIRE: QuestionnaireForm = {
   preferred_workout_types: [],
   dietary_preferences: [],
   break_meditation_interest: '',
-  auto_schedule_to_calendar: '',
 };
 
 export const AGE_RANGE_OPTIONS: { id: string; label: string }[] = [
@@ -104,12 +102,6 @@ export const BREAK_MEDITATION_OPTIONS: { id: string; label: string }[] = [
   { id: 'not_interested', label: 'Not interested' },
 ];
 
-export const AUTO_SCHEDULE_OPTIONS: { id: string; label: string }[] = [
-  { id: 'yes', label: 'Yes' },
-  { id: 'no', label: 'No' },
-  { id: 'ask_me_first', label: 'Ask me first' },
-];
-
 function asStringArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string');
   if (typeof v === 'string' && v) return [v];
@@ -137,8 +129,6 @@ export function questionnaireFromApi(raw: unknown): QuestionnaireForm {
     dietary_preferences: asStringArray(o.dietary_preferences),
     break_meditation_interest:
       typeof o.break_meditation_interest === 'string' ? o.break_meditation_interest : '',
-    auto_schedule_to_calendar:
-      typeof o.auto_schedule_to_calendar === 'string' ? o.auto_schedule_to_calendar : '',
   };
 }
 
@@ -188,7 +178,6 @@ export function buildQuestionnairePatchPayload(form: QuestionnaireForm): Record<
   }
   if (form.dietary_preferences.length > 0) out.dietary_preferences = form.dietary_preferences;
   if (form.break_meditation_interest) out.break_meditation_interest = form.break_meditation_interest;
-  if (form.auto_schedule_to_calendar) out.auto_schedule_to_calendar = form.auto_schedule_to_calendar;
   return out;
 }
 
@@ -203,6 +192,5 @@ export function validateQuestionnaireFormComplete(form: QuestionnaireForm): bool
   if (form.preferred_workout_types.length === 0) return false;
   if (form.dietary_preferences.length === 0) return false;
   if (!form.break_meditation_interest) return false;
-  if (!form.auto_schedule_to_calendar) return false;
   return true;
 }

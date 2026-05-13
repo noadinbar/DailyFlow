@@ -65,9 +65,7 @@ type BreakMeditationInterest =
   | 'not_interested'
   | '';
 
-type AutoScheduleToCalendar = 'yes' | 'no' | 'ask_me_first' | '';
-
-const TOTAL_STEPS = 11;
+const TOTAL_STEPS = 10;
 
 function formatStepText(stepIndex1Based: number, totalSteps: number) {
   return `Step ${stepIndex1Based} of ${totalSteps}`;
@@ -114,7 +112,6 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
   const [preferredWorkoutTypes, setPreferredWorkoutTypes] = useState<PreferredWorkoutType[]>([]);
   const [dietaryPreferences, setDietaryPreferences] = useState<DietaryPreference[]>([]);
   const [breakMeditationInterest, setBreakMeditationInterest] = useState<BreakMeditationInterest>('');
-  const [autoScheduleToCalendar, setAutoScheduleToCalendar] = useState<AutoScheduleToCalendar>('');
 
   const stepIndex1Based = stepIndex + 1;
 
@@ -130,12 +127,10 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       preferred_workout_types: preferredWorkoutTypes,
       dietary_preferences: dietaryPreferences,
       break_meditation_interest: breakMeditationInterest,
-      auto_schedule_to_calendar: autoScheduleToCalendar,
     }),
     [
       activityConsiderations,
       ageRange,
-      autoScheduleToCalendar,
       breakMeditationInterest,
       dietaryPreferences,
       fitnessLevel,
@@ -161,12 +156,10 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
     if (stepIndex === 7) return preferredWorkoutTypes.length === 0;
     if (stepIndex === 8) return dietaryPreferences.length === 0;
     if (stepIndex === 9) return breakMeditationInterest === '';
-    if (stepIndex === 10) return autoScheduleToCalendar === '';
     return true;
   }, [
     activityConsiderations.length,
     ageRange,
-    autoScheduleToCalendar,
     breakMeditationInterest,
     dietaryPreferences.length,
     fitnessLevel,
@@ -284,7 +277,6 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
           preferred_workout_types: collectedData.preferred_workout_types,
           dietary_preferences: collectedData.dietary_preferences,
           break_meditation_interest: collectedData.break_meditation_interest,
-          auto_schedule_to_calendar: collectedData.auto_schedule_to_calendar,
         };
 
         for (const key of Object.keys(requestBody)) {
@@ -742,40 +734,6 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>
                   {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {stepIndex === 10 && (
-        <div className="df-question" role="group" aria-label="Auto schedule to calendar question">
-          <div className="df-questionLabel">11. Add workouts to your calendar automatically?</div>
-          <div className="df-optionsGrid">
-            {(
-              [
-                { id: 'yes' as const, title: 'Yes', hint: 'Schedule automatically' },
-                { id: 'no' as const, title: 'No', hint: 'Do not add to calendar' },
-                { id: 'ask_me_first' as const, title: 'Ask me first', hint: 'Confirm before scheduling' },
-              ] as const
-            ).map((option) => {
-              const active = autoScheduleToCalendar === option.id;
-              return (
-                <label
-                  key={option.id}
-                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="autoScheduleToCalendar"
-                    value={option.id}
-                    checked={active}
-                    onChange={() => setAutoScheduleToCalendar(option.id)}
-                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
-                  />
-                  <div className="df-optionBtnTitle">{option.title}</div>
-                  <div className="df-optionBtnHint">{option.hint}</div>
                 </label>
               );
             })}

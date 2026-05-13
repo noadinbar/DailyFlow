@@ -66,7 +66,6 @@ _ALLOWED_BREAK_MEDITATION: Set[str] = {
     "both",
     "not_interested",
 }
-_ALLOWED_AUTO_SCHEDULE: Set[str] = {"yes", "no", "ask_me_first"}
 
 QUESTIONNAIRE_KEYS: Set[str] = {
     "age_range",
@@ -79,7 +78,6 @@ QUESTIONNAIRE_KEYS: Set[str] = {
     "preferred_workout_types",
     "dietary_preferences",
     "break_meditation_interest",
-    "auto_schedule_to_calendar",
 }
 
 
@@ -134,7 +132,6 @@ def validate_questionnaire_payload(payload: Dict[str, Any]) -> Optional[str]:
         "age_range": ("age_range", _ALLOWED_AGE_RANGE),
         "fitness_level": ("fitness_level", _ALLOWED_FITNESS_LEVEL),
         "break_meditation_interest": ("break_meditation_interest", _ALLOWED_BREAK_MEDITATION),
-        "auto_schedule_to_calendar": ("auto_schedule_to_calendar", _ALLOWED_AUTO_SCHEDULE),
     }
     for key, (label, allowed) in str_fields.items():
         if key not in payload:

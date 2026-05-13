@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ACTIVITY_OPTIONS,
   AGE_RANGE_OPTIONS,
-  AUTO_SCHEDULE_OPTIONS,
   BREAK_MEDITATION_OPTIONS,
   DIETARY_OPTIONS,
   type QuestionnaireForm,
@@ -708,38 +707,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                             checked={active}
                             onChange={() =>
                               setQForm((f) => ({ ...f, break_meditation_interest: o.id }))
-                            }
-                            disabled={isSavingPreferences}
-                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
-                          />
-                          <div className="df-optionBtnTitle">{o.label}</div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="df-field">
-                  <span className="df-fieldLabel">Auto-schedule to calendar</span>
-                  <div
-                    className="df-prefOptionsWrap"
-                    role="radiogroup"
-                    aria-label="Auto-schedule to calendar"
-                  >
-                    {AUTO_SCHEDULE_OPTIONS.map((o) => {
-                      const active = qForm.auto_schedule_to_calendar === o.id;
-                      return (
-                        <label
-                          key={o.id}
-                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
-                        >
-                          <input
-                            type="radio"
-                            name="settings-q-auto-schedule"
-                            value={o.id}
-                            checked={active}
-                            onChange={() =>
-                              setQForm((f) => ({ ...f, auto_schedule_to_calendar: o.id }))
                             }
                             disabled={isSavingPreferences}
                             style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}

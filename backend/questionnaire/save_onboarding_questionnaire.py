@@ -128,7 +128,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "preferred_workout_types": "preferred_workout_types",
         "dietary_preferences": "dietary_preferences",
         "break_meditation_interest": "break_meditation_interest",
-        "auto_schedule_to_calendar": "auto_schedule_to_calendar",
     }
 
     set_clauses = []
