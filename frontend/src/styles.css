@@ -1,14 +1,16 @@
 :root {
-  /* Soft "presentation" dusty-blush background, used on every visible app surface
-     except cards/panels (which stay white for readability). */
-  --df-bg: #fdeee9;
-  /* Slightly lighter blush for nested nav/side panels so they harmonize with --df-bg. */
-  --df-bg-soft: #fef6f3;
+  --df-bg: #f7f7f8;
   --df-card: #ffffff;
   --df-text: #111827;
   --df-muted: #6b7280;
   --df-border: #e5e7eb;
-  --df-primary: #2563eb;
+  /* Accent: deep indigo (darker than the previous bright blue, harmonizes with brand text). */
+  --df-primary: #3730a3;
+  --df-primary-strong: #2e2880;
+  --df-primary-soft: #eceefb;
+  --df-primary-soft-hover: #dde0f7;
+  --df-primary-tint: #d3d7f3;
+  --df-primary-edge: #c0c5ea;
   --df-brand-text: #2a2566;
 }
 
@@ -73,9 +75,9 @@ body {
 .df-progressBar {
   height: 10px;
   border-radius: 999px;
-  background: #eef2ff;
+  background: var(--df-primary-soft);
   overflow: hidden;
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--df-primary-edge);
 }
 
 .df-progressBarFill {
@@ -85,6 +87,7 @@ body {
   width: 0%;
   transition: width 200ms ease;
 }
+
 
 .df-question {
   margin-top: 8px;
@@ -121,8 +124,8 @@ body {
 }
 
 .df-btnPrimary {
-  border-color: rgba(37, 99, 235, 0.3);
-  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(55, 48, 163, 0.3);
+  background: rgba(55, 48, 163, 0.08);
   color: var(--df-primary);
 }
 
@@ -143,8 +146,8 @@ body {
 }
 
 .df-optionBtnActive {
-  border-color: rgba(37, 99, 235, 0.5);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  border-color: rgba(55, 48, 163, 0.5);
+  box-shadow: 0 0 0 3px rgba(55, 48, 163, 0.15);
 }
 
 .df-optionBtnTitle {
@@ -224,12 +227,6 @@ body {
   display: flex;
   flex-direction: column;
   padding: 36px;
-  /* Drop the white card backdrop so the page-wide blush is the actual background.
-     Inputs/toggle buttons stay white so contrast is preserved. */
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 .df-authHeader {
@@ -241,28 +238,11 @@ body {
 }
 
 .df-authLogo {
-  width: 460px;
+  width: 420px;
   max-width: 100%;
   height: auto;
   display: block;
   margin: 0 auto 8px;
-  /* The source PNG has a white backdrop baked in. mix-blend-mode multiplies the
-     image with the pink page so white pixels become the page color and the swirl
-     keeps its hues — no hard rectangle remains. The radial mask softens the
-     outermost edges even further for a clean fade. */
-  mix-blend-mode: multiply;
-  -webkit-mask-image: radial-gradient(
-    ellipse 78% 82% at center,
-    #000 55%,
-    rgba(0, 0, 0, 0.6) 80%,
-    rgba(0, 0, 0, 0) 100%
-  );
-  mask-image: radial-gradient(
-    ellipse 78% 82% at center,
-    #000 55%,
-    rgba(0, 0, 0, 0.6) 80%,
-    rgba(0, 0, 0, 0) 100%
-  );
 }
 
 .df-authTitle {
@@ -300,9 +280,9 @@ body {
 }
 
 .df-authToggleBtnActive {
-  border-color: rgba(37, 99, 235, 0.55);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(55, 48, 163, 0.55);
+  box-shadow: 0 0 0 3px rgba(55, 48, 163, 0.15);
+  background: rgba(55, 48, 163, 0.08);
   color: var(--df-primary);
 }
 
@@ -370,9 +350,7 @@ body {
   min-height: 86vh;
   border: 1px solid var(--df-border);
   border-radius: 16px;
-  /* Use the page-wide blush so the screen visually reads pink across the whole
-     content area. Inner cards/panels keep their own backgrounds. */
-  background: var(--df-bg);
+  background: #fff;
   display: grid;
   grid-template-columns: 220px 1fr;
   overflow: hidden;
@@ -386,38 +364,39 @@ body {
 .df-calendarLeftNav {
   border-right: 1px solid var(--df-border);
   padding: 18px 14px;
-  background: var(--df-bg-soft);
+  background: #fafafb;
 }
 
 .df-calendarBrand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 22px;
+  gap: 8px;
+  font-size: 24px;
   font-weight: 800;
   color: var(--df-brand-text);
+  /* Generous line-height so descenders (e.g. "y" in DailyFlow) are never clipped. */
+  line-height: 1.25;
+  padding-block: 4px;
   margin-bottom: 14px;
   min-width: 0;
-  line-height: 1;
 }
 
 .df-calendarBrandLogo {
   flex: none;
-  /* Sized to match the wordmark presence (line-height ~1 of 22px font = ~22px cap height,
-     but the emblem includes generous transparent padding so it visually balances at ~44px). */
-  width: 44px;
-  height: 44px;
+  /* Sized so the emblem reads about as tall as the wordmark itself. */
+  width: 64px;
+  height: 64px;
   object-fit: contain;
   border-radius: 10px;
   background: transparent;
-  /* Use multiply so any near-white halo in the PNG blends into the soft blush sidebar. */
+  /* Lets any near-white halo in the PNG blend cleanly with the sidebar background. */
   mix-blend-mode: multiply;
 }
 
 .df-calendarLeftNavCollapsed .df-calendarBrandLogo {
-  /* In collapsed mode the wordmark is hidden; let the emblem fill the row a bit more. */
-  width: 40px;
-  height: 40px;
+  /* Collapsed sidebar is 72px wide with 8px padding — keep the logo just under that. */
+  width: 52px;
+  height: 52px;
 }
 
 .df-calendarProfile {
@@ -485,7 +464,7 @@ body {
 }
 
 .df-calendarMenuItem:focus-visible {
-  outline: 2px solid #93c5fd;
+  outline: 2px solid #a5a8e5;
   outline-offset: 2px;
 }
 
@@ -513,14 +492,14 @@ body {
 }
 
 .df-calendarMenuItemActive {
-  background: #eef2ff;
-  border-color: #c7d2fe;
-  color: #1d4ed8;
+  background: var(--df-primary-soft);
+  border-color: var(--df-primary-edge);
+  color: var(--df-primary-strong);
 }
 
 .df-calendarMenuItemActive:hover:not(:disabled) {
-  background: #e0e7ff;
-  border-color: #c7d2fe;
+  background: var(--df-primary-soft-hover);
+  border-color: var(--df-primary-edge);
 }
 
 /* Sidebar hamburger toggle */
@@ -546,7 +525,7 @@ body {
 }
 
 .df-sidebarToggle:focus-visible {
-  outline: 2px solid #93c5fd;
+  outline: 2px solid #a5a8e5;
   outline-offset: 2px;
 }
 
@@ -648,8 +627,8 @@ body {
 }
 
 .df-calendarViewBtnActive {
-  background: #eef2ff;
-  color: #1d4ed8;
+  background: var(--df-primary-soft);
+  color: var(--df-primary-strong);
 }
 
 .df-calendarBody {
@@ -682,8 +661,8 @@ body {
 }
 
 .df-weekHeaderDayToday {
-  color: #1d4ed8 !important;
-  background: #eff6ff;
+  color: var(--df-primary-strong) !important;
+  background: var(--df-primary-soft);
   border-radius: 8px;
 }
 
@@ -761,8 +740,8 @@ body {
 }
 
 .df-monthCellToday {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 1px #bfdbfe inset;
+  border-color: #a5a8e5;
+  box-shadow: 0 0 0 1px var(--df-primary-edge) inset;
 }
 
 .df-weekColumn {
@@ -820,7 +799,7 @@ body {
 
 .df-calendarSidebar {
   padding: 14px 12px;
-  background: var(--df-bg-soft);
+  background: #fbfbfc;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -881,9 +860,9 @@ body {
 }
 
 .df-miniCalendarDayActive {
-  background: #2563eb;
+  background: var(--df-primary);
   color: #fff;
-  border-color: #1d4ed8;
+  border-color: var(--df-primary-strong);
 }
 
 .df-miniCalendarDayMuted {
@@ -1054,9 +1033,9 @@ body {
 }
 
 .df-settingsMenuItemActive {
-  background: #eef2ff;
-  border-color: #dbeafe;
-  color: #1d4ed8;
+  background: var(--df-primary-soft);
+  border-color: var(--df-primary-edge);
+  color: var(--df-primary-strong);
 }
 
 .df-settingsContent {
@@ -1229,9 +1208,9 @@ select.df-input {
 }
 
 .df-workoutSlot {
-  border: 1px solid #dbeafe;
-  background: #eff6ff;
-  color: #2563eb;
+  border: 1px solid var(--df-primary-edge);
+  background: var(--df-primary-soft);
+  color: var(--df-primary);
   border-radius: 8px;
   padding: 6px 8px;
   font-size: 12px;
@@ -1239,8 +1218,8 @@ select.df-input {
 
 .df-workoutAddBtn {
   appearance: none;
-  border: 1px solid #bfdbfe;
-  background: #2563eb;
+  border: 1px solid var(--df-primary-edge);
+  background: var(--df-primary);
   color: #fff;
   padding: 6px 10px;
   border-radius: 999px;
@@ -1279,9 +1258,9 @@ select.df-input {
 
 .df-weeklyPlanControlAdd {
   border-radius: 999px;
-  border-color: #bfdbfe;
-  color: #2563eb;
-  background: #eff6ff;
+  border-color: var(--df-primary-edge);
+  color: var(--df-primary);
+  background: var(--df-primary-soft);
 }
 
 .df-weeklyPlanControlRemove {
@@ -1338,9 +1317,9 @@ select.df-input {
 }
 
 .df-workoutFilterChipActive {
-  background: #eef2ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: var(--df-primary-soft);
+  border-color: var(--df-primary-edge);
+  color: var(--df-primary-strong);
 }
 
 .df-workoutLibraryGrid {
@@ -1367,8 +1346,8 @@ select.df-input {
 }
 
 .df-workoutLibraryCardClickable:hover {
-  border-color: #dbeafe;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+  border-color: var(--df-primary-edge);
+  box-shadow: 0 0 0 2px rgba(55, 48, 163, 0.08);
 }
 
 .df-workoutLibraryCardTop {
@@ -1387,8 +1366,8 @@ select.df-input {
 .df-workoutLibraryAdd {
   appearance: none;
   border: 0;
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--df-primary-soft);
+  color: var(--df-primary);
   width: 26px;
   height: 26px;
   border-radius: 999px;
@@ -1493,8 +1472,8 @@ select.df-input {
 .df-workoutsBasicSpinner {
   width: 44px;
   height: 44px;
-  border: 5px solid #c7d2fe;
-  border-top: 5px solid #1d4ed8;
+  border: 5px solid var(--df-primary-edge);
+  border-top: 5px solid var(--df-primary-strong);
   border-radius: 50%;
   animation: df-workouts-basic-spin 0.9s linear infinite;
   flex: 0 0 auto;
@@ -1586,17 +1565,56 @@ select.df-input {
   text-align: start;
 }
 
+/* Shared favorite-heart button used by Meals and Workouts.
+   The icon inside is a single SVG that only swaps its fill on toggle, so the
+   button's footprint is identical in both states. */
+.df-favoriteHeartBtn {
+  flex-shrink: 0;
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.df-favoriteHeartBtn:hover {
+  background: #f1f5f9;
+}
+
+.df-favoriteHeartBtn:focus-visible {
+  outline: 2px solid #a5a8e5;
+  outline-offset: 2px;
+}
+
+.df-favoriteHeartBtnActive {
+  color: #be185d;
+}
+
+/* Backwards-compat aliases for any places still using the old class names. */
 .df-mealLibraryCardHeart {
   flex-shrink: 0;
   appearance: none;
   border: none;
   background: transparent;
-  font-size: 1.25rem;
-  line-height: 1;
   cursor: pointer;
   color: #64748b;
-  padding: 2px 4px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .df-mealLibraryCardHeart:hover {
@@ -1676,15 +1694,15 @@ select.df-input {
   padding: 10px 12px;
   border: none;
   border-radius: 12px;
-  background: #e8f0fe;
-  color: #1e3a5f;
+  background: var(--df-primary-soft);
+  color: var(--df-primary-strong);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
 }
 
 .df-mealLibraryCalendarBtn:hover {
-  background: #d7e6fd;
+  background: var(--df-primary-soft-hover);
 }
 
 .df-mealLibraryCalendarBtnIcon {

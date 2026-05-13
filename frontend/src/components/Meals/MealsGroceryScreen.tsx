@@ -2,7 +2,13 @@ import React from 'react';
 import { jsPDF } from 'jspdf';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
-import AppSidebar, { CalendarPlusIcon, ClockIcon, FireIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import AppSidebar, {
+  CalendarPlusIcon,
+  ClockIcon,
+  FireIcon,
+  HeartIcon,
+  useSidebarCollapsed,
+} from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
 
 type MealsGroceryScreenProps = {
@@ -1221,11 +1227,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         <h3 className="df-mealLibraryCardTitle">{meal.title}</h3>
                         <button
                           type="button"
-                          className={`df-mealLibraryCardHeart${favoriteMealIds.includes(meal.id) ? ' df-mealLibraryCardHeartActive' : ''}`}
+                          className={`df-favoriteHeartBtn${favoriteMealIds.includes(meal.id) ? ' df-favoriteHeartBtnActive' : ''}`}
                           aria-label={`Toggle favorite for ${meal.title}`}
+                          aria-pressed={favoriteMealIds.includes(meal.id)}
                           onClick={() => void toggleFavoriteMeal(meal.id)}
                         >
-                          {favoriteMealIds.includes(meal.id) ? '❤' : '♡'}
+                          <HeartIcon size={18} filled={favoriteMealIds.includes(meal.id)} />
                         </button>
                       </div>
                       <div

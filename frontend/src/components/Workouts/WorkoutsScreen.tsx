@@ -1,7 +1,7 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
-import AppSidebar, { ClockIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import AppSidebar, { ClockIcon, HeartIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
 
 type WorkoutsScreenProps = {
@@ -1234,29 +1234,27 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 >
                   <div className="df-workoutLibraryCardTop">
                     <h3 className="df-workoutLibraryTitle">{item.title}</h3>
-                    <button
-                      type="button"
-                      className={`df-workoutFavoriteBtn${
+                    {(() => {
+                      const isFav =
                         favoriteKeySet.has((item as FavoriteWorkoutItem).favorite_key) ||
-                        favoriteSignatureSet.has(favoriteSignature(item))
-                          ? ' df-workoutFavoriteBtnActive'
-                          : ''
-                      }`}
-                      aria-label={`Toggle favorite for ${item.title}`}
-                      title={
-                        favoriteKeySet.has((item as FavoriteWorkoutItem).favorite_key) ||
-                        favoriteSignatureSet.has(favoriteSignature(item))
-                          ? 'Unfavorite'
-                          : 'Favorite'
-                      }
-                      disabled={isTogglingFavorite}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void toggleFavorite(item);
-                      }}
-                    >
-                      ❤
-                    </button>
+                        favoriteSignatureSet.has(favoriteSignature(item));
+                      return (
+                        <button
+                          type="button"
+                          className={`df-favoriteHeartBtn${isFav ? ' df-favoriteHeartBtnActive' : ''}`}
+                          aria-label={`Toggle favorite for ${item.title}`}
+                          aria-pressed={isFav}
+                          title={isFav ? 'Unfavorite' : 'Favorite'}
+                          disabled={isTogglingFavorite}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void toggleFavorite(item);
+                          }}
+                        >
+                          <HeartIcon size={18} filled={isFav} />
+                        </button>
+                      );
+                    })()}
                     <button
                       type="button"
                       className="df-workoutLibraryAdd"

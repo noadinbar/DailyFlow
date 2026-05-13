@@ -260,6 +260,31 @@ export function ClockIcon(props: { size?: number; className?: string }) {
   );
 }
 
+export function HeartIcon(props: {
+  size?: number;
+  filled?: boolean;
+  className?: string;
+}) {
+  const size = props.size ?? 18;
+  const filled = props.filled === true;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+      aria-hidden
+    >
+      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z" />
+    </svg>
+  );
+}
+
 export function FireIcon(props: { size?: number; className?: string }) {
   const size = props.size ?? 14;
   return (
