@@ -243,6 +243,51 @@ function formatQuantity(value: number): string {
   return value.toFixed(2).replace(/\.?0+$/, '');
 }
 
+const ENGLISH_DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function toIsoDateLocal(value: Date): string {
+  return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+}
+
+function formatAddPopupDayLabel(date: Date): string {
+  return `${ENGLISH_DAY_NAMES[date.getDay()]} ${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}`;
+}
+
+function buildAddPopupDayOptions(now: Date): { value: string; label: string }[] {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const daysUntilSaturday = 6 - today.getDay();
+  const options: { value: string; label: string }[] = [];
+  for (let i = 0; i <= daysUntilSaturday; i += 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() + i);
+    options.push({ value: toIsoDateLocal(day), label: formatAddPopupDayLabel(day) });
+  }
+  return options;
+}
+
+function isValidHHmm(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function sanitizeHHmmTyping(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
 function groupGroceryFromFlat(items: GroceryItem[]): Map<string, GroceryItem[]> {
   const grouped = new Map<string, GroceryItem[]>();
   for (const item of items) {
@@ -318,6 +363,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [addMealDate, setAddMealDate] = React.useState<string>('');
   const [addMealStartTime, setAddMealStartTime] = React.useState<string>('');
   const [addMealError, setAddMealError] = React.useState<string>('');
+
+  const addMealDayOptions = React.useMemo(
+    () => (addMealSource ? buildAddPopupDayOptions(new Date()) : []),
+    [addMealSource]
+  );
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
   const initials = (effectiveName || 'N').slice(0, 2).toUpperCase();
@@ -827,11 +877,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   function openAddMealModal(meal: MealLibraryItem) {
     setAddMealError('');
     setAddMealSource(meal);
-    const now = new Date();
-    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-      now.getDate()
-    ).padStart(2, '0')}`;
-    setAddMealDate(day);
+    setAddMealDate(toIsoDateLocal(new Date()));
     setAddMealStartTime('18:00');
   }
 
@@ -846,6 +892,10 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     if (!addMealSource) return;
     if (!addMealDate || !addMealStartTime) {
       setAddMealError('Please select date and start time.');
+      return;
+    }
+    if (!isValidHHmm(addMealStartTime)) {
+      setAddMealError('Please enter start time as HH:mm (00:00 to 23:59).');
       return;
     }
     setAddMealError('');
@@ -1078,19 +1128,28 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
-            <button
-              type="button"
-              className="df-btn df-btnPrimary"
-              onClick={runMockGenerate}
-              disabled={isGeneratingMeals || !selectedMealTypeForGenerate}
+            <span
+              title={
+                !selectedMealTypeForGenerate
+                  ? 'Select exactly one meal type to generate.'
+                  : undefined
+              }
+              style={{ display: 'inline-flex' }}
             >
-              {isGeneratingMeals ? 'Generating...' : 'Generate'}
-            </button>
-            {!selectedMealTypeForGenerate && (
-              <span className="df-calendarLegend" style={{ marginInlineStart: 8 }}>
-                Select exactly one meal type to generate.
-              </span>
-            )}
+              <button
+                type="button"
+                className="df-btn df-btnPrimary"
+                onClick={runMockGenerate}
+                disabled={isGeneratingMeals || !selectedMealTypeForGenerate}
+                title={
+                  !selectedMealTypeForGenerate
+                    ? 'Select exactly one meal type to generate.'
+                    : undefined
+                }
+              >
+                {isGeneratingMeals ? 'Generating...' : 'Generate'}
+              </button>
+            </span>
           </div>
           <div className="df-calendarTopbarRight">
             {googleCalendarStatus === 'reconnect_required' && (
@@ -1457,28 +1516,41 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
                   Date
                 </div>
-                <input
-                  type="date"
-                  className="df-input"
+                <select
+                  className="df-select"
                   value={addMealDate}
-                  min={weekStartIso || undefined}
-                  max={weekEndIso || undefined}
                   onChange={(event) => {
                     setAddMealDate(event.target.value);
                     setAddMealError('');
                   }}
-                />
+                >
+                  {addMealDayOptions.length === 0 && (
+                    <option value="" disabled>
+                      No available days this week
+                    </option>
+                  )}
+                  {addMealDayOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="df-field">
                 <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
-                  Start time
+                  Start time (24h, HH:mm)
                 </div>
                 <input
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
                   className="df-input"
                   value={addMealStartTime}
+                  placeholder="HH:mm"
+                  maxLength={5}
+                  pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
+                  aria-label="Start time in 24-hour HH:mm format"
                   onChange={(event) => {
-                    setAddMealStartTime(event.target.value);
+                    setAddMealStartTime(sanitizeHHmmTyping(event.target.value));
                     setAddMealError('');
                   }}
                 />

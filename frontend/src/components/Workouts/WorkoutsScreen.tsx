@@ -137,6 +137,43 @@ function buildWeekCards(weekStart: Date): WeekDayCard[] {
   return cards;
 }
 
+const ENGLISH_DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+function formatAddPopupDayLabel(date: Date): string {
+  return `${ENGLISH_DAY_NAMES[date.getDay()]} ${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}`;
+}
+
+function buildAddPopupDayOptions(now: Date): { value: string; label: string }[] {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const daysUntilSaturday = 6 - today.getDay();
+  const options: { value: string; label: string }[] = [];
+  for (let i = 0; i <= daysUntilSaturday; i += 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() + i);
+    options.push({ value: toIsoDateLocal(day), label: formatAddPopupDayLabel(day) });
+  }
+  return options;
+}
+
+function isValidHHmm(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function sanitizeHHmmTyping(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
 export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const { username, onLogout } = props;
   const navigate = useNavigate();
@@ -175,6 +212,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const isWorkoutsRoute = location.pathname.startsWith('/workouts');
   const isMealsRoute = location.pathname.startsWith('/meals');
   const weekCards = React.useMemo(() => buildWeekCards(weekStartDate), [weekStartDate]);
+  const addFromLibraryDayOptions = React.useMemo(
+    () => (addFromLibraryWorkout ? buildAddPopupDayOptions(new Date()) : []),
+    [addFromLibraryWorkout]
+  );
   const weekStartIso = React.useMemo(() => toIsoDateLocal(weekStartDate), [weekStartDate]);
   const weekEndIso = React.useMemo(() => {
     const end = new Date(weekStartDate);
@@ -777,7 +818,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   function openAddFromLibraryModal(workout: WorkoutLibraryItem) {
     setAddFromLibraryError('');
     setAddFromLibraryWorkout(workout);
-    setAddFromLibraryDay(weekStartIso);
+    setAddFromLibraryDay(toIsoDateLocal(new Date()));
     setAddFromLibraryStartTime('18:00');
   }
 
@@ -790,6 +831,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
   async function handleAddFromLibrarySave() {
     if (!addFromLibraryWorkout || !addFromLibraryDay || !addFromLibraryStartTime) return;
+    if (!isValidHHmm(addFromLibraryStartTime)) {
+      setAddFromLibraryError('Please enter start time as HH:mm (00:00 to 23:59).');
+      return;
+    }
     setAddFromLibraryError('');
     const saved = await mutateWeeklyPlan({
       action: 'add_library_workout',
@@ -1426,21 +1471,31 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                     setAddFromLibraryError('');
                   }}
                 >
-                  {weekCards.map((card) => (
-                    <option key={card.dateIso} value={card.dateIso}>
-                      {card.dayLabel} ({card.dateIso})
+                  {addFromLibraryDayOptions.length === 0 && (
+                    <option value="" disabled>
+                      No available days this week
+                    </option>
+                  )}
+                  {addFromLibraryDayOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="df-field">
-                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Start time</div>
+                <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Start time (24h, HH:mm)</div>
                 <input
                   className="df-input"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
                   value={addFromLibraryStartTime}
+                  placeholder="HH:mm"
+                  maxLength={5}
+                  pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
+                  aria-label="Start time in 24-hour HH:mm format"
                   onChange={(event) => {
-                    setAddFromLibraryStartTime(event.target.value);
+                    setAddFromLibraryStartTime(sanitizeHHmmTyping(event.target.value));
                     setAddFromLibraryError('');
                   }}
                 />

@@ -35,6 +35,9 @@ Existing DynamoDB tables:
   - SK: event_id
 - WorkoutLibrary
   - PK: user_id
+- MealsAndGroceries
+  - PK: user_id
+  - SK: record_key
 
 Current implemented foundation:
 - Cognito sign up / log in works.
@@ -49,6 +52,12 @@ Current implemented foundation:
 - A dedicated Google Calendar named DailyFlow is created/reused for app-created events.
 - DailyFlow calendar id is stored in Integrations as dailyflow_calendar_id.
 - Workouts screen exists and is connected to real backend/OpenAI/Google Calendar flows.
+- Meals & Grocery screen exists and is connected to real backend/OpenAI/Google Calendar flows.
+- Meals & Grocery includes Meal Library, Saved Meals This Week, Grocery List, favorites, filters, add-to-calendar flow, servings, grocery list generation, and PDF export.
+- Google reconnect buttons exist in relevant screens and should appear only when reconnect is required.
+- Meal Preferences was removed from the frontend and backend and must not be reintroduced.
+- Grocery List UI and PDF export currently show product names only, without quantities or units.
+- Grocery List PDF export uses jsPDF and has a designed pastel layout.
 
 Google Calendar rules:
 - Do not create duplicate DailyFlow calendars.
@@ -60,13 +69,30 @@ Google Calendar rules:
 - Current Google scopes should preserve both:
   - https://www.googleapis.com/auth/calendar.readonly
   - https://www.googleapis.com/auth/calendar.app.created
+- If Google reconnect is triggered from a specific screen, the user should return to the same source screen after OAuth when possible.
+- If implementing a return_to parameter for OAuth, only allow safe internal frontend paths and default to /calendar when missing or invalid.
+- Do not create an open redirect risk.
+
+Calendar / scheduling UI rules:
+- App-owned displayed times should use 24-hour HH:mm format.
+- Do not show AM/PM in DailyFlow UI.
+- Add-to-calendar popups in Meals and Workouts should use controlled 24-hour HH:mm input if native browser time input displays AM/PM.
+- In Meals and Workouts add popups, selectable days should be only from today through Saturday of the current week, inclusive.
+- Day labels should always be in English and should use this format:
+  - Sunday 10.05
+  - Monday 11.05
+- Do not allow selecting past days from the current week.
+- Do not change actual ISO datetime values sent to Google Calendar unless needed to derive them correctly from the selected date/time.
 
 Profile/settings rules:
 - Screens should use the shared profile/preferences source.
 - Do not create duplicate local preference state if existing profile data can be reused.
 - Preferences changed in one screen should be reflected in other screens after save/navigation.
 - Avoid adding new onboarding questionnaire questions unless explicitly requested.
-- Feature-specific preferences may live inside that feature when appropriate.
+- Keep real error messages for failed save/load/validation.
+- Remove unnecessary helper notes or cluttered microcopy from the Profile/Preferences popup when requested.
+- Profile and Preferences popup/modal should have consistent width and stable size between sections.
+- Do not reintroduce Meal Preferences.
 
 Workouts rules:
 - Workouts implementation should remain stable and not be rewritten unless explicitly requested.
@@ -76,13 +102,23 @@ Workouts rules:
 - Add to calendar must not create duplicate Google events.
 - Delete should remove the linked DailyFlow-created event when applicable.
 - Do not change Workouts while working on Meals unless the requested task explicitly depends on shared code.
+- Workout UI should stay consistent with Meals where appropriate, including subtle icons and pastel tag/category styling.
+- If adding icons, use clean UI icons or inline SVGs, not emoji.
 
 Current active milestone:
-The current active milestone is Meals & Grocery.
+The current active milestone is final UI/UX polish and consistency across implemented screens before presentation/demo.
 
-Meals & Grocery high-level direction:
-- Build the real Meals & Grocery screen, not a temporary test page.
-- The screen should include:
+Current focus areas:
+- Meals & Grocery polish
+- Workouts polish
+- Google reconnect behavior
+- Profile/Preferences popup cleanup
+- Sidebar navigation polish
+- Keep existing backend logic stable unless the requested UI behavior requires backend support
+
+Meals & Grocery current direction:
+- Keep the real Meals & Grocery screen, not a temporary test page.
+- The screen includes:
   - Meal Library
   - Saved Meals This Week
   - Grocery List
@@ -94,23 +130,21 @@ Meals & Grocery high-level direction:
 - If valid, the app should create a DailyFlow Google Calendar event.
 - Saved Meals This Week should be the source for Grocery List generation.
 - Grocery List should not be generated from the entire Meal Library.
-- Meals should support servings, and grocery quantities should update according to servings.
-- Grocery list quantities should be aggregated and rounded sensibly for package-like units.
+- Meals should support servings internally, and grocery aggregation may use servings internally.
+- Grocery List UI should show product names only.
+- Grocery List PDF export should show product names only.
+- Do not display grocery quantities or units in the UI or PDF export.
 - Meal Library should support favorites and filters.
-- Meal Preferences should be feature-specific and should not extend the onboarding questionnaire unless explicitly requested.
+- Meal tags/categories should use soft pastel colors.
+- The same tag should consistently receive the same pastel color.
+- Meal Preferences was removed. Do not add it back to the frontend or backend.
 - Use existing profile/questionnaire data where relevant, for example diet-related preferences.
-
-Planned Meals DynamoDB table:
-- Prefer one focused table:
-  - MealsAndGroceries
-  - PK: user_id
-  - SK: record_key
-- Exact schema/details should be defined in the relevant implementation prompt, not assumed too early.
+- Do not extend the onboarding questionnaire unless explicitly requested.
 
 General milestone rules:
 - Work incrementally and in small scoped steps.
 - Do not skip ahead to unrelated milestone work.
-- Do not implement Stress, Overview, Apple Watch, or unrelated features unless explicitly requested.
+- Do not implement Apple Watch, new Stress logic, new Overview logic, or unrelated features unless explicitly requested.
 - Do not rewrite unrelated parts of the app.
 - Do not add unnecessary architecture changes.
 - Keep Calendar, Workouts, Meals, Stress, and Overview logically separated.
@@ -120,6 +154,23 @@ General milestone rules:
   - BusyBlocks
   - DailyFlow calendar
   - DailyFlowEvents
+
+Design / UI style rules:
+- Keep the style clean, soft, modern, and pastel.
+- Prefer subtle UI icons or inline SVGs, not emoji.
+- Use consistent spacing, rounded cards, and clear hover states.
+- Sidebar navigation should support a collapsible hamburger behavior when requested:
+  - open state: icon + screen name
+  - closed state: icons only
+- Sidebar items should have nice icons for:
+  - Calendar
+  - Meals & Grocery
+  - Workouts
+  - Stress & Breaks
+  - Overview
+- Sidebar items should have hover states so they feel clickable.
+- Active screen should be highlighted more strongly than hover.
+- If Stress & Breaks or Overview are less complete, they should still have consistent sidebar icons and hover behavior unless explicitly disabled.
 
 Implementation guidance:
 - Keep code simple and minimal.
@@ -133,6 +184,13 @@ Implementation guidance:
 - Avoid temporary routes or throwaway AI/testing endpoints.
 - If placeholder logic is used, keep it light and easy to replace.
 - Use real product routes when backend work is requested.
+- Before changing shared components, inspect existing usage to avoid breaking other screens.
+- Do not change package dependencies unless clearly required.
+- Do not commit or stage:
+  - frontend/node_modules/
+  - frontend/dist/
+  - node_modules/
+  - dist/
 
 AWS / deployment guidance:
 - If a change requires AWS updates, state them explicitly and concretely.
@@ -143,13 +201,22 @@ AWS / deployment guidance:
   - sort key if any
   - required Lambda IAM permissions
   - required environment variables
-- If code changes require only redeploy and no AWS config changes, say that clearly.
+- If code changes require only redeploy and no AWS configuration changes, say that clearly.
 - Do not write “AWS CHANGES REQUIRED: none” when frontend or Lambda redeploy is still required.
 - Distinguish between:
   - AWS configuration changes
   - deployment/redeploy requirements
+- If frontend code changed, mention Amplify redeploy through Git push.
+- If Lambda code changed, list the exact Lambda files/functions that must be redeployed.
+- If API Gateway routes changed, list the exact route changes.
+- If Google OAuth start/callback code changed, explicitly mention which auth Lambdas must be redeployed.
+- In AWS CHANGES REQUIRED, explain only what must change because of the actual code changes.
+- Do not give generic AWS advice.
+- If no AWS changes and no deploy are needed, write exactly:
+  AWS CHANGES REQUIRED: none
 
 Working style:
+- At the beginning of a new agent task, read this rule first.
 - Before generating code, first explain the plan.
 - Before generating code, list which files will be created or updated.
 - Keep changes scoped to the requested step only.
