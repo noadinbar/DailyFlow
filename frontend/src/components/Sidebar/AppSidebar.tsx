@@ -110,7 +110,6 @@ export default function AppSidebar(props: AppSidebarProps) {
         </div>
         <div className="df-calendarProfileInfo">
           <div className="df-calendarProfileName">{displayName}</div>
-          <div className="df-calendarProfileHint">Plan your week</div>
         </div>
         <button
           type="button"

@@ -352,7 +352,7 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
   }
 
   return (
-    <section className="df-card" aria-label="Onboarding questionnaire wizard">
+    <section className="df-card df-onboardingCard" aria-label="Onboarding questionnaire wizard">
       <header>
         <h1 className="df-title">Onboarding questionnaire</h1>
         <p className="df-subtitle">Answer a few questions to personalize your experience.</p>

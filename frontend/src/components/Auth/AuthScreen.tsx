@@ -126,9 +126,6 @@ export default function AuthScreen(props: AuthScreenProps) {
             alt="DailyFlow logo"
           />
           <h1 className="df-authTitle">{title}</h1>
-          <p className="df-authSubtitle">
-            Choose an option to continue.
-          </p>
 
           <div className="df-authToggle" role="tablist" aria-label="Authentication mode">
             <button
