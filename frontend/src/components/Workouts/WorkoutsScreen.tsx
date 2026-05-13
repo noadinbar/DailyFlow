@@ -1,7 +1,12 @@
 import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
-import AppSidebar, { ClockIcon, HeartIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import AppSidebar, {
+  CalendarPlusIcon,
+  ClockIcon,
+  HeartIcon,
+  useSidebarCollapsed,
+} from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
 
 type WorkoutsScreenProps = {
@@ -1255,19 +1260,6 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                         </button>
                       );
                     })()}
-                    <button
-                      type="button"
-                      className="df-workoutLibraryAdd"
-                      aria-label={`Add ${item.title} to weekly plan`}
-                      title="Add to weekly plan"
-                      disabled={isSavingWeeklyPlan}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openAddFromLibraryModal(item);
-                      }}
-                    >
-                      +
-                    </button>
                   </div>
                   <div className="df-workoutTypePill" style={pastelTagStyle(item.workout_type)}>
                     {item.workout_type}
@@ -1280,6 +1272,22 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                   </div>
                   <div className="df-workoutMeta">{item.intensity} · {item.location}</div>
                   <div className="df-workoutMeta">{item.summary_short}</div>
+                  <button
+                    type="button"
+                    className="df-mealLibraryCalendarBtn df-workoutLibraryActionBtn"
+                    aria-label={`Add ${item.title} to weekly plan`}
+                    title="Add to weekly plan"
+                    disabled={isSavingWeeklyPlan}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openAddFromLibraryModal(item);
+                    }}
+                  >
+                    <span className="df-mealLibraryCalendarBtnIcon df-inlineIcon" aria-hidden>
+                      <CalendarPlusIcon size={16} />
+                    </span>
+                    Add to weekly plan
+                  </button>
                 </article>
               ))}
             </div>

@@ -85,12 +85,13 @@ export default function AppSidebar(props: AppSidebarProps) {
       </button>
 
       <div className="df-calendarBrand">
-        <img
-          src={dailyflowLogoUrl}
-          alt=""
-          aria-hidden
-          className="df-calendarBrandLogo"
-        />
+        <span className="df-calendarBrandLogoWrap" aria-hidden>
+          <img
+            src={dailyflowLogoUrl}
+            alt=""
+            className="df-calendarBrandLogo"
+          />
+        </span>
         <span className="df-calendarBrandLabel">DailyFlow</span>
       </div>
 

@@ -370,33 +370,52 @@ body {
 .df-calendarBrand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 24px;
   font-weight: 800;
   color: var(--df-brand-text);
   /* Generous line-height so descenders (e.g. "y" in DailyFlow) are never clipped. */
-  line-height: 1.25;
+  line-height: 1.3;
   padding-block: 4px;
   margin-bottom: 14px;
   min-width: 0;
 }
 
-.df-calendarBrandLogo {
+/* The brand logo PNG has a wide transparent halo around the emblem. Wrapping the
+   image in a fixed-size frame with overflow:hidden and scaling the image inside
+   crops away that empty halo, so the *visible* emblem reads at roughly the
+   wordmark height without making the brand row tall. */
+.df-calendarBrandLogoWrap {
   flex: none;
-  /* Sized so the emblem reads about as tall as the wordmark itself. */
-  width: 64px;
-  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.df-calendarBrandLogo {
+  /* Zoomed past the transparent margin baked into the asset. */
+  width: 92px;
+  height: 92px;
   object-fit: contain;
-  border-radius: 10px;
+  display: block;
   background: transparent;
-  /* Lets any near-white halo in the PNG blend cleanly with the sidebar background. */
+  /* Any near-white halo blends with the sidebar background. */
   mix-blend-mode: multiply;
 }
 
+.df-calendarLeftNavCollapsed .df-calendarBrandLogoWrap {
+  /* Collapsed sidebar is 72px wide with 8px padding — keep the frame just under that. */
+  width: 48px;
+  height: 48px;
+}
+
 .df-calendarLeftNavCollapsed .df-calendarBrandLogo {
-  /* Collapsed sidebar is 72px wide with 8px padding — keep the logo just under that. */
-  width: 52px;
-  height: 52px;
+  width: 84px;
+  height: 84px;
 }
 
 .df-calendarProfile {
@@ -1337,7 +1356,10 @@ select.df-input {
   border-radius: 12px;
   padding: 12px;
   background: #fff;
-  display: grid;
+  /* Flex column so the bottom action button can stretch to the card bottom and
+     stay vertically aligned across cards of different content heights. */
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -1363,16 +1385,17 @@ select.df-input {
   line-height: 1.25;
 }
 
-.df-workoutLibraryAdd {
-  appearance: none;
-  border: 0;
-  background: var(--df-primary-soft);
-  color: var(--df-primary);
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  font-size: 18px;
-  line-height: 1;
+/* Workouts library card "Add to weekly plan" action.
+   Inherits the look of .df-mealLibraryCalendarBtn (Meals card style) so the
+   two screens stay visually consistent; margin-top: auto pushes the button to
+   the bottom of the card regardless of meta content length. */
+.df-workoutLibraryActionBtn {
+  margin-top: auto;
+}
+
+.df-workoutLibraryActionBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .df-workoutFavoriteToggle {
