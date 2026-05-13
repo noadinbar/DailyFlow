@@ -92,13 +92,44 @@ export default function AuthScreen(props: AuthScreenProps) {
       } else {
         const payload: SignUpPayload = { username, email, password, confirmPassword };
         const result = await submitSignUpPlaceholder(payload);
+
+        // If Cognito reports the sign-up as fully complete (no confirmation /
+        // admin approval required), immediately sign in with the same
+        // credentials so the user is routed through the existing post-login
+        // flow (App.handleLoggedIn → fetchOnboardingCompleted → questionnaire
+        // or /calendar). This avoids forcing the user to retype the
+        // credentials they just submitted.
+        if (!result.confirmationRequired) {
+          try {
+            await submitLoginPlaceholder({ username, password });
+            setSuccessMessage('Account created. Signing you in...');
+            onLoggedIn?.({ username });
+            return;
+          } catch (autoSignInErr) {
+            // Auto sign-in failed (e.g. the user pool actually requires
+            // confirmation after all, or sign-in hit an unrelated error).
+            // Fall back to the manual log-in flow with a clear message so the
+            // user can recover instead of being stuck on a successful signup
+            // with no path forward.
+            const fallbackMessage =
+              (autoSignInErr as any)?.message &&
+              typeof (autoSignInErr as any).message === 'string'
+                ? `Account created. ${(autoSignInErr as any).message}`
+                : 'Account created. Please log in to continue.';
+            setSuccessMessage(fallbackMessage);
+            setMode('login');
+            setErrors({});
+            return;
+          }
+        }
+
+        // Confirmation is required (manual admin approval in the current
+        // Cognito setup). Don't try to auto-sign-in — Amplify will reject
+        // sign-in until the account is confirmed. Keep the existing flow:
+        // show the waiting-for-approval message and switch back to Log in.
         setSuccessMessage(
-          result.confirmationRequired
-            ? 'Account created. Waiting for admin approval. Please log in after approval.'
-            : 'Account created successfully. You can log in now.'
+          'Account created. Waiting for admin approval. Please log in after approval.'
         );
-        // Manual admin confirmation: do not navigate away or auto-sign-in.
-        // Switch UI back to Log in so the user can continue immediately.
         setMode('login');
         setErrors({});
       }

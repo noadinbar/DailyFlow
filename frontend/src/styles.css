@@ -276,30 +276,34 @@ body {
 
 .df-authWrap {
   /* Auth screen is full-bleed: the wrap occupies the entire viewport and the
-     centered content column lives inside. No gray outer gap. */
+     centered content column lives inside. No gray outer gap. Content is
+     anchored near the top (not vertically centered) so the logo, title,
+     toggle, and form sit higher in the viewport and there's no large empty
+     space above the logo on tall screens. The top inset scales with the
+     viewport so short screens stay tight while tall screens still breathe. */
   width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px;
+  padding: clamp(24px, 5vh, 64px) 24px 24px;
   box-sizing: border-box;
   background: #fff;
 }
 
 .df-authCard {
-  /* The auth "card" is just a stable-sized centered content column on top of
-     the full-screen white wrap — no border, no rounded corners, no separate
-     card surface. Wider than the form column so the slightly larger logo can
-     render at its full size; the form itself (.df-authForm) is still
-     max-width: 420px centered. Inner form scrolls internally on short
-     viewports so the outer footprint stays the same between Log in and
-     Sign up. */
+  /* The auth "card" is just a centered content column on top of the
+     full-screen white wrap — no border, no rounded corners, no separate
+     card surface. Wider than the form column so the slightly larger logo
+     can render at its full size; the form itself (.df-authForm) is still
+     max-width: 420px centered. No fixed height: content sizes naturally,
+     so the form never scrolls internally when there is enough viewport
+     space. Toggling between Log in (1 input) and Sign up (3 inputs) only
+     changes the form section below; the logo / title / toggle stay
+     anchored at the same top position. */
   width: 100%;
   max-width: 560px;
-  max-height: 100%;
-  height: min(86vh, 640px);
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -315,7 +319,7 @@ body {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .df-authLogo {
@@ -325,7 +329,7 @@ body {
   max-width: 100%;
   height: auto;
   display: block;
-  margin: 0 auto 8px;
+  margin: 0 auto 4px;
 }
 
 .df-authTitle {
@@ -345,7 +349,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 10px;
   max-width: 420px;
   margin-left: auto;
   margin-right: auto;
@@ -372,11 +376,11 @@ body {
 .df-authForm {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  /* Natural sizing — no internal scrollbar when there is enough viewport
+     space. If the viewport is genuinely too short for the full form, the
+     page itself scrolls (acceptable per the spec). */
   margin: 0 auto;
   max-width: 420px;
 }
