@@ -11,7 +11,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
 
-OPENAI_MODEL = "gpt-4.1-mini"
+OPENAI_MODEL = "gpt-5-mini"
 MAX_PERIOD_DAYS = 14
 MIN_FREE_WINDOW_MINUTES = 20
 DEFAULT_TIMEZONE_LABEL = "Asia/Jerusalem"

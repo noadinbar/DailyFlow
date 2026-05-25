@@ -1288,8 +1288,9 @@ select.df-input {
 
 .df-workoutWeekGrid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(100px, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 10px;
+  align-items: stretch;
 }
 
 .df-workoutDayCard {
@@ -1298,9 +1299,16 @@ select.df-input {
   padding: 10px;
   background: #fff;
   min-height: 170px;
-  display: grid;
-  align-content: start;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  overflow: hidden;
+}
+
+.df-workoutDayCard .df-weeklyPlanControls {
+  margin-top: auto;
+  flex-shrink: 0;
 }
 
 .df-workoutDay {
@@ -1328,6 +1336,12 @@ select.df-input {
 .df-workoutMeta {
   font-size: 13px;
   color: #4b5563;
+  min-width: 0;
+}
+
+.df-workoutDayCard .df-workoutMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .df-workoutSlot {
@@ -1447,7 +1461,7 @@ select.df-input {
 
 .df-workoutLibraryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   /* Force every implicit row to take the same height (the tallest card),
      so the bottom "Add to weekly plan" button aligns across cards in the
      grid even across multiple rows. */
@@ -1460,6 +1474,12 @@ select.df-input {
   padding-inline-end: 4px;
 }
 
+/* Stretch every card in library/saved-meal grids to the row height. */
+.df-workoutLibraryGrid > article {
+  height: 100%;
+  min-width: 0;
+}
+
 .df-workoutLibraryCard {
   border: 1px solid var(--df-border);
   border-radius: 12px;
@@ -1470,6 +1490,9 @@ select.df-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 220px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .df-workoutLibraryCardClickable {
@@ -1486,8 +1509,10 @@ select.df-input {
 }
 
 /* Clamp the workout summary line to 2 lines so cards stay visually uniform
-   when summaries vary in length. */
+   when summaries vary in length; flex grow keeps the action button at the bottom. */
 .df-workoutLibrarySummary {
+  flex: 1 1 auto;
+  min-height: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -1499,14 +1524,37 @@ select.df-input {
 .df-workoutLibraryCardTop {
   display: flex;
   justify-content: space-between;
-  align-items: start;
+  align-items: flex-start;
   gap: 10px;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .df-workoutLibraryTitle {
   margin: 0;
   font-size: 18px;
   line-height: 1.25;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.df-workoutLibraryCard .df-workoutTypePill,
+.df-workoutLibraryCard .df-workoutMetaTime,
+.df-workoutLibraryCard .df-workoutLibraryMetaLine {
+  flex-shrink: 0;
+}
+
+.df-workoutLibraryCard > .df-weeklyPlanControls {
+  margin-top: auto;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* Workouts library card "Add to weekly plan" action.
@@ -1665,7 +1713,7 @@ select.df-input {
   }
 
   .df-workoutLibraryGrid {
-    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1691,7 +1739,11 @@ select.df-input {
   border-radius: 14px;
   padding: 14px 14px 12px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  min-height: 0;
+  height: 100%;
+  min-height: 240px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .df-mealLibraryCardHeader {
@@ -1708,8 +1760,15 @@ select.df-input {
   font-weight: 700;
   color: #0f172a;
   line-height: 1.25;
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: start;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Shared favorite-heart button used by Meals and Workouts.
@@ -1773,11 +1832,15 @@ select.df-input {
 }
 
 .df-mealLibraryCardBody {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   cursor: pointer;
   border-radius: 10px;
   padding: 4px 2px 8px;
   text-align: start;
+  overflow: hidden;
 }
 
 .df-mealLibraryCardBody:hover {
@@ -1829,6 +1892,12 @@ select.df-input {
 
 .df-mealLibraryIngredientsPreview {
   line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .df-mealLibraryCalendarBtn {
@@ -1837,7 +1906,8 @@ select.df-input {
   justify-content: center;
   gap: 8px;
   width: 100%;
-  margin-top: 4px;
+  margin-top: auto;
+  flex-shrink: 0;
   padding: 10px 12px;
   border: none;
   border-radius: 12px;
