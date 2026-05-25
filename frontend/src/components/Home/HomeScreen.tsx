@@ -1126,11 +1126,6 @@ export default function HomeScreen(props: HomeScreenProps) {
                 {busyBlocksError}
               </div>
             )}
-            {!isSyncingBusyBlocks && !busyBlocksError && busyBlocks.length === 0 && (
-              <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#6b7280' }}>
-                No busy blocks yet. Run BusyBlocks sync to populate this calendar.
-              </div>
-            )}
           </section>
 
           <aside className="df-calendarSidebar" aria-label="Calendar details">
