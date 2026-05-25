@@ -8,6 +8,7 @@ import AppSidebar, {
   useSidebarCollapsed,
 } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
+import { buildApiUrl, getApiBaseUrl } from '../../services/api';
 import {
   GOOGLE_RECONNECT_MESSAGE_NEW,
   googleCalendarReconnectDisplayMessage,
@@ -328,10 +329,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     profileImageUrl: string;
     questionnaire: Record<string, unknown> | null;
   }> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(buildApiUrl('/profile'), {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -366,10 +365,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }
 
   async function saveProfileDisplayName(nextName: string): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(buildApiUrl('/profile'), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -397,10 +394,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }
 
   async function saveQuestionnairePreferences(patch: Record<string, unknown>): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(buildApiUrl('/profile'), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -434,10 +429,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     uploadUrl: string;
     objectKey: string;
   }> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile/image/upload-url`, {
+    const response = await fetch(buildApiUrl('/profile/image/upload-url'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -465,10 +458,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   }
 
   async function saveProfileImageKey(objectKey: string): Promise<void> {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
     const token = await getAuthToken();
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/profile`, {
+    const response = await fetch(buildApiUrl('/profile'), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -516,12 +507,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     setIsConnectingGoogleCalendar(true);
     void (async () => {
       try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-        if (!baseUrl?.trim()) {
-          setGenerateError('Missing API base URL configuration (VITE_API_BASE_URL).');
-          setIsConnectingGoogleCalendar(false);
-          return;
-        }
+        const baseUrl = getApiBaseUrl();
         const session = await fetchAuthSession();
         const accessToken = session.tokens?.accessToken?.toString();
         if (!accessToken) {
@@ -529,7 +515,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           setIsConnectingGoogleCalendar(false);
           return;
         }
-        const startUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/start?access_token=${encodeURIComponent(accessToken)}&return_to=${encodeURIComponent('/workouts')}`;
+        const startUrl = `${baseUrl}/auth/google/start?access_token=${encodeURIComponent(accessToken)}&return_to=${encodeURIComponent('/workouts')}`;
         window.location.assign(startUrl);
       } catch (e) {
         const anyErr = e as { message?: string };
@@ -545,14 +531,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     try {
       setGoogleCalendarStatus('checking');
       setGoogleCalendarStatusMessage('');
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      if (!baseUrl?.trim()) {
-        setGoogleCalendarStatus('error');
-        setGoogleCalendarStatusMessage('Missing API base URL (VITE_API_BASE_URL).');
-        return;
-      }
       const token = await getAuthToken();
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/auth/google/calendars`, {
+      const response = await fetch(buildApiUrl('/auth/google/calendars'), {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -598,13 +578,13 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     setGenerateHint('');
     setIsGeneratingPlan(mode === 'generate');
     try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
       const token = await getAuthToken();
       const isGenerate = mode === 'generate';
       const endpoint = isGenerate
-        ? `${baseUrl.replace(/\/$/, '')}/workouts/suggestions/generate`
-        : `${baseUrl.replace(/\/$/, '')}/workouts/suggestions?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+        ? buildApiUrl('/workouts/suggestions/generate')
+        : buildApiUrl(
+            `/workouts/suggestions?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`
+          );
       const response = await fetch(endpoint, {
         method: isGenerate ? 'POST' : 'GET',
         headers: {
@@ -661,7 +641,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
   }
 
-  async function handleGeneratePlanClick() {
+  async function handleGeneratePlanClick(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
     await loadWorkoutsData({ mode: 'generate', startDate: weekStartIso, endDate: weekEndIso });
   }
 
@@ -672,10 +654,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     try {
       setGenerateError('');
       setIsSavingWeeklyPlan(true);
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
       const token = await getAuthToken();
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/workouts/weekly-plan`, {
+      const response = await fetch(buildApiUrl('/workouts/weekly-plan'), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -856,10 +836,8 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     try {
       setGenerateError('');
       setIsTogglingFavorite(true);
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      if (!baseUrl?.trim()) throw new Error('Missing API base URL (VITE_API_BASE_URL).');
       const token = await getAuthToken();
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/workouts/favorites`, {
+      const response = await fetch(buildApiUrl('/workouts/favorites'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -970,7 +948,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             <button
               type="button"
               className="df-btn df-btnPrimary"
-              onClick={() => void handleGeneratePlanClick()}
+              onClick={(event) => void handleGeneratePlanClick(event)}
               disabled={isGeneratingPlan}
             >
               {isGeneratingPlan ? 'Generating...' : 'Generate plan'}
