@@ -17,7 +17,9 @@
 html,
 body,
 #root {
-  height: 100%;
+  /* min-height (not height) so the document can grow and scroll when app
+     content exceeds the viewport. */
+  min-height: 100%;
 }
 
 body {
@@ -435,23 +437,21 @@ body {
 }
 
 .df-calendarPage {
-  /* Full-bleed app shell: fills the entire browser viewport edge-to-edge.
-     No max-width / border / rounded corners — the sidebar touches the top,
-     bottom, and left edges; the main column touches the top, bottom, and
-     right edges. Internal scroll areas (calendar week grid, meals/workouts
-     content, sidebar nav) handle overflow so the page never gets double
-     scrollbars. */
+  /* Full-bleed app shell: at least viewport-tall, but can grow taller so the
+     document scrolls when content exceeds the viewport. Do not use a fixed
+     height + overflow:hidden here — that was blocking all page-level scroll.
+     Internal panels that need their own scroll (library grids with max-height,
+     etc.) keep overflow-y:auto on those elements only. */
   width: 100%;
   max-width: none;
-  height: 100vh;
-  height: 100dvh;
-  min-height: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
   border: 0;
   border-radius: 0;
   background: #fff;
   display: grid;
   grid-template-columns: 220px 1fr;
-  overflow: hidden;
+  overflow-x: hidden;
   transition: grid-template-columns 180ms ease;
 }
 
@@ -463,10 +463,8 @@ body {
   border-right: 1px solid var(--df-border);
   padding: 12px 12px;
   background: #fafafb;
-  /* The parent .df-calendarPage uses a definite viewport-fitting height; the
-     left rail handles its own overflow internally if the menu is ever taller
-     than the visible viewport. */
-  min-height: 0;
+  /* Scroll internally only when the sidebar content is taller than the
+     viewport (e.g. many nav items on a short screen). */
   overflow-y: auto;
 }
 
