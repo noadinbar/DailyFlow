@@ -8,6 +8,11 @@ import AppSidebar, {
   useSidebarCollapsed,
 } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
+import {
+  GOOGLE_RECONNECT_MESSAGE_NEW,
+  googleCalendarReconnectDisplayMessage,
+  isGoogleCalendarReconnectOrMissing,
+} from '../../services/googleCalendarConnection';
 
 type WorkoutsScreenProps = {
   username?: string;
@@ -85,9 +90,6 @@ type DayPlanModalState = {
 };
 
 type GoogleCalendarStatus = 'checking' | 'connected' | 'not_connected' | 'reconnect_required' | 'error';
-
-const GOOGLE_RECONNECT_MESSAGE = 'Google connection expired, reconnect required';
-const GOOGLE_RECONNECT_MESSAGE_NEW = 'Google Calendar connection expired. Please reconnect.';
 
 type WeekDayCard = { dayLabel: string; dateIso: string };
 
@@ -565,12 +567,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         setGoogleCalendarStatusMessage('');
         return;
       }
-      if (
-        response.status === 403 &&
-        (payload.message === GOOGLE_RECONNECT_MESSAGE || payload.message === GOOGLE_RECONNECT_MESSAGE_NEW)
-      ) {
+      if (!response.ok && isGoogleCalendarReconnectOrMissing(payload, response.status)) {
         setGoogleCalendarStatus('reconnect_required');
-        setGoogleCalendarStatusMessage(payload.message || GOOGLE_RECONNECT_MESSAGE_NEW);
+        setGoogleCalendarStatusMessage(googleCalendarReconnectDisplayMessage(payload));
         return;
       }
       if (!response.ok) {
@@ -691,13 +690,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         responsePayload = {};
       }
       if (!response.ok) {
-        const reconnectRequired =
-          responsePayload.reconnect_required === true ||
-          responsePayload.message === GOOGLE_RECONNECT_MESSAGE ||
-          responsePayload.message === GOOGLE_RECONNECT_MESSAGE_NEW;
-        if (reconnectRequired) {
+        if (isGoogleCalendarReconnectOrMissing(responsePayload, response.status)) {
           setGoogleCalendarStatus('reconnect_required');
-          setGoogleCalendarStatusMessage(responsePayload.message || GOOGLE_RECONNECT_MESSAGE_NEW);
+          setGoogleCalendarStatusMessage(googleCalendarReconnectDisplayMessage(responsePayload));
         }
         throw new Error(
           typeof responsePayload.message === 'string' && responsePayload.message.trim()

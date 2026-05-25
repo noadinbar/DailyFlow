@@ -2,6 +2,12 @@ import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from './ProfileSettingsModal';
 import AppSidebar, { useSidebarCollapsed, PencilIcon, SaveIcon } from '../Sidebar/AppSidebar';
+import {
+  GOOGLE_RECONNECT_MESSAGE_NEW,
+  googleCalendarReconnectDisplayMessage,
+  isGoogleCalendarReconnectOrMissing,
+  type GoogleConnectionPayload,
+} from '../../services/googleCalendarConnection';
 
 type HomeScreenProps = {
   username?: string;
@@ -9,7 +15,6 @@ type HomeScreenProps = {
 };
 
 /** Backend GET /auth/google/calendars: 200 connected, 404 not connected, 403 expired Google token. */
-const GOOGLE_RECONNECT_MESSAGE = 'Google connection expired, reconnect required';
 
 type CalendarSidebarState =
   | 'checking'
@@ -373,7 +378,22 @@ export default function HomeScreen(props: HomeScreenProps) {
     })();
   }
 
-  const refreshGoogleCalendarFromBackend = React.useCallback(async (enterEditMode: boolean = false) => {
+  const applyGoogleConnectionIssueToSidebar = React.useCallback(
+    (payload: GoogleConnectionPayload, httpStatus: number) => {
+      if (!isGoogleCalendarReconnectOrMissing(payload, httpStatus)) return false;
+      setGoogleCalendars([]);
+      setSelectedCalendarIds([]);
+      setCalendarsListError(googleCalendarReconnectDisplayMessage(payload));
+      setCalendarSidebarState(
+        httpStatus === 404 ? 'not_connected' : 'reconnect_required'
+      );
+      setBusyBlocksError('');
+      return true;
+    },
+    []
+  );
+
+  const refreshGoogleCalendarFromBackend = React.useCallback(async (enterEditMode: boolean = false): Promise<CalendarSidebarState> => {
     setCalendarSidebarState('checking');
     setCalendarsListError('');
     setGoogleCalendars([]);
@@ -386,14 +406,14 @@ export default function HomeScreen(props: HomeScreenProps) {
       if (!token) {
         setCalendarsListError('You need to be signed in to load calendars.');
         setCalendarSidebarState('error');
-        return;
+        return 'error';
       }
 
       const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
       if (!baseUrl?.trim()) {
         setCalendarsListError('Missing API base URL (VITE_API_BASE_URL).');
         setCalendarSidebarState('error');
-        return;
+        return 'error';
       }
 
       const endpointUrl = `${baseUrl.replace(/\/$/, '')}/auth/google/calendars`;
@@ -420,29 +440,20 @@ export default function HomeScreen(props: HomeScreenProps) {
         setSelectedCalendarIds([]);
         setCalendarsListError('');
         setCalendarSidebarState('not_connected');
-        return;
-      }
-
-      if (
-        response.status === 403 &&
-        typeof payload.message === 'string' &&
-        payload.message === GOOGLE_RECONNECT_MESSAGE
-      ) {
-        setGoogleCalendars([]);
-        setSelectedCalendarIds([]);
-        setCalendarsListError(GOOGLE_RECONNECT_MESSAGE);
-        setCalendarSidebarState('reconnect_required');
-        return;
+        return 'not_connected';
       }
 
       if (!response.ok) {
+        if (applyGoogleConnectionIssueToSidebar(payload, response.status)) {
+          return response.status === 404 ? 'not_connected' : 'reconnect_required';
+        }
         const message =
           typeof payload.message === 'string' && payload.message.trim()
             ? payload.message
             : `Could not load calendars (${response.status}).`;
         setCalendarsListError(message);
         setCalendarSidebarState('error');
-        return;
+        return 'error';
       }
 
       const calendars = Array.isArray(payload.calendars) ? payload.calendars : [];
@@ -456,14 +467,16 @@ export default function HomeScreen(props: HomeScreenProps) {
       );
       setIsEditingCalendars(enterEditMode || !selectionConfigured);
       setCalendarSidebarState('ready');
+      return 'ready';
     } catch (e) {
       const anyErr = e as { message?: string };
       setCalendarsListError(
         typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to load calendars.'
       );
       setCalendarSidebarState('error');
+      return 'error';
     }
-  }, []);
+  }, [applyGoogleConnectionIssueToSidebar]);
 
   const syncAndRefreshBusyBlocks = React.useCallback(async () => {
     setIsSyncingBusyBlocks(true);
@@ -498,6 +511,9 @@ export default function HomeScreen(props: HomeScreenProps) {
         syncPayload = {};
       }
       if (!syncResponse.ok) {
+        if (applyGoogleConnectionIssueToSidebar(syncPayload, syncResponse.status)) {
+          return;
+        }
         const message =
           typeof syncPayload.message === 'string' && syncPayload.message.trim()
             ? syncPayload.message
@@ -526,6 +542,9 @@ export default function HomeScreen(props: HomeScreenProps) {
       }
 
       if (!response.ok) {
+        if (applyGoogleConnectionIssueToSidebar(payload, response.status)) {
+          return;
+        }
         const message =
           typeof payload.message === 'string' && payload.message.trim()
             ? payload.message
@@ -561,7 +580,7 @@ export default function HomeScreen(props: HomeScreenProps) {
     } finally {
       setIsSyncingBusyBlocks(false);
     }
-  }, []);
+  }, [applyGoogleConnectionIssueToSidebar]);
 
   const refreshBusyBlocksOnly = React.useCallback(async () => {
     setBusyBlocksError('');
@@ -602,6 +621,9 @@ export default function HomeScreen(props: HomeScreenProps) {
       }
 
       if (!response.ok) {
+        if (applyGoogleConnectionIssueToSidebar(payload, response.status)) {
+          return { lastBusySyncAt: '' };
+        }
         const message =
           typeof payload.message === 'string' && payload.message.trim()
             ? payload.message
@@ -642,7 +664,7 @@ export default function HomeScreen(props: HomeScreenProps) {
       );
       return { lastBusySyncAt: '' };
     }
-  }, []);
+  }, [applyGoogleConnectionIssueToSidebar]);
 
   async function handleSaveCalendarSelectionClick() {
     setIsSavingCalendarSelection(true);
@@ -733,8 +755,11 @@ export default function HomeScreen(props: HomeScreenProps) {
       window.history.replaceState({}, '', next);
     }
 
-    void refreshGoogleCalendarFromBackend(false);
     void (async () => {
+      const calendarState = await refreshGoogleCalendarFromBackend(false);
+      if (calendarState !== 'ready') {
+        return;
+      }
       const { lastBusySyncAt } = await refreshBusyBlocksOnly();
       if (!isBusySyncFresh(lastBusySyncAt) && !isAutoBusyBlocksSyncInFlight) {
         isAutoBusyBlocksSyncInFlight = true;
@@ -1228,7 +1253,7 @@ export default function HomeScreen(props: HomeScreenProps) {
               )}
               {calendarSidebarState === 'reconnect_required' && (
                 <div className="df-calendarLegend" style={{ color: '#b45309' }} role="alert">
-                  {calendarsListError}
+                  {calendarsListError || GOOGLE_RECONNECT_MESSAGE_NEW}
                 </div>
               )}
               {calendarSidebarState === 'error' && (

@@ -10,6 +10,11 @@ import AppSidebar, {
   useSidebarCollapsed,
 } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
+import {
+  GOOGLE_RECONNECT_MESSAGE_NEW,
+  googleCalendarReconnectDisplayMessage,
+  isGoogleCalendarReconnectOrMissing,
+} from '../../services/googleCalendarConnection';
 
 type MealsGroceryScreenProps = {
   username?: string;
@@ -19,10 +24,7 @@ type MealsGroceryScreenProps = {
 type IngredientRounding = 'none' | 'ceil';
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 type PrepTimeFilter = 'lt20' | '20to40' | 'gt40';
-type GoogleCalendarStatus = 'connected' | 'reconnect_required';
-
-const GOOGLE_RECONNECT_MESSAGE = 'Google connection expired, reconnect required';
-const GOOGLE_RECONNECT_MESSAGE_NEW = 'Google Calendar connection expired. Please reconnect.';
+type GoogleCalendarStatus = 'checking' | 'connected' | 'not_connected' | 'reconnect_required';
 
 type MealIngredient = {
   name: string;
@@ -361,7 +363,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
 
   const [isGeneratingMeals, setIsGeneratingMeals] = React.useState<boolean>(false);
 
-  const [googleCalendarStatus, setGoogleCalendarStatus] = React.useState<GoogleCalendarStatus>('connected');
+  const [googleCalendarStatus, setGoogleCalendarStatus] = React.useState<GoogleCalendarStatus>('checking');
   const [googleCalendarStatusMessage, setGoogleCalendarStatusMessage] = React.useState<string>('');
   const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState<boolean>(false);
 
@@ -402,12 +404,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     }
   }
 
-  function detectReconnectRequired(payload: MealsSavedPatchResponse, status: number): boolean {
-    if (payload && payload.reconnect_required === true) return true;
-    const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
-    if (!message) return false;
-    if (status !== 401 && status !== 403) return false;
-    return message === GOOGLE_RECONNECT_MESSAGE || message === GOOGLE_RECONNECT_MESSAGE_NEW;
+  function applyGoogleReconnectFromResponse(payload: MealsSavedPatchResponse, status: number): boolean {
+    if (!isGoogleCalendarReconnectOrMissing(payload, status)) return false;
+    setGoogleCalendarStatus(status === 404 ? 'not_connected' : 'reconnect_required');
+    setGoogleCalendarStatusMessage(googleCalendarReconnectDisplayMessage(payload));
+    return true;
   }
 
   async function patchMealsSaved(
@@ -432,15 +433,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       payload = {};
     }
     if (!response.ok) {
-      if (detectReconnectRequired(payload, response.status)) {
-        setGoogleCalendarStatus('reconnect_required');
-        setGoogleCalendarStatusMessage(
-          typeof payload.message === 'string' && payload.message.trim()
-            ? payload.message
-            : GOOGLE_RECONNECT_MESSAGE_NEW
-        );
-      }
-      if (setGlobal) {
+      const isGoogleIssue = applyGoogleReconnectFromResponse(payload, response.status);
+      if (setGlobal && !isGoogleIssue) {
         setMealsApiError(
           typeof payload.message === 'string' && payload.message.trim()
             ? payload.message
@@ -453,6 +447,43 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     }
     return { ok: response.ok, status: response.status, payload };
   }
+
+  const refreshGoogleCalendarConnectionState = React.useCallback(async () => {
+    try {
+      setGoogleCalendarStatus('checking');
+      setGoogleCalendarStatusMessage('');
+      const baseUrl = getApiBaseUrl();
+      const token = await getAuthToken();
+      const response = await fetch(`${baseUrl}/auth/google/calendars`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let payload: MealsSavedPatchResponse = {};
+      try {
+        payload = (await response.json()) as MealsSavedPatchResponse;
+      } catch {
+        payload = {};
+      }
+      if (response.status === 404) {
+        setGoogleCalendarStatus('not_connected');
+        setGoogleCalendarStatusMessage('');
+        return;
+      }
+      if (!response.ok) {
+        if (applyGoogleReconnectFromResponse(payload, response.status)) {
+          return;
+        }
+        setGoogleCalendarStatus('connected');
+        setGoogleCalendarStatusMessage('');
+        return;
+      }
+      setGoogleCalendarStatus('connected');
+      setGoogleCalendarStatusMessage('');
+    } catch {
+      setGoogleCalendarStatus('connected');
+      setGoogleCalendarStatusMessage('');
+    }
+  }, []);
 
   function handleConnectGoogleCalendarClick() {
     setIsConnectingGoogleCalendar(true);
@@ -915,12 +946,14 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         { setGlobalError: false }
       );
       if (!ok) {
+        if (applyGoogleReconnectFromResponse(payload, status)) {
+          setAddMealError(googleCalendarReconnectDisplayMessage(payload));
+          return;
+        }
         const msg =
           typeof payload.message === 'string' && payload.message.trim()
             ? payload.message.trim()
-            : status === 404
-              ? 'Google Calendar is not connected. Connect Google from Calendar, then try again.'
-              : `Could not add meal to calendar (${status}).`;
+            : `Could not add meal to calendar (${status}).`;
         setAddMealError(msg);
         return;
       }
@@ -1078,6 +1111,18 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     })();
   }, []);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('google_calendar_connected') === '1') {
+      params.delete('google_calendar_connected');
+      const nextSearch = params.toString();
+      const next = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', next);
+    }
+    void refreshGoogleCalendarConnectionState();
+  }, [refreshGoogleCalendarConnectionState]);
+
   return (
     <section
       className={`df-calendarPage df-workoutsPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
@@ -1118,7 +1163,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             </span>
           </div>
           <div className="df-calendarTopbarRight">
-            {googleCalendarStatus === 'reconnect_required' && (
+            {(googleCalendarStatus === 'reconnect_required' ||
+              googleCalendarStatus === 'not_connected') && (
               <button
                 type="button"
                 className="df-btn df-btnPrimary"
@@ -1135,9 +1181,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
         </header>
 
         {mealsApiError && <div className="df-errorText" style={{ padding: '8px 16px 0' }}>{mealsApiError}</div>}
-        {googleCalendarStatus === 'reconnect_required' && (
+        {(googleCalendarStatus === 'reconnect_required' ||
+          googleCalendarStatus === 'not_connected') && (
           <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
-            {googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
+            {googleCalendarStatus === 'not_connected'
+              ? 'Connect Google Calendar to add meals to your calendar.'
+              : googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
           </div>
         )}
         {mealGenerationWarning && (
