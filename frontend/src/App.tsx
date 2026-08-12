@@ -5,6 +5,7 @@ import OnboardingQuestionnaireWizard from './components/OnboardingQuestionnaireW
 import HomeScreen from './components/Home/HomeScreen';
 import WorkoutsScreen from './components/Workouts/WorkoutsScreen';
 import MealsGroceryScreen from './components/Meals/MealsGroceryScreen';
+import StressBreaksScreen from './components/StressBreaks/StressBreaksScreen';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
 import { fetchOnboardingCompleted, signOutCurrentUser } from './services/auth/cognitoPlaceholders';
 import { configureAmplify } from './services/auth/amplifyConfig';
@@ -31,7 +32,12 @@ function normalizePathname(pathname: string): string {
 function shouldStartHydratingCalendar(): boolean {
   if (typeof window === 'undefined') return false;
   const current = normalizePathname(window.location.pathname);
-  return current === '/calendar' || current === '/workouts' || current === '/meals';
+  return (
+    current === '/calendar' ||
+    current === '/workouts' ||
+    current === '/meals' ||
+    current === '/stress'
+  );
 }
 
 export default function App() {
@@ -57,7 +63,12 @@ export default function App() {
 
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
-    if (normalizedPath !== '/calendar' && normalizedPath !== '/workouts' && normalizedPath !== '/meals') {
+    if (
+      normalizedPath !== '/calendar' &&
+      normalizedPath !== '/workouts' &&
+      normalizedPath !== '/meals' &&
+      normalizedPath !== '/stress'
+    ) {
       setIsHydratingCalendarRoute(false);
       return;
     }
@@ -120,7 +131,10 @@ export default function App() {
   React.useEffect(() => {
     const normalizedPath = normalizePathname(location.pathname);
     const isAllowedHomePath =
-      normalizedPath === '/calendar' || normalizedPath === '/workouts' || normalizedPath === '/meals';
+      normalizedPath === '/calendar' ||
+      normalizedPath === '/workouts' ||
+      normalizedPath === '/meals' ||
+      normalizedPath === '/stress';
     if (screen === 'home' && authState.isAuthenticated && !isAllowedHomePath) {
       navigate('/calendar', { replace: true });
     }
@@ -180,6 +194,15 @@ export default function App() {
       <Navigate to="/" replace />
     );
 
+  const stressRouteElement =
+    isHydratingCalendarRoute ? (
+      <></>
+    ) : screen === 'home' && authState.isAuthenticated ? (
+      <StressBreaksScreen username={authState.user?.username} onLogout={() => handleLogout()} />
+    ) : (
+      <Navigate to="/" replace />
+    );
+
   return (
     <main className="df-page" style={{ position: 'relative' }}>
       {/* Keep Routes mounted during login/calendar hydration so navigate() updates the URL reliably. */}
@@ -211,6 +234,8 @@ export default function App() {
       {/* RR v7: "/meals/*" does not match the exact path "/meals"; register "/meals" explicitly. */}
       <Route path="/meals" element={mealsRouteElement} />
       <Route path="/meals/*" element={mealsRouteElement} />
+      <Route path="/stress" element={stressRouteElement} />
+      <Route path="/stress/*" element={stressRouteElement} />
         <Route
           path="*"
           element={

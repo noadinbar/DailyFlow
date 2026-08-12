@@ -106,45 +106,38 @@ Workouts rules:
 - If adding icons, use clean UI icons or inline SVGs, not emoji.
 
 Current active milestone:
-The current active milestone is final UI/UX polish and consistency across implemented screens before presentation/demo.
+The current active milestone is completing the remaining DailyFlow product areas before final UI/UX polish.
+
+Current planned order:
+- Stress & Breaks
+- Overview
+- Workout image generation, if an additional image model is approved
+- Mobile responsiveness and final cross-screen polish
 
 Current focus areas:
-- Meals & Grocery polish
-- Workouts polish
-- Google reconnect behavior
-- Profile/Preferences popup cleanup
-- Sidebar navigation polish
-- Keep existing backend logic stable unless the requested UI behavior requires backend support
+- Stress & Breaks implementation
+- Keep existing Calendar, Workouts, Meals, Google integration, and profile flows stable
+- Reuse existing UI and backend patterns where appropriate
+- Work incrementally and avoid unrelated changes
 
-Meals & Grocery current direction:
-- Keep the real Meals & Grocery screen, not a temporary test page.
-- The screen includes:
-  - Meal Library
-  - Saved Meals This Week
-  - Grocery List
-- There should not be an automatic weekly meal plan like Workouts.
-- The user manually chooses meals from the Meal Library.
-- Clicking + on a meal should open a popup where the user chooses date and time.
-- The app should calculate the end time using the meal prep duration.
-- The app should check BusyBlocks before saving a meal prep event.
-- If valid, the app should create a DailyFlow Google Calendar event.
-- Saved Meals This Week should be the source for Grocery List generation.
-- Grocery List should not be generated from the entire Meal Library.
-- Meals should support servings internally, and grocery aggregation may use servings internally.
-- Grocery List UI should show product names only.
-- Grocery List PDF export should show product names only.
-- Do not display grocery quantities or units in the UI or PDF export.
-- Meal Library should support favorites and filters.
-- Meal tags/categories should use soft pastel colors.
-- The same tag should consistently receive the same pastel color.
-- Meal Preferences was removed. Do not add it back to the frontend or backend.
-- Use existing profile/questionnaire data where relevant, for example diet-related preferences.
-- Do not extend the onboarding questionnaire unless explicitly requested.
+Stress & Breaks direction:
+- Stress & Breaks is a separate product area with its own first-time questionnaire and editable preferences.
+- Do not modify the existing global onboarding questionnaire for Stress & Breaks.
+- Use BusyBlocks and user-provided preferences to identify potentially stressful periods; do not claim to detect actual stress.
+- The screen will include:
+  - Potentially Stressful Periods
+  - Weekly Break Plan
+  - Activity Library
+- Activity Library should follow the existing Meals/Workouts library design language and include favorites.
+- Activity Library will distinguish between Timed and Flexible activities.
+- Weekly Break Plan and Google Calendar behavior should reuse existing Workouts patterns where appropriate.
+- DailyFlow should provide recommendations but should not automatically schedule breaks for the user.
+- Do not implement Apple Watch, HRV, or physiological stress detection.
 
 General milestone rules:
 - Work incrementally and in small scoped steps.
 - Do not skip ahead to unrelated milestone work.
-- Do not implement Apple Watch, new Stress logic, new Overview logic, or unrelated features unless explicitly requested.
+- - Do not implement Apple Watch, Overview logic, workout image generation, mobile responsiveness, or unrelated milestone work unless explicitly requested.
 - Do not rewrite unrelated parts of the app.
 - Do not add unnecessary architecture changes.
 - Keep Calendar, Workouts, Meals, Stress, and Overview logically separated.

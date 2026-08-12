@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import boto3
 from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
 
-OPENAI_MODEL = "gpt-5-mini"
+OPENAI_MODEL = "gpt-4.1-mini"
 OPENAI_TIMEOUT_SECONDS = 12
 OPENAI_MAX_RETRIES = 0
 MEAL_TYPE_TARGETS: Dict[str, int] = {

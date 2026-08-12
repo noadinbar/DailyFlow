@@ -11,11 +11,21 @@ _Q_DIR = str(Path(__file__).resolve().parent.parent / "questionnaire")
 if _Q_DIR not in sys.path:
     sys.path.insert(0, _Q_DIR)
 
+_PROFILE_DIR = str(Path(__file__).resolve().parent)
+if _PROFILE_DIR not in sys.path:
+    sys.path.insert(0, _PROFILE_DIR)
+
 from shared_fields import (  # noqa: E402
     QUESTIONNAIRE_KEYS,
     normalize_workouts_per_week_for_storage,
     questionnaire_from_user_item,
     validate_questionnaire_payload,
+)
+from stress_breaks_fields import (  # noqa: E402
+    ATTR_TO_API,
+    normalize_stress_breaks_for_storage,
+    stress_breaks_from_user_item,
+    validate_stress_breaks_payload,
 )
 
 _CORS_HEADERS = {
@@ -153,6 +163,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         q = questionnaire_from_user_item(item)
         if q:
             body["questionnaire"] = q
+        stress_breaks = stress_breaks_from_user_item(item)
+        if stress_breaks is not None:
+            body["stress_breaks"] = stress_breaks
         return _json_response(200, body)
 
     if method != "PATCH":
@@ -172,6 +185,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         err = validate_questionnaire_payload(questionnaire_payload)
         if err:
             return _json_response(400, {"message": err})
+
+    stress_breaks_payload: Optional[Dict[str, Any]] = None
+    if "stress_breaks" in payload:
+        raw_sb = payload.get("stress_breaks")
+        if not isinstance(raw_sb, dict):
+            return _json_response(400, {"message": "stress_breaks must be a JSON object."})
+        sb_err = validate_stress_breaks_payload(raw_sb)
+        if sb_err:
+            return _json_response(400, {"message": sb_err})
+        stress_breaks_payload = raw_sb
 
     updates: Dict[str, str] = {}
     removes: list[str] = []
@@ -228,6 +251,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         updates[key] = token
         expr_values[token] = value
 
+    stress_breaks_stored: Optional[Dict[str, Any]] = None
+    if stress_breaks_payload is not None:
+        stress_breaks_stored = normalize_stress_breaks_for_storage(stress_breaks_payload)
+        for attr_name, attr_value in stress_breaks_stored.items():
+            token = f":sb_{attr_name}"
+            updates[attr_name] = token
+            expr_values[token] = attr_value
+
     if not updates and not removes:
         return _json_response(400, {"message": "At least one updatable field is required."})
 
@@ -270,5 +301,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             else:
                 saved_q[k] = v
         response_body["questionnaire"] = saved_q
+
+    if stress_breaks_payload is not None:
+        # Return only the Stress & Breaks fields written in this request.
+        response_sb: Dict[str, Any] = {}
+        for attr_name, attr_value in (stress_breaks_stored or {}).items():
+            api_key = ATTR_TO_API.get(attr_name)
+            if api_key:
+                response_sb[api_key] = attr_value
+        response_body["stress_breaks"] = response_sb
 
     return _json_response(200, response_body)
