@@ -30,9 +30,12 @@ export type StressActivitiesResponse = {
   timed_activities?: StressActivity[];
   flexible_activities?: StressActivity[];
   favorite_activities?: StressActivity[];
+  weekly_break_plan?: unknown[];
   has_library?: boolean;
   generated_at?: string | null;
   updated_at?: string | null;
+  week_start?: string | null;
+  week_end?: string | null;
   message?: string;
   metadata?: {
     timed_categories?: string[];

@@ -38,12 +38,15 @@ from activity_model import (  # noqa: E402
     json_safe,
     library_table,
     load_library_item,
+    merge_flexible_preserving_plan_refs,
     merge_timed_preserving_favorites,
     normalize_activity_list,
     normalize_favorites,
     normalize_timed_activity,
+    normalize_weekly_break_plan,
     safe_string_list,
     to_dynamodb_safe,
+    weekly_plan_referenced_ids,
 )
 
 OPENAI_MODEL = "gpt-4.1-mini"
@@ -238,7 +241,9 @@ def _save_library(
     flexible_activities: List[Dict[str, Any]],
     favorite_activities: List[Dict[str, Any]],
     generated_at: str,
+    existing_item: Optional[Dict[str, Any]] = None,
 ) -> None:
+    existing = existing_item or {}
     item = {
         "user_id": user_id,
         "timed_activities": timed_activities,
@@ -246,7 +251,18 @@ def _save_library(
         "favorite_activities": favorite_activities,
         "generated_at": generated_at,
         "updated_at": generated_at,
+        # Preserve Weekly Break Plan across library regeneration (Workouts-style).
+        "current_week_plan": normalize_weekly_break_plan(existing.get("current_week_plan")),
     }
+    week_start = existing.get("current_week_plan_week_start")
+    week_end = existing.get("current_week_plan_week_end")
+    plan_updated_at = existing.get("current_week_plan_updated_at")
+    if isinstance(week_start, str) and week_start.strip():
+        item["current_week_plan_week_start"] = week_start.strip()
+    if isinstance(week_end, str) and week_end.strip():
+        item["current_week_plan_week_end"] = week_end.strip()
+    if isinstance(plan_updated_at, str) and plan_updated_at.strip():
+        item["current_week_plan_updated_at"] = plan_updated_at.strip()
     library_table().put_item(Item=to_dynamodb_safe(item))
 
 
@@ -300,8 +316,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
 
     previous_timed = normalize_activity_list(existing.get("timed_activities"), kind="timed")
+    previous_flexible = normalize_activity_list(existing.get("flexible_activities"), kind="flexible")
     favorite_activities = normalize_favorites(existing.get("favorite_activities"))
-    flexible_activities = flexible_activities_for_prefs(flexible_cats)
+    existing_weekly_plan = normalize_weekly_break_plan(existing.get("current_week_plan"))
+    referenced_ids = weekly_plan_referenced_ids(existing_weekly_plan)
+    flexible_activities = merge_flexible_preserving_plan_refs(
+        refreshed=flexible_activities_for_prefs(flexible_cats),
+        previous_flexible=previous_flexible,
+        referenced_library_ids=referenced_ids,
+    )
 
     timed_activities: List[Dict[str, Any]] = []
     if timed_cats:
@@ -326,10 +349,25 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             generated=generated,
             favorite_activities=favorite_activities,
             previous_timed=previous_timed,
+            referenced_library_ids=referenced_ids,
         )
     else:
-        # No Timed categories selected: clear Timed library, but keep Timed favorites in favorite_activities.
+        # Keep Timed activities that are still referenced by the Weekly Break Plan.
         timed_activities = []
+        previous_by_id = {str(item.get("id", "")).strip(): item for item in previous_timed}
+        used_sigs = set()
+        for ref_id in referenced_ids:
+            source = previous_by_id.get(ref_id)
+            if not source:
+                continue
+            item = normalize_timed_activity(source)
+            if not item:
+                continue
+            sig = activity_signature(item)
+            if sig in used_sigs:
+                continue
+            used_sigs.add(sig)
+            timed_activities.append(item)
 
     generated_at = iso_utc_now()
     try:
@@ -339,6 +377,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             flexible_activities=flexible_activities,
             favorite_activities=favorite_activities,
             generated_at=generated_at,
+            existing_item=existing,
         )
     except Exception as err:
         print(f"[stress-generate] save failed: {err}\n{traceback.format_exc()}")
@@ -350,6 +389,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "timed_activities": timed_activities,
             "flexible_activities": flexible_activities,
             "favorite_activities": favorite_activities,
+            "weekly_break_plan": existing_weekly_plan,
             "has_library": bool(timed_activities or flexible_activities),
             "generated_at": generated_at,
             "updated_at": generated_at,

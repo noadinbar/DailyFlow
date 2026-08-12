@@ -7,6 +7,10 @@ import { pastelTagStyle } from '../shared/pastelTags';
 import StressBreaksQuestionnaireWizard from './StressBreaksQuestionnaireWizard';
 import StressBreaksPreferencesModal from './StressBreaksPreferencesModal';
 import ActivityLibrarySection from './ActivityLibrarySection';
+import WeeklyBreakPlanSection, {
+  AddToWeeklyPlanModal,
+  type WeeklyBreakPlanItem,
+} from './WeeklyBreakPlanSection';
 import {
   EMPTY_STRESS_BREAKS_FORM,
   stressBreaksPreferencesFromApi,
@@ -28,6 +32,107 @@ type StressBreaksScreenProps = {
 
 type PreferencesLoadState = 'loading' | 'ready' | 'error';
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function toIsoDateLocal(value: Date): string {
+  return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+}
+
+function startOfWeek(value: Date): Date {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  next.setDate(next.getDate() - next.getDay());
+  return next;
+}
+
+function buildWeekCards(weekStart: Date): { dayLabel: string; dateIso: string }[] {
+  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const cards: { dayLabel: string; dateIso: string }[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + i);
+    cards.push({ dayLabel: labels[i], dateIso: toIsoDateLocal(day) });
+  }
+  return cards;
+}
+
+const ENGLISH_DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+function formatAddPopupDayLabel(date: Date): string {
+  return `${ENGLISH_DAY_NAMES[date.getDay()]} ${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}`;
+}
+
+function buildAddPopupDayOptions(now: Date): { value: string; label: string }[] {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const daysUntilSaturday = 6 - today.getDay();
+  const options: { value: string; label: string }[] = [];
+  for (let i = 0; i <= daysUntilSaturday; i += 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() + i);
+    options.push({ value: toIsoDateLocal(day), label: formatAddPopupDayLabel(day) });
+  }
+  return options;
+}
+
+function isValidHHmm(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function sanitizeHHmmTyping(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+function normalizeWeeklyBreakPlan(raw: unknown): WeeklyBreakPlanItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WeeklyBreakPlanItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const o = entry as Record<string, unknown>;
+    const id = typeof o.id === 'string' ? o.id.trim() : '';
+    const libraryId = typeof o.library_activity_id === 'string' ? o.library_activity_id.trim() : '';
+    const title = typeof o.title === 'string' ? o.title.trim() : '';
+    const category = typeof o.category === 'string' ? o.category.trim() : '';
+    const day = typeof o.recommended_day === 'string' ? o.recommended_day.trim() : '';
+    const start = typeof o.recommended_start_time === 'string' ? o.recommended_start_time.trim() : '';
+    const end = typeof o.recommended_end_time === 'string' ? o.recommended_end_time.trim() : '';
+    const duration =
+      typeof o.duration_minutes === 'number' && Number.isFinite(o.duration_minutes)
+        ? Math.max(1, Math.ceil(o.duration_minutes))
+        : 0;
+    if (!id || !libraryId || !title || !category || !day || !start || !end || duration <= 0) continue;
+    const kindRaw = typeof o.kind === 'string' ? o.kind.trim().toLowerCase() : '';
+    const kind: 'timed' | 'flexible' =
+      kindRaw === 'flexible' || libraryId.startsWith('flex_') ? 'flexible' : 'timed';
+    out.push({
+      id,
+      library_activity_id: libraryId,
+      kind,
+      title,
+      category,
+      category_label: typeof o.category_label === 'string' ? o.category_label : undefined,
+      duration_minutes: duration,
+      recommended_day: day,
+      recommended_start_time: start,
+      recommended_end_time: end,
+      summary_short: typeof o.summary_short === 'string' ? o.summary_short : undefined,
+    });
+  }
+  return out;
+}
+
 export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const { username, onLogout } = props;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useSidebarCollapsed();
@@ -46,6 +151,7 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const [timedActivities, setTimedActivities] = React.useState<StressActivity[]>([]);
   const [flexibleActivities, setFlexibleActivities] = React.useState<StressActivity[]>([]);
   const [favoriteActivities, setFavoriteActivities] = React.useState<StressActivity[]>([]);
+  const [weeklyBreakPlan, setWeeklyBreakPlan] = React.useState<WeeklyBreakPlanItem[]>([]);
   const [hasLibrary, setHasLibrary] = React.useState(false);
   const [isLoadingLibrary, setIsLoadingLibrary] = React.useState(false);
   const [libraryLoadError, setLibraryLoadError] = React.useState('');
@@ -54,11 +160,27 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const [favoriteError, setFavoriteError] = React.useState('');
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState(false);
   const [selectedActivity, setSelectedActivity] = React.useState<StressActivity | null>(null);
+  const [weekStartDate] = React.useState<Date>(() => startOfWeek(new Date()));
+  const [isSavingWeeklyPlan, setIsSavingWeeklyPlan] = React.useState(false);
+  const [weeklyPlanError, setWeeklyPlanError] = React.useState('');
+  const [addFromLibraryActivity, setAddFromLibraryActivity] = React.useState<StressActivity | null>(null);
+  const [addFromLibraryDay, setAddFromLibraryDay] = React.useState('');
+  const [addFromLibraryStartTime, setAddFromLibraryStartTime] = React.useState('18:00');
+  const [addFromLibraryDuration, setAddFromLibraryDuration] = React.useState<number | null>(10);
+  const [addFromLibraryError, setAddFromLibraryError] = React.useState('');
 
   const effectiveName = displayName.trim() || username || 'User';
   const questionnaireCompleted = stressBreaks?.questionnaire_completed === true;
   const showQuestionnaire =
     preferencesLoadState === 'ready' && !questionnaireCompleted;
+
+  const weekCards = React.useMemo(() => buildWeekCards(weekStartDate), [weekStartDate]);
+  const weekStartIso = weekCards[0]?.dateIso || toIsoDateLocal(weekStartDate);
+  const weekEndIso = weekCards[6]?.dateIso || weekStartIso;
+  const addFromLibraryDayOptions = React.useMemo(
+    () => (addFromLibraryActivity ? buildAddPopupDayOptions(new Date()) : []),
+    [addFromLibraryActivity]
+  );
 
   const favoriteKeySet = React.useMemo(() => {
     const keys = new Set<string>();
@@ -77,16 +199,24 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     return keys;
   }, [favoriteActivities]);
 
+  const libraryById = React.useMemo(() => {
+    const map = new Map<string, StressActivity>();
+    for (const item of [...timedActivities, ...flexibleActivities]) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [timedActivities, flexibleActivities]);
+
   function applyLibraryPayload(payload: StressActivitiesResponse) {
     const timed = normalizeActivityList(payload.timed_activities);
     const flexible = normalizeActivityList(payload.flexible_activities);
     const favorites = normalizeActivityList(payload.favorite_activities);
+    const plan = normalizeWeeklyBreakPlan(payload.weekly_break_plan);
     setTimedActivities(timed);
     setFlexibleActivities(flexible);
     setFavoriteActivities(favorites);
-    setHasLibrary(
-      payload.has_library === true || timed.length > 0 || flexible.length > 0
-    );
+    setWeeklyBreakPlan(plan);
+    setHasLibrary(payload.has_library === true || timed.length > 0 || flexible.length > 0);
   }
 
   async function getAuthToken(): Promise<string> {
@@ -432,6 +562,125 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     }
   }
 
+  async function mutateWeeklyPlan(
+    payload: Record<string, unknown>,
+    options?: { onError?: (message: string) => void; suppressGlobalError?: boolean }
+  ): Promise<WeeklyBreakPlanItem[] | null> {
+    try {
+      setWeeklyPlanError('');
+      setIsSavingWeeklyPlan(true);
+      const token = await getAuthToken();
+      const response = await fetch(buildApiUrl('/stress/activities'), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      let responsePayload: { weekly_break_plan?: unknown; message?: string } = {};
+      try {
+        responsePayload = (await response.json()) as typeof responsePayload;
+      } catch {
+        responsePayload = {};
+      }
+      if (!response.ok) {
+        throw new Error(
+          typeof responsePayload.message === 'string' && responsePayload.message.trim()
+            ? responsePayload.message
+            : `Could not update weekly break plan (${response.status}).`
+        );
+      }
+      const savedPlan = normalizeWeeklyBreakPlan(responsePayload.weekly_break_plan);
+      setWeeklyBreakPlan(savedPlan);
+      return savedPlan;
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      const message =
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to save weekly break plan.';
+      if (options?.onError) options.onError(message);
+      if (!options?.suppressGlobalError) setWeeklyPlanError(message);
+      return null;
+    } finally {
+      setIsSavingWeeklyPlan(false);
+    }
+  }
+
+  function openAddFromLibraryModal(activity: StressActivity) {
+    const options = buildAddPopupDayOptions(new Date());
+    setAddFromLibraryActivity(activity);
+    setAddFromLibraryDay(options[0]?.value || '');
+    setAddFromLibraryStartTime('18:00');
+    setAddFromLibraryDuration(activity.kind === 'flexible' ? 10 : null);
+    setAddFromLibraryError('');
+  }
+
+  function closeAddFromLibraryModal() {
+    if (isSavingWeeklyPlan) return;
+    setAddFromLibraryActivity(null);
+    setAddFromLibraryError('');
+  }
+
+  async function handleAddFromLibrarySave() {
+    if (!addFromLibraryActivity || !addFromLibraryDay || !addFromLibraryStartTime) return;
+    if (!isValidHHmm(addFromLibraryStartTime)) {
+      setAddFromLibraryError('Please enter start time as HH:mm (00:00 to 23:59).');
+      return;
+    }
+    if (addFromLibraryActivity.kind === 'flexible') {
+      if (addFromLibraryDuration == null || ![5, 10, 15, 20, 30].includes(addFromLibraryDuration)) {
+        setAddFromLibraryError('Please choose a duration.');
+        return;
+      }
+    }
+    setAddFromLibraryError('');
+    const body: Record<string, unknown> = {
+      action: 'add_library_activity',
+      week_start: weekStartIso,
+      week_end: weekEndIso,
+      library_activity_id: addFromLibraryActivity.id,
+      recommended_day: addFromLibraryDay,
+      recommended_start_time: addFromLibraryStartTime,
+    };
+    if (addFromLibraryActivity.kind === 'flexible') {
+      body.duration_minutes = addFromLibraryDuration;
+    }
+    const saved = await mutateWeeklyPlan(body, {
+      onError: setAddFromLibraryError,
+      suppressGlobalError: true,
+    });
+    if (saved) closeAddFromLibraryModal();
+  }
+
+  async function handleRemoveWeeklyPlanItem(planId: string) {
+    await mutateWeeklyPlan({
+      action: 'remove_plan_item',
+      week_start: weekStartIso,
+      week_end: weekEndIso,
+      plan_id: planId,
+    });
+  }
+
+  function openActivityFromPlan(libraryActivityId: string) {
+    const found = libraryById.get(libraryActivityId);
+    if (found) {
+      setSelectedActivity(found);
+      return;
+    }
+    const fromPlan = weeklyBreakPlan.find((item) => item.library_activity_id === libraryActivityId);
+    if (!fromPlan) return;
+    setSelectedActivity({
+      id: fromPlan.library_activity_id,
+      kind: fromPlan.kind,
+      title: fromPlan.title,
+      category: fromPlan.category,
+      category_label: fromPlan.category_label,
+      duration_minutes: fromPlan.kind === 'flexible' ? null : fromPlan.duration_minutes,
+      summary_short: fromPlan.summary_short || `${fromPlan.title} break.`,
+      instructions: [],
+    });
+  }
+
   React.useEffect(() => {
     let cancelled = false;
     setPreferencesLoadState('loading');
@@ -615,23 +864,35 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
           )}
 
           {preferencesLoadState === 'ready' && questionnaireCompleted && (
-            <ActivityLibrarySection
-              timedActivities={timedActivities}
-              flexibleActivities={flexibleActivities}
-              favoriteKeySet={favoriteKeySet}
-              favoriteSignatureSet={favoriteSignatureSet}
-              hasLibrary={hasLibrary}
-              isLoadingLibrary={isLoadingLibrary}
-              libraryLoadError={libraryLoadError}
-              isGenerating={isGenerating}
-              generateError={generateError}
-              favoriteError={favoriteError}
-              isTogglingFavorite={isTogglingFavorite}
-              onGenerate={() => void generateActivities()}
-              onRetryLoad={handleRetryLibraryLoad}
-              onToggleFavorite={(activity) => void toggleFavorite(activity)}
-              onOpenDetail={setSelectedActivity}
-            />
+            <>
+              <WeeklyBreakPlanSection
+                weekCards={weekCards}
+                planItems={weeklyBreakPlan}
+                isSaving={isSavingWeeklyPlan}
+                planError={weeklyPlanError}
+                onRemove={(planId) => void handleRemoveWeeklyPlanItem(planId)}
+                onOpenActivity={openActivityFromPlan}
+              />
+              <ActivityLibrarySection
+                timedActivities={timedActivities}
+                flexibleActivities={flexibleActivities}
+                favoriteKeySet={favoriteKeySet}
+                favoriteSignatureSet={favoriteSignatureSet}
+                hasLibrary={hasLibrary}
+                isLoadingLibrary={isLoadingLibrary}
+                libraryLoadError={libraryLoadError}
+                isGenerating={isGenerating}
+                generateError={generateError}
+                favoriteError={favoriteError}
+                isTogglingFavorite={isTogglingFavorite}
+                isSavingWeeklyPlan={isSavingWeeklyPlan}
+                onGenerate={() => void generateActivities()}
+                onRetryLoad={handleRetryLibraryLoad}
+                onToggleFavorite={(activity) => void toggleFavorite(activity)}
+                onOpenDetail={setSelectedActivity}
+                onAddToWeeklyPlan={openAddFromLibraryModal}
+              />
+            </>
           )}
         </div>
       </div>
@@ -644,6 +905,7 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
             setHasLibrary(false);
             setTimedActivities([]);
             setFlexibleActivities([]);
+            setWeeklyBreakPlan([]);
             setLibraryLoadError('');
             setIsLoadingLibrary(true);
             void (async () => {
@@ -676,6 +938,31 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
         onSave={saveStressBreaksPreferences}
       />
 
+      {addFromLibraryActivity && (
+        <AddToWeeklyPlanModal
+          activity={addFromLibraryActivity}
+          dayOptions={addFromLibraryDayOptions}
+          day={addFromLibraryDay}
+          startTime={addFromLibraryStartTime}
+          durationMinutes={addFromLibraryDuration}
+          error={addFromLibraryError}
+          isSaving={isSavingWeeklyPlan}
+          onDayChange={(value) => {
+            setAddFromLibraryDay(value);
+            setAddFromLibraryError('');
+          }}
+          onStartTimeChange={(value) => {
+            setAddFromLibraryStartTime(sanitizeHHmmTyping(value));
+            setAddFromLibraryError('');
+          }}
+          onDurationChange={(value) => {
+            setAddFromLibraryDuration(value);
+            setAddFromLibraryError('');
+          }}
+          onSave={() => void handleAddFromLibrarySave()}
+          onClose={closeAddFromLibraryModal}
+        />
+      )}
       {selectedActivity && (
         <div
           className="df-modalBackdrop"

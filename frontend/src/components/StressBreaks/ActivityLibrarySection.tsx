@@ -1,5 +1,5 @@
 import React from 'react';
-import { ClockIcon, HeartIcon } from '../Sidebar/AppSidebar';
+import { CalendarPlusIcon, ClockIcon, HeartIcon } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
 import {
   activityFavoriteKey,
@@ -22,10 +22,12 @@ type ActivityLibrarySectionProps = {
   generateError: string;
   favoriteError: string;
   isTogglingFavorite: boolean;
+  isSavingWeeklyPlan: boolean;
   onGenerate: () => void;
   onRetryLoad: () => void;
   onToggleFavorite: (activity: StressActivity) => void;
   onOpenDetail: (activity: StressActivity) => void;
+  onAddToWeeklyPlan: (activity: StressActivity) => void;
 };
 
 export default function ActivityLibrarySection(props: ActivityLibrarySectionProps) {
@@ -41,10 +43,12 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
     generateError,
     favoriteError,
     isTogglingFavorite,
+    isSavingWeeklyPlan,
     onGenerate,
     onRetryLoad,
     onToggleFavorite,
     onOpenDetail,
+    onAddToWeeklyPlan,
   } = props;
 
   const [activeTab, setActiveTab] = React.useState<LibraryTab>('timed');
@@ -192,6 +196,22 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
                   {durationLabel}
                 </div>
                 <div className="df-workoutMeta df-workoutLibrarySummary">{item.summary_short}</div>
+                <button
+                  type="button"
+                  className="df-mealLibraryCalendarBtn df-workoutLibraryActionBtn"
+                  aria-label={`Add ${item.title} to weekly break plan`}
+                  title="Add to weekly break plan"
+                  disabled={isSavingWeeklyPlan}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddToWeeklyPlan(item);
+                  }}
+                >
+                  <span className="df-mealLibraryCalendarBtnIcon df-inlineIcon" aria-hidden>
+                    <CalendarPlusIcon size={16} />
+                  </span>
+                  Add to plan
+                </button>
               </article>
             );
           })}

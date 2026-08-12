@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha1
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import boto3
 
@@ -298,15 +299,23 @@ def merge_timed_preserving_favorites(
     generated: List[Dict[str, Any]],
     favorite_activities: List[Dict[str, Any]],
     previous_timed: List[Dict[str, Any]],
+    referenced_library_ids: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Workouts-style merge: keep favorited Timed activities (by signature),
-    then append new generated activities that are not signature-duplicates.
+    Workouts-style merge: keep favorited Timed activities (by signature) and
+    activities referenced by the Weekly Break Plan, then append new generated
+    activities that are not signature-duplicates.
     """
     fav_keys = {
         str(f.get("favorite_key", "")).strip() or favorite_key_from_item(f)
         for f in favorite_activities
         if str(f.get("kind", "")).strip().lower() != "flexible"
+    }
+    referenced_ids = {x for x in (referenced_library_ids or set()) if x}
+    previous_by_id = {
+        str(item.get("id", "")).strip(): item
+        for item in previous_timed
+        if str(item.get("id", "")).strip()
     }
     previous_by_sig = {activity_signature(item): item for item in previous_timed}
     favorites_by_sig = {
@@ -319,16 +328,13 @@ def merge_timed_preserving_favorites(
     used_ids: Set[str] = set()
     used_sigs: Set[str] = set()
 
-    for key in fav_keys:
-        source = favorites_by_sig.get(key) or previous_by_sig.get(key)
-        if not source:
-            continue
+    def _append_preserved(source: Dict[str, Any]) -> None:
         item = normalize_timed_activity(source)
         if not item:
-            continue
+            return
         sig = activity_signature(item)
         if sig in used_sigs:
-            continue
+            return
         item_id = str(item.get("id", "")).strip()
         if not item_id or item_id in used_ids:
             item_id = next_timed_id(used_ids)
@@ -336,6 +342,16 @@ def merge_timed_preserving_favorites(
         used_ids.add(item_id)
         used_sigs.add(sig)
         preserved.append(item)
+
+    for key in fav_keys:
+        source = favorites_by_sig.get(key) or previous_by_sig.get(key)
+        if source:
+            _append_preserved(source)
+
+    for ref_id in referenced_ids:
+        source = previous_by_id.get(ref_id)
+        if source:
+            _append_preserved(source)
 
     merged = list(preserved)
     for item in generated:
@@ -351,3 +367,127 @@ def merge_timed_preserving_favorites(
         used_sigs.add(sig)
         merged.append(next_item)
     return merged
+
+
+def merge_flexible_preserving_plan_refs(
+    *,
+    refreshed: List[Dict[str, Any]],
+    previous_flexible: List[Dict[str, Any]],
+    referenced_library_ids: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Keep Flexible catalog refresh, plus any plan-referenced flexible activities."""
+    referenced_ids = {x for x in (referenced_library_ids or set()) if x}
+    by_id = {
+        str(item.get("id", "")).strip(): item
+        for item in refreshed
+        if str(item.get("id", "")).strip()
+    }
+    previous_by_id = {
+        str(item.get("id", "")).strip(): item
+        for item in previous_flexible
+        if str(item.get("id", "")).strip()
+    }
+    out = list(refreshed)
+    for ref_id in referenced_ids:
+        if ref_id in by_id:
+            continue
+        source = previous_by_id.get(ref_id)
+        if not source:
+            continue
+        item = normalize_flexible_activity(source)
+        if not item:
+            continue
+        out.append(item)
+        by_id[ref_id] = item
+    return out
+
+
+def parse_hh_mm(value: str) -> Optional[Tuple[int, int]]:
+    raw = str(value or "").strip()
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", raw):
+        return None
+    hour_s, minute_s = raw.split(":")
+    return int(hour_s), int(minute_s)
+
+
+def add_minutes_hhmm(start_hhmm: str, duration_minutes: int) -> Optional[str]:
+    parsed = parse_hh_mm(start_hhmm)
+    if not parsed or duration_minutes <= 0:
+        return None
+    hour, minute = parsed
+    total = hour * 60 + minute + duration_minutes
+    if total > 24 * 60:
+        return None
+    end_h, end_m = divmod(total, 60)
+    if end_h == 24 and end_m == 0:
+        return "24:00"
+    if end_h >= 24:
+        return None
+    return f"{end_h:02d}:{end_m:02d}"
+
+
+FLEXIBLE_PLAN_DURATIONS: Tuple[int, ...] = (5, 10, 15, 20, 30)
+
+
+def next_plan_id(current_plan: List[Dict[str, Any]]) -> str:
+    max_idx = 0
+    for item in current_plan:
+        plan_id = str(item.get("id", "")).strip()
+        if plan_id.startswith("plan_") and plan_id[5:].isdigit():
+            max_idx = max(max_idx, int(plan_id[5:]))
+    return f"plan_{max_idx + 1}"
+
+
+def normalize_weekly_break_plan(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        lib_id = str(item.get("library_activity_id", "")).strip()
+        rec_day = str(item.get("recommended_day", "")).strip()
+        rec_start = str(item.get("recommended_start_time", "")).strip()
+        rec_end = str(item.get("recommended_end_time", "")).strip()
+        if not lib_id or not rec_day or not rec_start or not rec_end:
+            continue
+        kind = str(item.get("kind", "")).strip().lower()
+        if kind not in {"timed", "flexible"}:
+            kind = "flexible" if lib_id.startswith("flex_") else "timed"
+        duration_minutes = to_int(item.get("duration_minutes"), 0)
+        if duration_minutes <= 0:
+            continue
+        title = str(item.get("title", "")).strip()
+        category = str(item.get("category", "")).strip()
+        cleaned.append(
+            {
+                "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned) + 1}",
+                "library_activity_id": lib_id,
+                "kind": kind,
+                "title": title,
+                "category": category,
+                "category_label": str(item.get("category_label", "")).strip() or category_label(category),
+                "duration_minutes": duration_minutes,
+                "recommended_day": rec_day,
+                "recommended_start_time": rec_start,
+                "recommended_end_time": rec_end,
+                "summary_short": str(item.get("summary_short", "")).strip(),
+            }
+        )
+    cleaned.sort(
+        key=lambda x: (
+            x["recommended_day"],
+            x["recommended_start_time"],
+            x["recommended_end_time"],
+            x["id"],
+        )
+    )
+    return cleaned
+
+
+def weekly_plan_referenced_ids(plan: List[Dict[str, Any]]) -> Set[str]:
+    return {
+        str(item.get("library_activity_id", "")).strip()
+        for item in plan
+        if str(item.get("library_activity_id", "")).strip()
+    }
