@@ -63,6 +63,16 @@ const NAMED_TAG_INDEX: Record<string, number> = {
   outdoor: 0,
   home: 6,
 
+  // Stress & Breaks activity categories
+  breathing: 1,
+  meditation: 2,
+  stretching: 0,
+  walking: 0,
+  reading: 5,
+  journaling: 4,
+  music: 3,
+  screenfree: 6,
+
   // Intensity-like labels that occasionally appear as chips
   low: 0,
   moderate: 5,

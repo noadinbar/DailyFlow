@@ -3,13 +3,23 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
 import AppSidebar, { useSidebarCollapsed } from '../Sidebar/AppSidebar';
 import { buildApiUrl } from '../../services/api';
+import { pastelTagStyle } from '../shared/pastelTags';
 import StressBreaksQuestionnaireWizard from './StressBreaksQuestionnaireWizard';
 import StressBreaksPreferencesModal from './StressBreaksPreferencesModal';
+import ActivityLibrarySection from './ActivityLibrarySection';
 import {
   EMPTY_STRESS_BREAKS_FORM,
   stressBreaksPreferencesFromApi,
   type StressBreaksPreferences,
 } from './stressBreaksPreferences';
+import {
+  activityFavoriteKey,
+  activityMatchSignature,
+  categoryDisplayLabel,
+  normalizeActivityList,
+  type StressActivitiesResponse,
+  type StressActivity,
+} from './activityCategories';
 
 type StressBreaksScreenProps = {
   username?: string;
@@ -33,10 +43,51 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const [stressBreaks, setStressBreaks] = React.useState<StressBreaksPreferences | null>(null);
   const [isPreferencesModalOpen, setIsPreferencesModalOpen] = React.useState(false);
 
+  const [timedActivities, setTimedActivities] = React.useState<StressActivity[]>([]);
+  const [flexibleActivities, setFlexibleActivities] = React.useState<StressActivity[]>([]);
+  const [favoriteActivities, setFavoriteActivities] = React.useState<StressActivity[]>([]);
+  const [hasLibrary, setHasLibrary] = React.useState(false);
+  const [isLoadingLibrary, setIsLoadingLibrary] = React.useState(false);
+  const [libraryLoadError, setLibraryLoadError] = React.useState('');
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [generateError, setGenerateError] = React.useState('');
+  const [favoriteError, setFavoriteError] = React.useState('');
+  const [isTogglingFavorite, setIsTogglingFavorite] = React.useState(false);
+  const [selectedActivity, setSelectedActivity] = React.useState<StressActivity | null>(null);
+
   const effectiveName = displayName.trim() || username || 'User';
   const questionnaireCompleted = stressBreaks?.questionnaire_completed === true;
   const showQuestionnaire =
     preferencesLoadState === 'ready' && !questionnaireCompleted;
+
+  const favoriteKeySet = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of favoriteActivities) {
+      const key = activityFavoriteKey(item);
+      if (key) keys.add(key);
+    }
+    return keys;
+  }, [favoriteActivities]);
+
+  const favoriteSignatureSet = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of favoriteActivities) {
+      keys.add(activityMatchSignature(item));
+    }
+    return keys;
+  }, [favoriteActivities]);
+
+  function applyLibraryPayload(payload: StressActivitiesResponse) {
+    const timed = normalizeActivityList(payload.timed_activities);
+    const flexible = normalizeActivityList(payload.flexible_activities);
+    const favorites = normalizeActivityList(payload.favorite_activities);
+    setTimedActivities(timed);
+    setFlexibleActivities(flexible);
+    setFavoriteActivities(favorites);
+    setHasLibrary(
+      payload.has_library === true || timed.length > 0 || flexible.length > 0
+    );
+  }
 
   async function getAuthToken(): Promise<string> {
     const session = await fetchAuthSession();
@@ -277,15 +328,136 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     return next;
   }
 
+  async function loadActivityLibrary(): Promise<void> {
+    const token = await getAuthToken();
+    const response = await fetch(buildApiUrl('/stress/activities'), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    let payload: StressActivitiesResponse = {};
+    try {
+      payload = (await response.json()) as StressActivitiesResponse;
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) {
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : `Could not load activity library (${response.status}).`;
+      throw new Error(message);
+    }
+    applyLibraryPayload(payload);
+  }
+
+  async function generateActivities(): Promise<void> {
+    setIsGenerating(true);
+    setGenerateError('');
+    setFavoriteError('');
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(buildApiUrl('/stress/activities/generate'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      let payload: StressActivitiesResponse = {};
+      try {
+        payload = (await response.json()) as StressActivitiesResponse;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not generate activities (${response.status}).`;
+        throw new Error(message);
+      }
+      applyLibraryPayload(payload);
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setGenerateError(
+        typeof anyErr?.message === 'string' && anyErr.message.trim()
+          ? anyErr.message
+          : 'Could not generate activities.'
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function toggleFavorite(activity: StressActivity): Promise<void> {
+    setIsTogglingFavorite(true);
+    setFavoriteError('');
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(buildApiUrl('/stress/activities'), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: 'toggle_favorite',
+          activity,
+        }),
+      });
+      let payload: { favorite_activities?: unknown; message?: string } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not update favorite (${response.status}).`;
+        throw new Error(message);
+      }
+      setFavoriteActivities(normalizeActivityList(payload.favorite_activities));
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setFavoriteError(
+        typeof anyErr?.message === 'string' && anyErr.message.trim()
+          ? anyErr.message
+          : 'Could not update favorite.'
+      );
+    } finally {
+      setIsTogglingFavorite(false);
+    }
+  }
+
   React.useEffect(() => {
     let cancelled = false;
     setPreferencesLoadState('loading');
     setPreferencesLoadError('');
     void (async () => {
       try {
-        await loadProfile();
-        if (!cancelled) {
-          setPreferencesLoadState('ready');
+        const loaded = await loadProfile();
+        if (cancelled) return;
+        setPreferencesLoadState('ready');
+        if (loaded.stressBreaks?.questionnaire_completed === true) {
+          setIsLoadingLibrary(true);
+          setLibraryLoadError('');
+          try {
+            await loadActivityLibrary();
+          } catch (e) {
+            const anyErr = e as { message?: string };
+            if (!cancelled) {
+              setLibraryLoadError(
+                typeof anyErr?.message === 'string' && anyErr.message.trim()
+                  ? anyErr.message
+                  : 'Could not load activity library.'
+              );
+            }
+          } finally {
+            if (!cancelled) setIsLoadingLibrary(false);
+          }
         }
       } catch (e) {
         const anyErr = e as { message?: string };
@@ -327,8 +499,24 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     setPreferencesLoadError('');
     void (async () => {
       try {
-        await loadProfile();
+        const loaded = await loadProfile();
         setPreferencesLoadState('ready');
+        if (loaded.stressBreaks?.questionnaire_completed === true) {
+          setIsLoadingLibrary(true);
+          setLibraryLoadError('');
+          try {
+            await loadActivityLibrary();
+          } catch (e) {
+            const anyErr = e as { message?: string };
+            setLibraryLoadError(
+              typeof anyErr?.message === 'string' && anyErr.message.trim()
+                ? anyErr.message
+                : 'Could not load activity library.'
+            );
+          } finally {
+            setIsLoadingLibrary(false);
+          }
+        }
       } catch (e) {
         const anyErr = e as { message?: string };
         setPreferencesLoadError(
@@ -338,6 +526,25 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
         );
         setPreferencesLoadState('error');
         setStressBreaks(null);
+      }
+    })();
+  }
+
+  function handleRetryLibraryLoad() {
+    setIsLoadingLibrary(true);
+    setLibraryLoadError('');
+    void (async () => {
+      try {
+        await loadActivityLibrary();
+      } catch (e) {
+        const anyErr = e as { message?: string };
+        setLibraryLoadError(
+          typeof anyErr?.message === 'string' && anyErr.message.trim()
+            ? anyErr.message
+            : 'Could not load activity library.'
+        );
+      } finally {
+        setIsLoadingLibrary(false);
       }
     })();
   }
@@ -408,16 +615,23 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
           )}
 
           {preferencesLoadState === 'ready' && questionnaireCompleted && (
-            <section className="df-workoutsSection">
-              <div className="df-workoutsSectionHeader">
-                <h2 className="df-workoutsTitle" style={{ fontSize: 20, margin: 0 }}>
-                  Preferences saved
-                </h2>
-              </div>
-              <p className="df-subtitle" style={{ marginTop: 8 }}>
-                Your Stress &amp; Breaks preferences are ready. Use Edit Preferences anytime to update them.
-              </p>
-            </section>
+            <ActivityLibrarySection
+              timedActivities={timedActivities}
+              flexibleActivities={flexibleActivities}
+              favoriteKeySet={favoriteKeySet}
+              favoriteSignatureSet={favoriteSignatureSet}
+              hasLibrary={hasLibrary}
+              isLoadingLibrary={isLoadingLibrary}
+              libraryLoadError={libraryLoadError}
+              isGenerating={isGenerating}
+              generateError={generateError}
+              favoriteError={favoriteError}
+              isTogglingFavorite={isTogglingFavorite}
+              onGenerate={() => void generateActivities()}
+              onRetryLoad={handleRetryLibraryLoad}
+              onToggleFavorite={(activity) => void toggleFavorite(activity)}
+              onOpenDetail={setSelectedActivity}
+            />
           )}
         </div>
       </div>
@@ -427,6 +641,25 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
           onSave={saveStressBreaksPreferences}
           onCompleted={(saved) => {
             setStressBreaks(saved);
+            setHasLibrary(false);
+            setTimedActivities([]);
+            setFlexibleActivities([]);
+            setLibraryLoadError('');
+            setIsLoadingLibrary(true);
+            void (async () => {
+              try {
+                await loadActivityLibrary();
+              } catch (e) {
+                const anyErr = e as { message?: string };
+                setLibraryLoadError(
+                  typeof anyErr?.message === 'string' && anyErr.message.trim()
+                    ? anyErr.message
+                    : 'Could not load activity library.'
+                );
+              } finally {
+                setIsLoadingLibrary(false);
+              }
+            })();
           }}
         />
       )}
@@ -442,6 +675,67 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
         onClose={() => setIsPreferencesModalOpen(false)}
         onSave={saveStressBreaksPreferences}
       />
+
+      {selectedActivity && (
+        <div
+          className="df-modalBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedActivity(null);
+          }}
+        >
+          <div
+            className="df-modalPanel"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${selectedActivity.title} details`}
+          >
+            <div className="df-modalHeader">
+              <div className="df-modalTitle">{selectedActivity.title}</div>
+              <button
+                type="button"
+                className="df-iconBtn"
+                onClick={() => setSelectedActivity(null)}
+                aria-label="Close activity details"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
+              <div>
+                <span
+                  className="df-workoutTypePill"
+                  style={pastelTagStyle(
+                    categoryDisplayLabel(selectedActivity.category, selectedActivity.category_label)
+                  )}
+                >
+                  {categoryDisplayLabel(selectedActivity.category, selectedActivity.category_label)}
+                </span>
+              </div>
+              <div className="df-workoutMeta">
+                {selectedActivity.kind === 'flexible' || selectedActivity.duration_minutes == null
+                  ? 'Flexible'
+                  : `${selectedActivity.duration_minutes} min`}
+              </div>
+              <p className="df-subtitle" style={{ margin: 0 }}>
+                {selectedActivity.summary_short}
+              </p>
+              {selectedActivity.instructions && selectedActivity.instructions.length > 0 ? (
+                <div>
+                  <div className="df-fieldLabel" style={{ marginBottom: 8 }}>
+                    Instructions
+                  </div>
+                  <ol style={{ margin: 0, paddingInlineStart: 18, display: 'grid', gap: 6 }}>
+                    {selectedActivity.instructions.map((step, idx) => (
+                      <li key={`${selectedActivity.id}-step-${idx}`}>{step}</li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
       <ProfileSettingsModal
         isOpen={isProfileSettingsOpen}

@@ -2090,3 +2090,19 @@ select.df-input {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+/* Stress & Breaks Activity Library */
+.df-stressLibraryTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.df-stressLibraryEmpty {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 1px dashed var(--df-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+}
