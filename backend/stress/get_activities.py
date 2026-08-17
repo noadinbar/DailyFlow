@@ -180,12 +180,27 @@ def _busy_blocks_table():
 
 
 def _parse_hh_mm_time(value: str) -> Optional[time]:
-    """Workouts-compatible HH:MM parser (used for BusyBlocks overlap checks)."""
-    parsed = parse_hh_mm(value)
-    if not parsed:
+    """
+    Mirror workouts/weekly_plan_update.py _parse_hh_mm exactly.
+
+    BusyBlocks sync stores times via time.isoformat() (often HH:MM:SS).
+    Workouts accepts that by reading hour/minute from the first 5 chars.
+    Do NOT use activity_model.parse_hh_mm here — it requires exact HH:MM and
+    drops every BusyBlock row that has seconds.
+    """
+    if not isinstance(value, str):
         return None
-    hour, minute = parsed
-    return time(hour, minute)
+    raw = value.strip()
+    if len(raw) < 5:
+        return None
+    try:
+        hour = int(raw[0:2])
+        minute = int(raw[3:5])
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            return None
+        return time(hour, minute)
+    except Exception:
+        return None
 
 
 def _query_busy_blocks(
@@ -195,7 +210,7 @@ def _query_busy_blocks(
     *,
     flow: str = "unknown",
 ) -> List[Dict[str, Any]]:
-    """Mirror workouts/weekly_plan_update.py _query_busy_blocks."""
+    """Mirror workouts/weekly_plan_update.py _query_busy_blocks (same Query + filters)."""
     print(
         "[stress-insights-debug] busyblocks_query_enter "
         f"flow={flow} "
@@ -211,6 +226,10 @@ def _query_busy_blocks(
     table = _busy_blocks_table()
     items: List[Dict[str, Any]] = []
     last_evaluated_key: Optional[Dict[str, Any]] = None
+    scanned_rows = 0
+    kept_rows = 0
+    dropped_date = 0
+    dropped_time = 0
     while True:
         query_args: Dict[str, Any] = {"KeyConditionExpression": Key("user_id").eq(user_id)}
         if last_evaluated_key:
@@ -219,14 +238,23 @@ def _query_busy_blocks(
         for item in response.get("Items") or []:
             if not isinstance(item, dict):
                 continue
+            scanned_rows += 1
             block_date = str(item.get("date", "")).strip()
             if not block_date or block_date < start_date_iso or block_date > end_date_iso:
+                dropped_date += 1
                 continue
             start_time = str(item.get("start_time", "")).strip()
             end_time = str(item.get("end_time", "")).strip()
             if not _parse_hh_mm_time(start_time) or not _parse_hh_mm_time(end_time):
+                dropped_time += 1
+                print(
+                    "[stress-insights-debug] busyblocks_query_drop_time "
+                    f"flow={flow} date={block_date!r} "
+                    f"start_time={start_time!r} end_time={end_time!r}"
+                )
                 continue
             items.append({"date": block_date, "start_time": start_time, "end_time": end_time})
+            kept_rows += 1
         last_evaluated_key = response.get("LastEvaluatedKey")
         if not last_evaluated_key:
             break
@@ -239,7 +267,10 @@ def _query_busy_blocks(
         f"user_id={user_id} "
         f"week_start={start_date_iso!r} "
         f"week_end={end_date_iso!r} "
-        f"returned_count={len(items)}"
+        f"scanned_rows={scanned_rows} "
+        f"dropped_date={dropped_date} "
+        f"dropped_time={dropped_time} "
+        f"returned_count={len(items)} kept_rows={kept_rows}"
     )
     for block in items:
         print(

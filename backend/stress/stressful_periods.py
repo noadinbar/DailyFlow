@@ -37,23 +37,69 @@ TIME_OF_DAY_LABELS: Dict[str, str] = {
     "evening": "evening",
 }
 
-DURATION_DISPLAY_MINUTES: Dict[str, int] = {
-    "3_5": 5,
-    "5_10": 10,
-    "10_15": 10,
-    "15_20": 15,
-    "depends_on_schedule": 10,
+DURATION_CHOICES_BY_PREF: Dict[str, Tuple[int, ...]] = {
+    "3_5": (3, 4, 5),
+    "5_10": (5, 8, 10),
+    "10_15": (10, 12, 15),
+    "15_20": (15, 18, 20),
+    "depends_on_schedule": (5, 8, 10, 12, 15),
 }
 
-ACTIVITY_PHRASES: Dict[str, str] = {
-    "breathing": "a short breathing exercise",
-    "meditation": "a brief mindfulness break",
-    "stretching": "a short stretching break",
-    "walking": "a short walk",
-    "reading": "a quiet reading pause",
-    "journaling": "a quick journaling reset",
-    "music": "a short music break",
-    "screen_free": "a brief screen-free pause",
+ACTIVITY_SHORT_LABELS: Dict[str, str] = {
+    "breathing": "breathing",
+    "meditation": "mindfulness",
+    "stretching": "stretching",
+    "walking": "walk",
+    "reading": "reading",
+    "journaling": "journaling",
+    "music": "music",
+    "screen_free": "screen-free",
+}
+
+LEAD_VARIANTS: Dict[str, Tuple[str, ...]] = {
+    "high_load": (
+        "{day} {tod} looks especially busy",
+        "{day} {tod} looks packed",
+        "{day} {tod} seems intense",
+    ),
+    "back_to_back": (
+        "{day} has several close-together commitments",
+        "{day} has several back-to-back commitments",
+        "{day} looks tightly scheduled",
+    ),
+    "long_block": (
+        "{day} includes a long continuous busy stretch",
+        "{day} has a long stretch of commitments",
+        "{day} looks heavy with one long busy block",
+    ),
+    "few_gaps": (
+        "{day} looks packed with limited free gaps",
+        "{day} has little breathing room between blocks",
+        "{day} seems short on free windows",
+    ),
+}
+
+ACTION_VARIANTS: Dict[str, Tuple[str, ...]] = {
+    "high_load": (
+        "consider a {duration}-minute calming {activity} break.",
+        "try a short {duration}-minute {activity} reset.",
+        "this may be a good time for a {duration}-minute {activity} pause.",
+    ),
+    "back_to_back": (
+        "a {duration}-minute {activity} break between commitments could help.",
+        "try a short {duration}-minute {activity} between blocks.",
+        "consider a {duration}-minute {activity} reset in a small gap.",
+    ),
+    "long_block": (
+        "consider a {duration}-minute {activity} break before or after that stretch.",
+        "a {duration}-minute {activity} pause around that long block could help.",
+        "try a {duration}-minute {activity} reset near the edges of that stretch.",
+    ),
+    "few_gaps": (
+        "a short {duration}-minute {activity} break in a free window could help.",
+        "try fitting in a {duration}-minute {activity} pause.",
+        "consider a compact {duration}-minute {activity} reset.",
+    ),
 }
 
 # Absolute floors — below this, a day is not treated as "particularly busy".
@@ -261,12 +307,27 @@ def _score_day(
     return score, primary
 
 
-def _pick_duration_minutes(prefs: Dict[str, Any]) -> int:
-    durations = prefs.get("durations") or []
-    for dur_id in durations:
-        if dur_id in DURATION_DISPLAY_MINUTES:
-            return DURATION_DISPLAY_MINUTES[dur_id]
-    return 10
+def _duration_choices(prefs: Dict[str, Any]) -> List[int]:
+    choices: List[int] = []
+    for dur_id in prefs.get("durations") or []:
+        for minutes in DURATION_CHOICES_BY_PREF.get(str(dur_id), ()):
+            if minutes not in choices:
+                choices.append(minutes)
+    if not choices:
+        choices = [5, 8, 10, 12, 15]
+    return choices
+
+
+def _pick_duration_minutes(prefs: Dict[str, Any], *, insight_index: int, reason: str) -> int:
+    choices = _duration_choices(prefs)
+    # Bias shorter options for packed/back-to-back days; still rotate for variety.
+    if reason in {"back_to_back", "few_gaps"} and len(choices) >= 2:
+        pool = choices[: max(2, (len(choices) + 1) // 2)]
+    elif reason == "long_block" and len(choices) >= 2:
+        pool = choices[len(choices) // 3 :] or choices
+    else:
+        pool = choices
+    return pool[insight_index % len(pool)]
 
 
 def _preferred_categories(prefs: Dict[str, Any], library_categories: Sequence[str]) -> List[str]:
@@ -289,31 +350,32 @@ def _preferred_categories(prefs: Dict[str, Any], library_categories: Sequence[st
     return ordered
 
 
-def _headline(day_label: str, tod_label: str, reason: str) -> str:
-    if reason == "back_to_back":
-        return f"{day_label} has several back-to-back commitments."
-    if reason == "long_block":
-        return f"{day_label} includes a long continuous busy stretch."
-    if reason == "few_gaps":
-        return f"{day_label} looks packed, with limited gaps between blocks."
-    return f"{day_label} {tod_label} looks especially busy."
+def _activity_phrase(category: str) -> str:
+    return ACTIVITY_SHORT_LABELS.get(category, CATEGORY_LABELS.get(category, "calming").lower())
 
 
-def _recommendation_text(
+def _build_insight_copy(
     *,
+    day_label: str,
+    tod_label: str,
+    reason: str,
     category: str,
     duration_minutes: int,
-    reason: str,
-) -> str:
-    phrase = ACTIVITY_PHRASES.get(category, "a short calming break")
-    label = CATEGORY_LABELS.get(category, category.replace("_", " ").title())
-    if reason == "back_to_back":
-        return f"Recommended: take a {duration_minutes}-minute {label.lower()} break between scheduled blocks."
-    if reason == "long_block":
-        return f"Recommended: add {phrase} (~{duration_minutes} min) before or after the long stretch."
-    if reason == "few_gaps":
-        return f"Recommended: choose a short {label.lower()} activity ({duration_minutes} min) in a small free window."
-    return f"Recommended: take a {duration_minutes}-minute calming break — try {phrase}."
+    insight_index: int,
+) -> Tuple[str, str]:
+    """Return (lead, action) for a single compact insight line. No em dash."""
+    reason_key = reason if reason in LEAD_VARIANTS else "high_load"
+    leads = LEAD_VARIANTS[reason_key]
+    actions = ACTION_VARIANTS[reason_key]
+    lead_template = leads[insight_index % len(leads)]
+    action_template = actions[(insight_index + 1) % len(actions)]
+    lead = lead_template.format(day=day_label, tod=tod_label)
+    action = action_template.format(
+        duration=duration_minutes,
+        activity=_activity_phrase(category),
+    )
+    # Keep legacy fields useful: headline=lead, recommendation=action (no "Recommended:" prefix).
+    return lead, action
 
 
 def build_stressful_periods_insights(
@@ -350,7 +412,6 @@ def build_stressful_periods_insights(
         "durations": _safe_string_list(preferences.get("durations")),
     }
     categories = _preferred_categories(prefs, library_categories or [])
-    duration_minutes = _pick_duration_minutes(prefs)
 
     empty_payload = {
         "week_start": week_start,
@@ -424,6 +485,8 @@ def build_stressful_periods_insights(
 
     scored.sort(key=lambda row: (-float(row["score"]), str(row["iso_day"])))
     top = scored[:MAX_INSIGHTS]
+    # Display in chronological week order after selecting top scores.
+    top.sort(key=lambda row: str(row["iso_day"]))
 
     insights: List[Dict[str, Any]] = []
     for idx, row in enumerate(top):
@@ -437,17 +500,25 @@ def build_stressful_periods_insights(
         # Keep category ids valid for Timed/Flexible sets only.
         if category not in TIMED_ACTIVITY_ID_SET and category not in FLEXIBLE_ACTIVITY_ID_SET:
             category = "breathing"
+        duration_minutes = _pick_duration_minutes(prefs, insight_index=idx, reason=reason)
+        lead, action = _build_insight_copy(
+            day_label=day_label,
+            tod_label=tod_label,
+            reason=reason,
+            category=category,
+            duration_minutes=duration_minutes,
+            insight_index=idx,
+        )
         insight = {
             "id": f"insight_{idx + 1}",
             "day": iso_day,
             "day_label": day_label,
             "period_label": tod_label,
-            "headline": _headline(day_label, tod_label, reason),
-            "recommendation": _recommendation_text(
-                category=category,
-                duration_minutes=duration_minutes,
-                reason=reason,
-            ),
+            "lead": lead,
+            "action": action,
+            # Backward-compatible fields for older clients / logging.
+            "headline": lead,
+            "recommendation": action,
             "suggested_category": category,
             "suggested_category_label": CATEGORY_LABELS.get(category, category),
             "suggested_duration_minutes": duration_minutes,
