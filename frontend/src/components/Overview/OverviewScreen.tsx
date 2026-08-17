@@ -562,7 +562,20 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                         {scheduledWorkouts.map((item) => (
                           <li key={item.id} className="df-overviewWorkoutRow">
                             <div className="df-overviewWorkoutMain">
-                              <span className="df-overviewWorkoutName">{item.title}</span>
+                              <div className="df-overviewWorkoutTitleRow">
+                                <label className="df-overviewCompleted">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.completed}
+                                    disabled={Boolean(savingCompletedIds[item.id])}
+                                    aria-label={`Mark ${item.title} completed`}
+                                    onChange={(event) => {
+                                      void handleToggleCompleted(item.id, event.target.checked);
+                                    }}
+                                  />
+                                </label>
+                                <span className="df-overviewWorkoutName">{item.title}</span>
+                              </div>
                               <span className="df-overviewWorkoutMeta">
                                 {formatIsoDayLabel(item.date)}
                                 {item.start_time ? (
@@ -575,17 +588,6 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                                 ) : null}
                               </span>
                             </div>
-                            <label className="df-overviewCompleted">
-                              <input
-                                type="checkbox"
-                                checked={item.completed}
-                                disabled={Boolean(savingCompletedIds[item.id])}
-                                onChange={(event) => {
-                                  void handleToggleCompleted(item.id, event.target.checked);
-                                }}
-                              />
-                              Completed
-                            </label>
                           </li>
                         ))}
                       </ul>

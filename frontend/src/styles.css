@@ -2295,10 +2295,6 @@ select.df-input {
 }
 
 .df-overviewWorkoutRow {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
   padding: 8px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.62);
@@ -2310,16 +2306,25 @@ select.df-input {
   min-width: 0;
 }
 
+.df-overviewWorkoutTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .df-overviewWorkoutName {
   font-size: 14px;
   font-weight: 650;
   color: #111827;
+  min-width: 0;
 }
 
 .df-overviewWorkoutMeta {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-left: 36px;
   font-size: 13px;
   color: #6b7280;
 }
@@ -2327,18 +2332,18 @@ select.df-input {
 .df-overviewCompleted {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 600;
-  color: #9a3412;
+  width: 28px;
+  height: 28px;
+  margin: -3px;
   cursor: pointer;
-  user-select: none;
 }
 
 .df-overviewCompleted input {
-  width: 15px;
-  height: 15px;
+  width: 22px;
+  height: 22px;
   margin: 0;
   accent-color: #c2410c;
+  cursor: pointer;
 }
