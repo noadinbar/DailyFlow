@@ -25,6 +25,27 @@ type BusyDay = {
   day_label: string;
 };
 
+type InsightKind = 'observation' | 'progress' | 'suggestion';
+
+type WeeklyInsight = {
+  id: string;
+  kind: InsightKind;
+  text: string;
+};
+
+type InsightsResponse = {
+  week_start?: string;
+  week_end?: string;
+  insights?: WeeklyInsight[];
+  message?: string;
+};
+
+const INSIGHT_KIND_LABELS: Record<InsightKind, string> = {
+  observation: 'Observation',
+  progress: 'Progress',
+  suggestion: 'Suggestion',
+};
+
 type OverviewResponse = {
   week_start?: string;
   week_end?: string;
@@ -108,6 +129,27 @@ function OverviewStressGlyph() {
   );
 }
 
+function RefreshIcon(props: { size?: number; spinning?: boolean }) {
+  const size = props.size ?? 16;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className={props.spinning ? 'df-stressRefreshIconSpin' : undefined}
+    >
+      <path d="M21 12a9 9 0 1 1-3.2-6.8" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
+  );
+}
+
 function asScheduledItems(raw: unknown): ScheduledWorkoutItem[] {
   if (!Array.isArray(raw)) return [];
   const items: ScheduledWorkoutItem[] = [];
@@ -146,6 +188,30 @@ function asBusyDays(raw: unknown): BusyDay[] {
   return days;
 }
 
+function asInsightKind(value: unknown): InsightKind {
+  return value === 'progress' || value === 'suggestion' || value === 'observation' ? value : 'observation';
+}
+
+function asWeeklyInsights(raw: unknown): WeeklyInsight[] {
+  if (!Array.isArray(raw)) return [];
+  const insights: WeeklyInsight[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const o = entry as Record<string, unknown>;
+    const text = typeof o.text === 'string' ? o.text.trim() : '';
+    if (!text || seen.has(text.toLowerCase())) continue;
+    seen.add(text.toLowerCase());
+    insights.push({
+      id: typeof o.id === 'string' && o.id.trim() ? o.id.trim() : `insight_${insights.length + 1}`,
+      kind: asInsightKind(o.kind),
+      text,
+    });
+    if (insights.length >= 7) break;
+  }
+  return insights;
+}
+
 export default function OverviewScreen(props: OverviewScreenProps) {
   const { username, onLogout } = props;
   const navigate = useNavigate();
@@ -167,6 +233,11 @@ export default function OverviewScreen(props: OverviewScreenProps) {
   const [breaksCount, setBreaksCount] = React.useState<number>(0);
   const [busyDays, setBusyDays] = React.useState<BusyDay[]>([]);
   const [savingCompletedIds, setSavingCompletedIds] = React.useState<Record<string, boolean>>({});
+  const [insights, setInsights] = React.useState<WeeklyInsight[]>([]);
+  const [insightsError, setInsightsError] = React.useState<string>('');
+  const [isGeneratingInsights, setIsGeneratingInsights] = React.useState<boolean>(false);
+  const hasRequestedInsightsRef = React.useRef(false);
+  const insightsRequestIdRef = React.useRef(0);
 
   const effectiveName = displayName || username || 'there';
 
@@ -384,6 +455,56 @@ export default function OverviewScreen(props: OverviewScreenProps) {
     }
   }
 
+  async function loadInsights(): Promise<void> {
+    const requestId = insightsRequestIdRef.current + 1;
+    insightsRequestIdRef.current = requestId;
+    hasRequestedInsightsRef.current = true;
+    setIsGeneratingInsights(true);
+    setInsightsError('');
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(buildApiUrl('/overview/insights'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ refresh: true }),
+      });
+      let payload: InsightsResponse = {};
+      try {
+        payload = (await response.json()) as InsightsResponse;
+      } catch {
+        payload = {};
+      }
+      if (insightsRequestIdRef.current !== requestId) return;
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not generate insights (${response.status}).`;
+        throw new Error(message);
+      }
+      const nextInsights = asWeeklyInsights(payload.insights);
+      if (nextInsights.length < 3) {
+        throw new Error('Insights are currently unavailable. Please try again.');
+      }
+      setInsights(nextInsights);
+    } catch (e) {
+      if (insightsRequestIdRef.current !== requestId) return;
+      const anyErr = e as { message?: string };
+      setInsightsError(
+        typeof anyErr?.message === 'string' && anyErr.message.trim()
+          ? anyErr.message
+          : 'Could not generate insights.'
+      );
+    } finally {
+      if (insightsRequestIdRef.current === requestId) {
+        setIsGeneratingInsights(false);
+      }
+    }
+  }
+
   async function handleToggleCompleted(workoutId: string, nextCompleted: boolean): Promise<void> {
     if (savingCompletedIds[workoutId]) return;
     const previous = scheduledWorkouts;
@@ -462,6 +583,11 @@ export default function OverviewScreen(props: OverviewScreenProps) {
     })();
   }, []);
 
+  React.useEffect(() => {
+    if (activeTab !== 'insights' || hasRequestedInsightsRef.current) return;
+    void loadInsights();
+  }, [activeTab]);
+
   const weekRangeLabel = weekStart && weekEnd ? formatWeekRangeLabel(weekStart, weekEnd) : '';
   const scheduledCount = scheduledWorkouts.length;
   const busyDayLabels = busyDays.map((day) => day.day_label).join(', ');
@@ -509,7 +635,10 @@ export default function OverviewScreen(props: OverviewScreenProps) {
               role="tab"
               aria-selected={activeTab === 'insights'}
               className={`df-workoutFilterChip${activeTab === 'insights' ? ' df-workoutFilterChipActive' : ''}`}
-              onClick={() => setActiveTab('insights')}
+              onClick={() => {
+                if (!hasRequestedInsightsRef.current) setIsGeneratingInsights(true);
+                setActiveTab('insights');
+              }}
             >
               Insights
             </button>
@@ -561,19 +690,19 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                       <ul className="df-overviewWorkoutList">
                         {scheduledWorkouts.map((item) => (
                           <li key={item.id} className="df-overviewWorkoutRow">
+                            <label className="df-overviewCompleted">
+                              <input
+                                type="checkbox"
+                                checked={item.completed}
+                                disabled={Boolean(savingCompletedIds[item.id])}
+                                aria-label={`Mark ${item.title} completed`}
+                                onChange={(event) => {
+                                  void handleToggleCompleted(item.id, event.target.checked);
+                                }}
+                              />
+                            </label>
                             <div className="df-overviewWorkoutMain">
                               <div className="df-overviewWorkoutTitleRow">
-                                <label className="df-overviewCompleted">
-                                  <input
-                                    type="checkbox"
-                                    checked={item.completed}
-                                    disabled={Boolean(savingCompletedIds[item.id])}
-                                    aria-label={`Mark ${item.title} completed`}
-                                    onChange={(event) => {
-                                      void handleToggleCompleted(item.id, event.target.checked);
-                                    }}
-                                  />
-                                </label>
                                 <span className="df-overviewWorkoutName">{item.title}</span>
                               </div>
                               <span className="df-overviewWorkoutMeta">
@@ -651,10 +780,54 @@ export default function OverviewScreen(props: OverviewScreenProps) {
 
           {activeTab === 'insights' && (
             <section className="df-workoutsSection" role="tabpanel" aria-label="Insights">
-              <div className="df-calendarLegend">Insights will appear here in a later phase.</div>
+              <div className="df-overviewInsightsHeader">
+                <h2 className="df-workoutsTitle">Weekly Insights</h2>
+                <button
+                  type="button"
+                  className="df-iconBtn df-stressRefreshBtn"
+                  onClick={() => void loadInsights()}
+                  disabled={isGeneratingInsights}
+                  aria-label="Refresh insights"
+                  title="Refresh insights"
+                >
+                  <RefreshIcon size={16} spinning={isGeneratingInsights} />
+                </button>
+              </div>
+              {insightsError ? (
+                <div className="df-errorText" role="alert">
+                  {insightsError}
+                </div>
+              ) : null}
+              {!isGeneratingInsights && !insightsError && insights.length === 0 ? (
+                <div className="df-overviewInsightsEmpty" role="status">
+                  Weekly insights will appear here after they are generated.
+                </div>
+              ) : null}
+              {insights.length > 0 ? (
+                <ul className="df-overviewInsightList">
+                  {insights.map((insight) => (
+                    <li key={insight.id} className={`df-overviewInsightCard df-overviewInsightCard-${insight.kind}`}>
+                      <span className="df-overviewInsightKind">{INSIGHT_KIND_LABELS[insight.kind]}</span>
+                      <p className="df-overviewInsightText">{insight.text}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </section>
           )}
         </div>
+
+        {isGeneratingInsights && (
+          <div className="df-workoutsLoadingOverlay" role="status" aria-live="polite" aria-label="Generating insights">
+            <div className="df-workoutsLoadingShade" aria-hidden />
+            <div className="df-workoutsLoadingCenter">
+              <div className="df-workoutsLoadingCard">
+                <div className="df-workoutsBasicSpinner" aria-hidden />
+                <div className="df-workoutsLoadingText">Generating insights...</div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <ProfileSettingsModal

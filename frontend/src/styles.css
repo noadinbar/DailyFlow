@@ -2295,6 +2295,9 @@ select.df-input {
 }
 
 .df-overviewWorkoutRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.62);
@@ -2304,6 +2307,7 @@ select.df-input {
   display: grid;
   gap: 2px;
   min-width: 0;
+  flex: 1;
 }
 
 .df-overviewWorkoutTitleRow {
@@ -2333,10 +2337,11 @@ select.df-input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   flex: 0 0 auto;
   width: 28px;
   height: 28px;
-  margin: -3px;
+  margin: 0;
   cursor: pointer;
 }
 
@@ -2346,4 +2351,70 @@ select.df-input {
   margin: 0;
   accent-color: #c2410c;
   cursor: pointer;
+}
+
+.df-overviewInsightsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.df-overviewInsightList {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.df-overviewInsightCard {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--df-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  border-left-width: 4px;
+}
+
+.df-overviewInsightCard-observation {
+  border-left-color: #5b8c7a;
+  background: #eef7f2;
+}
+
+.df-overviewInsightCard-progress {
+  border-left-color: #c47a4a;
+  background: #fff4ea;
+}
+
+.df-overviewInsightCard-suggestion {
+  border-left-color: #6b6aa8;
+  background: #f3f0fb;
+}
+
+.df-overviewInsightKind {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #4b5563;
+  margin-bottom: 4px;
+}
+
+.df-overviewInsightText {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #1f2937;
+}
+
+.df-overviewInsightsEmpty {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--df-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #6b7280;
+  font-size: 13px;
 }

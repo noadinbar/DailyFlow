@@ -1,11 +1,14 @@
 """
 GET /overview — read-only current-week Summary data.
 PATCH /overview — persist Overview-only workout completion for the current week.
+POST /overview/insights — generate 3–7 AI Weekly Insights from current-week facts.
+POST /overview is accepted as the same Insights action.
 
 Week bounds are Sunday–Saturday, computed from the current date in the
 DailyFlow app timezone (Asia/Jerusalem), matching Google Calendar event times.
 Overview never mutates Workouts, Meals, Stress, or Google Calendar state.
 Completion is stored on the Users item, not on WorkoutLibrary plan items.
+Insights are not persisted; each request calls OpenAI again.
 """
 
 from __future__ import annotations
@@ -46,7 +49,7 @@ _CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "https://main.dnp9vhzk0bw8l.amplifyapp.com",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
-    "Access-Control-Allow-Methods": "OPTIONS,GET,PATCH",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,PATCH,POST",
 }
 
 
@@ -123,6 +126,20 @@ def _current_date_in_app_timezone() -> date:
         return datetime.now(timezone.utc).date()
 
 
+def _request_path(event: Dict[str, Any]) -> str:
+    request_context = event.get("requestContext") or {}
+    http = request_context.get("http") or {}
+    path = http.get("path") or event.get("rawPath") or event.get("path") or event.get("resource") or ""
+    return str(path).rstrip("/").lower()
+
+
+def _is_insights_post(event: Dict[str, Any], method: str) -> bool:
+    if method != "POST":
+        return False
+    path = _request_path(event)
+    return path.endswith("/insights") or path.endswith("/overview")
+
+
 def current_week_bounds(today: Optional[date] = None) -> Tuple[str, str]:
     """Sunday–Saturday ISO dates for the week containing `today` in Asia/Jerusalem."""
     now_d = today or _current_date_in_app_timezone()
@@ -194,6 +211,19 @@ def _users_item(user_id: str) -> Dict[str, Any]:
 def _weekly_goal_from_users(item: Dict[str, Any]) -> int:
     # Same clamp Workouts uses when reading Users.workouts_per_week.
     return max(1, min(7, _to_int(item.get("workouts_per_week"), 3)))
+
+
+def _preferred_workout_times(item: Dict[str, Any]) -> List[str]:
+    raw = item.get("preferred_workout_times")
+    if not isinstance(raw, list):
+        return ["any_time"]
+    allowed = {"morning", "noon", "afternoon", "evening", "any_time"}
+    out: List[str] = []
+    for value in raw:
+        key = _safe_string(value)
+        if key in allowed and key not in out:
+            out.append(key)
+    return out or ["any_time"]
 
 
 def _completed_ids_for_week(users_item: Dict[str, Any], week_start: str) -> List[str]:
@@ -338,6 +368,25 @@ def _scheduled_workouts(user_id: str, week_start: str, week_end: str) -> List[Di
     return scheduled
 
 
+def _library_workout_durations(user_id: str) -> List[int]:
+    item = (
+        _table("WORKOUT_LIBRARY_TABLE", WORKOUT_LIBRARY_DEFAULT_TABLE)
+        .get_item(Key={"user_id": user_id})
+        .get("Item")
+        or {}
+    )
+    if not isinstance(item, dict):
+        return []
+    durations: List[int] = []
+    for raw in item.get("workout_library") or []:
+        if not isinstance(raw, dict):
+            continue
+        duration = _to_int(raw.get("duration_minutes"), 0)
+        if duration > 0:
+            durations.append(duration)
+    return durations
+
+
 def _scheduled_meals_count(user_id: str, week_start: str, week_end: str) -> int:
     week_keys = [f"WEEK#{week_start}"]
     legacy_start = _legacy_utc_week_start_iso()
@@ -365,6 +414,46 @@ def _scheduled_meals_count(user_id: str, week_start: str, week_end: str) -> int:
     return count
 
 
+def _scheduled_meal_facts(user_id: str, week_start: str, week_end: str) -> List[Dict[str, Any]]:
+    week_keys = [f"WEEK#{week_start}"]
+    legacy_start = _legacy_utc_week_start_iso()
+    if legacy_start != week_start:
+        week_keys.append(f"WEEK#{legacy_start}")
+    seen_ids = set()
+    facts: List[Dict[str, Any]] = []
+    meals_table = _table("MEALS_TABLE")
+    for week_key in week_keys:
+        week_item = meals_table.get_item(Key={"user_id": user_id, "record_key": week_key}).get("Item") or {}
+        if not isinstance(week_item, dict):
+            continue
+        for raw in week_item.get("saved_meals_this_week") or []:
+            if not isinstance(raw, dict) or not _has_google_event(raw):
+                continue
+            meal_id = _safe_string(raw.get("id"))
+            meal_date = _safe_string(raw.get("date"))
+            if meal_id and meal_id in seen_ids:
+                continue
+            if not _in_week(meal_date, week_start, week_end):
+                continue
+            if meal_id:
+                seen_ids.add(meal_id)
+            title = _safe_string(raw.get("meal_name")) or "Meal"
+            start_time = _hh_mm(raw.get("start_time"))
+            end_time = _hh_mm(raw.get("end_time"))
+            item: Dict[str, Any] = {
+                "title": title,
+                "date": meal_date,
+                "day_label": _day_label(meal_date),
+            }
+            if start_time:
+                item["start_time"] = start_time
+            if end_time:
+                item["end_time"] = end_time
+            facts.append(item)
+    facts.sort(key=lambda row: (row["date"], row.get("start_time") or "", row["title"]))
+    return facts
+
+
 def _scheduled_breaks_count(item: Dict[str, Any], week_start: str, week_end: str) -> int:
     saved_start = _safe_string(item.get("current_week_plan_week_start"))
     saved_end = _safe_string(item.get("current_week_plan_week_end"))
@@ -380,6 +469,43 @@ def _scheduled_breaks_count(item: Dict[str, Any], week_start: str, week_end: str
     return count
 
 
+def _scheduled_break_facts(item: Dict[str, Any], week_start: str, week_end: str) -> List[Dict[str, Any]]:
+    saved_start = _safe_string(item.get("current_week_plan_week_start"))
+    saved_end = _safe_string(item.get("current_week_plan_week_end"))
+    if saved_start != week_start or saved_end != week_end:
+        return []
+    library_by_id: Dict[str, Dict[str, Any]] = {}
+    for raw in list(item.get("timed_activities") or []) + list(item.get("flexible_activities") or []):
+        if not isinstance(raw, dict):
+            continue
+        lib_id = _safe_string(raw.get("id"))
+        if lib_id:
+            library_by_id[lib_id] = raw
+    facts: List[Dict[str, Any]] = []
+    for raw in item.get("current_week_plan") or []:
+        if not isinstance(raw, dict) or not _has_google_event(raw):
+            continue
+        rec_day = _safe_string(raw.get("recommended_day"))
+        start_time = _hh_mm(raw.get("recommended_start_time"))
+        if not _in_week(rec_day, week_start, week_end):
+            continue
+        lib = library_by_id.get(_safe_string(raw.get("library_activity_id"))) or {}
+        title = _safe_string(raw.get("title")) or _safe_string(lib.get("title")) or "Break"
+        fact: Dict[str, Any] = {
+            "title": title,
+            "date": rec_day,
+            "day_label": _day_label(rec_day),
+        }
+        if start_time:
+            fact["start_time"] = start_time
+        end_time = _hh_mm(raw.get("recommended_end_time"))
+        if end_time:
+            fact["end_time"] = end_time
+        facts.append(fact)
+    facts.sort(key=lambda row: (row["date"], row.get("start_time") or "", row["title"]))
+    return facts
+
+
 def _busy_days(
     *,
     user_id: str,
@@ -387,12 +513,14 @@ def _busy_days(
     week_end: str,
     library_item: Dict[str, Any],
     preferences: Dict[str, Any],
+    busy_blocks: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, str]]:
-    try:
-        busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
-    except Exception as err:
-        print(f"[overview] busyblocks query failed: {err}")
-        busy_blocks = []
+    if busy_blocks is None:
+        try:
+            busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
+        except Exception as err:
+            print(f"[overview] busyblocks query failed: {err}")
+            busy_blocks = []
     payload = build_stressful_periods_insights(
         week_start=week_start,
         week_end=week_end,
@@ -510,6 +638,149 @@ def _handle_patch_completion(user_id: str, payload: Dict[str, Any]) -> Dict[str,
     )
 
 
+def _workout_fact_items(scheduled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    facts: List[Dict[str, Any]] = []
+    for item in scheduled:
+        date_iso = _safe_string(item.get("date"))
+        fact: Dict[str, Any] = {
+            "title": _safe_string(item.get("title")) or "Workout",
+            "date": date_iso,
+            "day_label": _day_label(date_iso),
+            "completed": item.get("completed") is True,
+        }
+        start_time = _hh_mm(item.get("start_time"))
+        if start_time:
+            fact["start_time"] = start_time
+        facts.append(fact)
+    return facts
+
+
+def _busy_block_facts(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    facts: List[Dict[str, Any]] = []
+    for block in blocks:
+        date_iso = _safe_string(block.get("date"))
+        start_time = _hh_mm(block.get("start_time"))
+        end_time = _hh_mm(block.get("end_time"))
+        if not date_iso or not start_time or not end_time:
+            continue
+        facts.append(
+            {
+                "date": date_iso,
+                "day_label": _day_label(date_iso),
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+        )
+    return facts
+
+
+def _handle_post_insights(user_id: str) -> Dict[str, Any]:
+    from insights import (  # noqa: E402
+        compute_suggested_workout_window,
+        failure_http,
+        generate_weekly_insights,
+        now_in_app_timezone,
+        remaining_days,
+        typical_workout_duration_minutes,
+    )
+
+    now = now_in_app_timezone()
+    week_start, week_end = current_week_bounds(now.date())
+    try:
+        users_item = _users_item(user_id)
+        weekly_goal = _weekly_goal_from_users(users_item)
+        scheduled_workouts = _apply_completed_flags(
+            _scheduled_workouts(user_id, week_start, week_end),
+            _completed_ids_for_week(users_item, week_start),
+        )
+        meal_facts = _scheduled_meal_facts(user_id, week_start, week_end)
+        stress_item = (
+            _table("STRESS_BREAKS_LIBRARY_TABLE", STRESS_BREAKS_LIBRARY_DEFAULT_TABLE)
+            .get_item(Key={"user_id": user_id})
+            .get("Item")
+            or {}
+        )
+        if not isinstance(stress_item, dict):
+            stress_item = {}
+        break_facts = _scheduled_break_facts(stress_item, week_start, week_end)
+        try:
+            busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
+        except Exception as err:
+            print(f"[overview] busyblocks query failed: {err}")
+            busy_blocks = []
+        busy_days = _busy_days(
+            user_id=user_id,
+            week_start=week_start,
+            week_end=week_end,
+            library_item=stress_item,
+            preferences=_stress_preferences_from_users(users_item),
+            busy_blocks=busy_blocks,
+        )
+        needed_minutes = typical_workout_duration_minutes(_library_workout_durations(user_id))
+        suggested_window = compute_suggested_workout_window(
+            weekly_goal=weekly_goal,
+            scheduled_count=len(scheduled_workouts),
+            busy_blocks=busy_blocks,
+            preferred_times=_preferred_workout_times(users_item),
+            needed_minutes=needed_minutes,
+            now=now,
+            week_start=week_start,
+            week_end=week_end,
+        )
+    except ValueError as err:
+        return _json_response(500, {"message": str(err)})
+    except Exception:
+        return _json_response(500, {"message": "Unexpected error while generating insights."})
+
+    today_iso = now.date().isoformat()
+    completed_count = sum(1 for item in scheduled_workouts if item.get("completed") is True)
+    facts: Dict[str, Any] = {
+        "week_start": week_start,
+        "week_end": week_end,
+        "today": today_iso,
+        "now": now.strftime("%H:%M"),
+        "timezone": APP_TIMEZONE_ID,
+        "remaining_days": remaining_days(today_iso, week_end),
+        "workouts": {
+            "weekly_goal": weekly_goal,
+            "scheduled_count": len(scheduled_workouts),
+            "completed_count": completed_count,
+            "goal_met": len(scheduled_workouts) >= weekly_goal,
+            "scheduled_items": _workout_fact_items(scheduled_workouts),
+        },
+        "meals": {
+            "scheduled_count": len(meal_facts),
+            "scheduled_items": meal_facts,
+        },
+        "stress_breaks": {
+            "scheduled_count": len(break_facts),
+            "scheduled_items": break_facts,
+            "busy_days": busy_days,
+        },
+        "busy_blocks": _busy_block_facts(busy_blocks),
+        "suggested_workout_window": suggested_window,
+        "wording_seed": _iso_utc_now(),
+    }
+    try:
+        insights, reason = generate_weekly_insights(facts)
+    except Exception:
+        print("[overview-insights] unexpected generate error")
+        return _json_response(500, {"message": "Unexpected error while generating insights."})
+    if not insights:
+        status, message = failure_http(reason)
+        print(f"[overview-insights] generation_failed reason={reason}")
+        return _json_response(status, {"message": message})
+    return _json_response(
+        200,
+        {
+            "week_start": week_start,
+            "week_end": week_end,
+            "insights": insights,
+            "suggested_workout_window": suggested_window,
+        },
+    )
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_context = event.get("requestContext") or {}
     http = request_context.get("http") or {}
@@ -524,6 +795,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     if method == "GET":
         return _handle_get(user_id)
+    if _is_insights_post(event, method):
+        return _handle_post_insights(user_id)
     if method != "PATCH":
         return _json_response(405, {"message": "Method not allowed."})
 
