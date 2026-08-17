@@ -1,5 +1,6 @@
 """
-GET /stress/activities — load Timed + Flexible library, favorites, and weekly plan.
+GET /stress/activities — load Timed + Flexible library, favorites, weekly plan,
+and Potentially Stressful Periods insights for the requested week.
 PATCH /stress/activities — mutate library/plan state:
   - toggle_favorite
   - add_library_activity (BusyBlocks conflict validation, Workouts-style)
@@ -12,6 +13,8 @@ semantics as backend/workouts/weekly_plan_update.py _slot_is_valid).
 Weekly Break Plan week scoping mirrors Workouts GET /workouts/suggestions:
 a single current_week_plan is reused only when saved week_start/end match the
 requested period; otherwise the plan is rolled to an empty plan for the new week.
+
+Insights are guidance only — they never mutate Weekly Break Plan or Google Calendar.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from activity_model import (  # noqa: E402
     to_dynamodb_safe,
     to_int,
 )
+from stressful_periods import build_stressful_periods_insights  # noqa: E402
 
 # Match Workouts weekly_plan_update.py slot window.
 DAY_START_MINUTES = 6 * 60
@@ -649,12 +653,91 @@ def _mark_busy_blocks_stale(user_id: str) -> None:
         return
 
 
+def _users_table():
+    table_name = os.getenv("USERS_TABLE", "").strip()
+    if not table_name:
+        raise ValueError("Missing USERS_TABLE env var.")
+    return _dynamodb_resource().Table(table_name)
+
+
+def _read_stress_preferences(user_id: str) -> Dict[str, Any]:
+    """Read Phase 1 Stress & Breaks prefs from Users (same attrs as profile/generate)."""
+    item = _users_table().get_item(Key={"user_id": user_id}, ConsistentRead=True).get("Item") or {}
+    if not isinstance(item, dict):
+        item = {}
+
+    def _list(attr: str) -> List[str]:
+        raw = item.get(attr)
+        if not isinstance(raw, list):
+            return []
+        out: List[str] = []
+        for value in raw:
+            if isinstance(value, str) and value.strip() and value.strip() not in out:
+                out.append(value.strip())
+        return out
+
+    return {
+        "questionnaire_completed": item.get("stress_breaks_questionnaire_completed") is True,
+        "busiest_times": _list("stress_breaks_busiest_times"),
+        "busiest_days": _list("stress_breaks_busiest_days"),
+        "busy_day_factors": _list("stress_breaks_busy_day_factors"),
+        "preferred_activities": _list("stress_breaks_preferred_activities"),
+        "durations": _list("stress_breaks_durations"),
+    }
+
+
+def _library_categories(item: Dict[str, Any]) -> List[str]:
+    cats: List[str] = []
+    for raw in list(item.get("timed_activities") or []) + list(item.get("flexible_activities") or []):
+        normalized = normalize_activity(raw)
+        if not normalized:
+            continue
+        category = str(normalized.get("category", "")).strip()
+        if category and category not in cats:
+            cats.append(category)
+    return cats
+
+
+def _build_insights_payload(
+    *,
+    user_id: str,
+    week_start: str,
+    week_end: str,
+    library_item: Dict[str, Any],
+) -> Dict[str, Any]:
+    try:
+        prefs = _read_stress_preferences(user_id)
+    except Exception as err:
+        print(f"[stress-activities] preferences read for insights failed: {err}")
+        prefs = {
+            "questionnaire_completed": False,
+            "busiest_times": [],
+            "busiest_days": [],
+            "busy_day_factors": [],
+            "preferred_activities": [],
+            "durations": [],
+        }
+    try:
+        busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
+    except Exception as err:
+        print(f"[stress-activities] busyblocks query for insights failed: {err}")
+        busy_blocks = []
+    return build_stressful_periods_insights(
+        week_start=week_start,
+        week_end=week_end,
+        busy_blocks=busy_blocks,
+        preferences=prefs,
+        library_categories=_library_categories(library_item),
+    )
+
+
 def _library_payload(
     item: Dict[str, Any],
     *,
     weekly_plan: Optional[List[Dict[str, Any]]] = None,
     week_start: Optional[str] = None,
     week_end: Optional[str] = None,
+    stressful_periods: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     timed = normalize_activity_list(item.get("timed_activities"), kind="timed")
     flexible = normalize_activity_list(item.get("flexible_activities"), kind="flexible")
@@ -669,7 +752,7 @@ def _library_payload(
     if week_end is None:
         raw_end = item.get("current_week_plan_week_end")
         week_end = raw_end if isinstance(raw_end, str) else None
-    return {
+    payload: Dict[str, Any] = {
         "timed_activities": timed,
         "flexible_activities": flexible,
         "favorite_activities": favorites,
@@ -680,6 +763,9 @@ def _library_payload(
         "week_start": week_start,
         "week_end": week_end,
     }
+    if stressful_periods is not None:
+        payload["stressful_periods"] = stressful_periods
+    return payload
 
 
 def _find_library_activity(item: Dict[str, Any], activity_id: str) -> Optional[Dict[str, Any]]:
@@ -741,6 +827,7 @@ def _handle_get(user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
     saved_weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
     week_matches = saved_week_start == period_start and saved_week_end == period_end
 
+    weekly_plan: List[Dict[str, Any]]
     if week_matches:
         # Same week as Workouts "saved_current_week_plan" path — reuse stored plan,
         # but drop orphans outside the week bounds (heals stale PATCH week-bound updates).
@@ -756,30 +843,27 @@ def _handle_get(user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as err:
                 print(f"[stress-activities] week-scope heal failed: {err}")
                 return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
-        return _json_response(
-            200,
-            _library_payload(
-                item,
-                weekly_plan=weekly_plan,
+    else:
+        # Week rolled (Workouts would derive+overwrite current_week_plan). Stress has no
+        # auto-scheduler — persist an empty plan for the requested week.
+        weekly_plan = []
+        try:
+            _persist_weekly_plan(
+                user_id=user_id,
                 week_start=period_start,
                 week_end=period_end,
-            ),
-        )
+                weekly_plan=weekly_plan,
+            )
+        except Exception as err:
+            print(f"[stress-activities] week-roll persist failed: {err}")
+            return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
 
-    # Week rolled (Workouts would derive+overwrite current_week_plan). Stress has no
-    # auto-scheduler — persist an empty plan for the requested week.
-    weekly_plan: List[Dict[str, Any]] = []
-    try:
-        _persist_weekly_plan(
-            user_id=user_id,
-            week_start=period_start,
-            week_end=period_end,
-            weekly_plan=weekly_plan,
-        )
-    except Exception as err:
-        print(f"[stress-activities] week-roll persist failed: {err}")
-        return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
-
+    stressful_periods = _build_insights_payload(
+        user_id=user_id,
+        week_start=period_start,
+        week_end=period_end,
+        library_item=item,
+    )
     return _json_response(
         200,
         _library_payload(
@@ -787,6 +871,7 @@ def _handle_get(user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
             weekly_plan=weekly_plan,
             week_start=period_start,
             week_end=period_end,
+            stressful_periods=stressful_periods,
         ),
     )
 

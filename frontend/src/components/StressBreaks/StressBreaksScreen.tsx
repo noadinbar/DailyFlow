@@ -17,6 +17,10 @@ import WeeklyBreakPlanSection, {
   type PlanCalendarStatus,
   type WeeklyBreakPlanItem,
 } from './WeeklyBreakPlanSection';
+import PotentiallyStressfulPeriodsSection, {
+  normalizeStressfulPeriodsPayload,
+  type StressfulPeriodsPayload,
+} from './PotentiallyStressfulPeriodsSection';
 import {
   EMPTY_STRESS_BREAKS_FORM,
   stressBreaksPreferencesFromApi,
@@ -190,6 +194,10 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>(
     {}
   );
+  const [stressfulPeriods, setStressfulPeriods] = React.useState<StressfulPeriodsPayload | null>(null);
+  const [isLoadingInsights, setIsLoadingInsights] = React.useState(false);
+  const [isRefreshingInsights, setIsRefreshingInsights] = React.useState(false);
+  const [insightsError, setInsightsError] = React.useState('');
 
   const effectiveName = displayName.trim() || username || 'User';
   const questionnaireCompleted = stressBreaks?.questionnaire_completed === true;
@@ -239,6 +247,11 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     setFavoriteActivities(favorites);
     setWeeklyBreakPlan(plan);
     setHasLibrary(payload.has_library === true || timed.length > 0 || flexible.length > 0);
+    const insights = normalizeStressfulPeriodsPayload(payload.stressful_periods);
+    if (insights) {
+      setStressfulPeriods(insights);
+      setInsightsError('');
+    }
   }
 
   async function getAuthToken(): Promise<string> {
@@ -480,31 +493,69 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     return next;
   }
 
-  async function loadActivityLibrary(): Promise<void> {
-    const token = await getAuthToken();
-    const response = await fetch(
-      buildApiUrl(
-        `/stress/activities?start_date=${encodeURIComponent(weekStartIso)}&end_date=${encodeURIComponent(weekEndIso)}`
-      ),
-      {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
-    let payload: StressActivitiesResponse = {};
+  async function loadActivityLibrary(options?: { insightsOnlyRefresh?: boolean }): Promise<void> {
+    const insightsOnlyRefresh = options?.insightsOnlyRefresh === true;
+    if (insightsOnlyRefresh) {
+      setIsRefreshingInsights(true);
+      setInsightsError('');
+    } else {
+      setIsLoadingInsights(true);
+      setInsightsError('');
+    }
     try {
-      payload = (await response.json()) as StressActivitiesResponse;
-    } catch {
-      payload = {};
+      const token = await getAuthToken();
+      const response = await fetch(
+        buildApiUrl(
+          `/stress/activities?start_date=${encodeURIComponent(weekStartIso)}&end_date=${encodeURIComponent(weekEndIso)}`
+        ),
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      let payload: StressActivitiesResponse = {};
+      try {
+        payload = (await response.json()) as StressActivitiesResponse;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        const message =
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not load activity library (${response.status}).`;
+        throw new Error(message);
+      }
+      if (insightsOnlyRefresh) {
+        const insights = normalizeStressfulPeriodsPayload(payload.stressful_periods);
+        if (!insights) {
+          throw new Error('Insights response was incomplete.');
+        }
+        setStressfulPeriods(insights);
+        setInsightsError('');
+      } else {
+        applyLibraryPayload(payload);
+      }
+    } finally {
+      if (insightsOnlyRefresh) {
+        setIsRefreshingInsights(false);
+      } else {
+        setIsLoadingInsights(false);
+      }
     }
-    if (!response.ok) {
-      const message =
-        typeof payload.message === 'string' && payload.message.trim()
-          ? payload.message
-          : `Could not load activity library (${response.status}).`;
-      throw new Error(message);
+  }
+
+  async function refreshInsights(): Promise<void> {
+    try {
+      await loadActivityLibrary({ insightsOnlyRefresh: true });
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setInsightsError(
+        typeof anyErr?.message === 'string' && anyErr.message.trim()
+          ? anyErr.message
+          : 'Could not refresh insights.'
+      );
     }
-    applyLibraryPayload(payload);
   }
 
   async function generateActivities(): Promise<void> {
@@ -1142,6 +1193,13 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
 
           {preferencesLoadState === 'ready' && questionnaireCompleted && (
             <>
+              <PotentiallyStressfulPeriodsSection
+                insightsPayload={stressfulPeriods}
+                isLoading={isLoadingInsights || isLoadingLibrary}
+                isRefreshing={isRefreshingInsights}
+                error={insightsError}
+                onRefresh={() => void refreshInsights()}
+              />
               <WeeklyBreakPlanSection
                 weekCards={weekCards}
                 planItems={weeklyBreakPlan}

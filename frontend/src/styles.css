@@ -2106,3 +2106,40 @@ select.df-input {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.7);
 }
+
+.df-stressInsightsSection {
+  margin-bottom: 4px;
+}
+
+.df-stressInsightList {
+  display: grid;
+  gap: 10px;
+}
+
+.df-stressInsightCard {
+  padding: 12px 14px;
+  border: 1px solid var(--df-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.df-stressInsightHeadline {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--df-text, #111827);
+}
+
+.df-stressInsightRecommendation {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #4b5563;
+}
+
+.df-stressInsightEmpty {
+  padding: 12px 14px;
+  border: 1px dashed var(--df-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+}

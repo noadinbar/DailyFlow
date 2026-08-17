@@ -31,6 +31,7 @@ export type StressActivitiesResponse = {
   flexible_activities?: StressActivity[];
   favorite_activities?: StressActivity[];
   weekly_break_plan?: unknown[];
+  stressful_periods?: unknown;
   has_library?: boolean;
   generated_at?: string | null;
   updated_at?: string | null;
