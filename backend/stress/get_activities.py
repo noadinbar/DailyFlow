@@ -2,19 +2,24 @@
 GET /stress/activities — load Timed + Flexible library, favorites, and weekly plan.
 PATCH /stress/activities — mutate library/plan state:
   - toggle_favorite
-  - add_library_activity
+  - add_library_activity (BusyBlocks conflict validation, Workouts-style)
   - remove_plan_item
 
-Uses StressBreaksLibrary only (no Users / BusyBlocks / Google in Phase 3A).
+Uses StressBreaksLibrary. add_library_activity also reads BusyBlocks (same overlap
+semantics as backend/workouts/weekly_plan_update.py _slot_is_valid).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import boto3
+from boto3.dynamodb.conditions import Key
 
 _STRESS_DIR = str(Path(__file__).resolve().parent)
 if _STRESS_DIR not in sys.path:
@@ -22,7 +27,6 @@ if _STRESS_DIR not in sys.path:
 
 from activity_model import (  # noqa: E402
     FLEXIBLE_PLAN_DURATIONS,
-    add_minutes_hhmm,
     favorite_key_from_item,
     iso_utc_now,
     json_safe,
@@ -38,6 +42,10 @@ from activity_model import (  # noqa: E402
     to_dynamodb_safe,
     to_int,
 )
+
+# Match Workouts weekly_plan_update.py slot window.
+DAY_START_MINUTES = 6 * 60
+DAY_END_MINUTES = 22 * 60
 
 _CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -82,6 +90,91 @@ def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def _today_iso_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
+
+
+def _busy_blocks_table():
+    table_name = os.getenv("BUSY_BLOCKS_TABLE", "").strip()
+    if not table_name:
+        raise ValueError("Missing BUSY_BLOCKS_TABLE env var.")
+    region = os.getenv("AWS_REGION")
+    dynamodb = boto3.resource("dynamodb", region_name=region) if region else boto3.resource("dynamodb")
+    return dynamodb.Table(table_name)
+
+
+def _parse_hh_mm_time(value: str) -> Optional[time]:
+    """Workouts-compatible HH:MM parser (used for BusyBlocks overlap checks)."""
+    parsed = parse_hh_mm(value)
+    if not parsed:
+        return None
+    hour, minute = parsed
+    return time(hour, minute)
+
+
+def _query_busy_blocks(user_id: str, start_date_iso: str, end_date_iso: str) -> List[Dict[str, Any]]:
+    """Mirror workouts/weekly_plan_update.py _query_busy_blocks."""
+    table = _busy_blocks_table()
+    items: List[Dict[str, Any]] = []
+    last_evaluated_key: Optional[Dict[str, Any]] = None
+    while True:
+        query_args: Dict[str, Any] = {"KeyConditionExpression": Key("user_id").eq(user_id)}
+        if last_evaluated_key:
+            query_args["ExclusiveStartKey"] = last_evaluated_key
+        response = table.query(**query_args)
+        for item in response.get("Items") or []:
+            if not isinstance(item, dict):
+                continue
+            block_date = str(item.get("date", "")).strip()
+            if not block_date or block_date < start_date_iso or block_date > end_date_iso:
+                continue
+            start_time = str(item.get("start_time", "")).strip()
+            end_time = str(item.get("end_time", "")).strip()
+            if not _parse_hh_mm_time(start_time) or not _parse_hh_mm_time(end_time):
+                continue
+            items.append({"date": block_date, "start_time": start_time, "end_time": end_time})
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+    items.sort(key=lambda x: (x["date"], x["start_time"], x["end_time"]))
+    return items
+
+
+def _slot_is_valid(
+    *,
+    week_start: str,
+    week_end: str,
+    recommended_day: str,
+    recommended_start_time: str,
+    duration_minutes: int,
+    busy_blocks: List[Dict[str, Any]],
+) -> Tuple[bool, str, str]:
+    """
+    Mirror workouts/weekly_plan_update.py _slot_is_valid exactly:
+    - day must be inside week
+    - start must parse as HH:MM
+    - slot must fit 06:00-22:00
+    - overlap if max(start, block_start) < min(end, block_end)  (half-open)
+    """
+    if recommended_day < week_start or recommended_day > week_end:
+        return False, "", "Selected day must be inside the visible week."
+    start_t = _parse_hh_mm_time(recommended_start_time)
+    if not start_t:
+        return False, "", "recommended_start_time must be HH:MM."
+    start_m = start_t.hour * 60 + start_t.minute
+    end_m = start_m + duration_minutes
+    if start_m < DAY_START_MINUTES or end_m > DAY_END_MINUTES:
+        return False, "", "Selected time is outside allowed workout hours (06:00-22:00)."
+    for block in busy_blocks:
+        if block.get("date") != recommended_day:
+            continue
+        b_start = _parse_hh_mm_time(str(block.get("start_time", "")))
+        b_end = _parse_hh_mm_time(str(block.get("end_time", "")))
+        if not b_start or not b_end:
+            continue
+        b_start_m = b_start.hour * 60 + b_start.minute
+        b_end_m = b_end.hour * 60 + b_end.minute
+        if max(start_m, b_start_m) < min(end_m, b_end_m):
+            return False, "", "Selected slot overlaps an existing busy block."
+    return True, f"{end_m // 60:02d}:{end_m % 60:02d}", ""
 
 
 def _library_payload(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -259,10 +352,24 @@ def _handle_add_library_activity(user_id: str, payload: Dict[str, Any]) -> Dict[
         if duration_minutes <= 0:
             return _json_response(400, {"message": "Selected activity has invalid duration."})
 
-    recommended_end_time = add_minutes_hhmm(recommended_start_time, duration_minutes)
-    if not recommended_end_time or recommended_end_time == "24:00":
-        # Keep end within the same calendar day for Phase 3A (no overnight breaks).
-        return _json_response(400, {"message": "Activity must end before midnight. Choose an earlier start time."})
+    try:
+        busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
+    except ValueError as err:
+        return _json_response(500, {"message": str(err)})
+    except Exception as err:
+        print(f"[stress-activities] busyblocks query failed: {err}")
+        return _json_response(503, {"message": "Could not validate calendar availability. Try again shortly."})
+
+    slot_ok, recommended_end_time, err = _slot_is_valid(
+        week_start=week_start,
+        week_end=week_end,
+        recommended_day=recommended_day,
+        recommended_start_time=recommended_start_time,
+        duration_minutes=duration_minutes,
+        busy_blocks=busy_blocks,
+    )
+    if not slot_ok:
+        return _json_response(400, {"message": err})
 
     weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
     weekly_plan.append(
