@@ -8,6 +8,10 @@ PATCH /stress/activities — mutate library/plan state:
 
 Uses StressBreaksLibrary. add_library_activity also reads BusyBlocks (same overlap
 semantics as backend/workouts/weekly_plan_update.py _slot_is_valid).
+
+Weekly Break Plan week scoping mirrors Workouts GET /workouts/suggestions:
+a single current_week_plan is reused only when saved week_start/end match the
+requested period; otherwise the plan is rolled to an empty plan for the new week.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -113,6 +117,53 @@ def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def _today_iso_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
+
+
+def _parse_period_query(event: Dict[str, Any]) -> Tuple[Optional[date], Optional[date], Optional[str]]:
+    """Mirror workouts/suggestions.py _period_from_get_event / _parse_period_payload."""
+    params = event.get("queryStringParameters") or {}
+    if not isinstance(params, dict):
+        params = {}
+    start_raw = params.get("start_date")
+    end_raw = params.get("end_date")
+    if not isinstance(start_raw, str) or not isinstance(end_raw, str):
+        return None, None, "start_date and end_date are required (YYYY-MM-DD)."
+    try:
+        start_date_value = date.fromisoformat(start_raw.strip())
+        end_date_value = date.fromisoformat(end_raw.strip())
+    except Exception:
+        return None, None, "start_date and end_date must be valid ISO dates (YYYY-MM-DD)."
+    if end_date_value < start_date_value:
+        return None, None, "end_date must be on or after start_date."
+    span_days = (end_date_value - start_date_value).days + 1
+    if span_days > 14:
+        return None, None, "Requested period is too long (max 14 days)."
+    return start_date_value, end_date_value, None
+
+
+def _filter_plan_to_week(plan: List[Dict[str, Any]], week_start: str, week_end: str) -> List[Dict[str, Any]]:
+    return [
+        entry
+        for entry in plan
+        if week_start <= str(entry.get("recommended_day", "")).strip() <= week_end
+    ]
+
+
+def _weekly_plan_for_requested_week(
+    item: Dict[str, Any],
+    week_start: str,
+    week_end: str,
+) -> List[Dict[str, Any]]:
+    """
+    Workouts stores one current_week_plan. Reuse it only when saved week bounds match
+    the requested week; otherwise start empty (week rolled).
+    Also drop any orphan items whose recommended_day falls outside the week.
+    """
+    saved_start = str(item.get("current_week_plan_week_start", "")).strip()
+    saved_end = str(item.get("current_week_plan_week_end", "")).strip()
+    if saved_start != week_start or saved_end != week_end:
+        return []
+    return _filter_plan_to_week(normalize_weekly_break_plan(item.get("current_week_plan")), week_start, week_end)
 
 
 def _busy_blocks_table():
@@ -598,15 +649,26 @@ def _mark_busy_blocks_stale(user_id: str) -> None:
         return
 
 
-def _library_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+def _library_payload(
+    item: Dict[str, Any],
+    *,
+    weekly_plan: Optional[List[Dict[str, Any]]] = None,
+    week_start: Optional[str] = None,
+    week_end: Optional[str] = None,
+) -> Dict[str, Any]:
     timed = normalize_activity_list(item.get("timed_activities"), kind="timed")
     flexible = normalize_activity_list(item.get("flexible_activities"), kind="flexible")
     favorites = normalize_favorites(item.get("favorite_activities"))
-    weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    if weekly_plan is None:
+        weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
     generated_at = item.get("generated_at")
     updated_at = item.get("updated_at")
-    week_start = item.get("current_week_plan_week_start")
-    week_end = item.get("current_week_plan_week_end")
+    if week_start is None:
+        raw_start = item.get("current_week_plan_week_start")
+        week_start = raw_start if isinstance(raw_start, str) else None
+    if week_end is None:
+        raw_end = item.get("current_week_plan_week_end")
+        week_end = raw_end if isinstance(raw_end, str) else None
     return {
         "timed_activities": timed,
         "flexible_activities": flexible,
@@ -615,8 +677,8 @@ def _library_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "has_library": bool(timed or flexible),
         "generated_at": generated_at if isinstance(generated_at, str) else None,
         "updated_at": updated_at if isinstance(updated_at, str) else None,
-        "week_start": week_start if isinstance(week_start, str) else None,
-        "week_end": week_end if isinstance(week_end, str) else None,
+        "week_start": week_start,
+        "week_end": week_end,
     }
 
 
@@ -658,7 +720,14 @@ def _persist_weekly_plan(
     return updated_at
 
 
-def _handle_get(user_id: str) -> Dict[str, Any]:
+def _handle_get(user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    start_date_value, end_date_value, period_error = _parse_period_query(event)
+    if period_error:
+        return _json_response(400, {"message": period_error})
+    assert start_date_value is not None and end_date_value is not None
+    period_start = start_date_value.isoformat()
+    period_end = end_date_value.isoformat()
+
     try:
         item = load_library_item(user_id)
     except ValueError as err:
@@ -666,7 +735,60 @@ def _handle_get(user_id: str) -> Dict[str, Any]:
     except Exception as err:
         print(f"[stress-activities] load failed: {err}")
         return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
-    return _json_response(200, _library_payload(item))
+
+    saved_week_start = str(item.get("current_week_plan_week_start", "")).strip()
+    saved_week_end = str(item.get("current_week_plan_week_end", "")).strip()
+    saved_weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    week_matches = saved_week_start == period_start and saved_week_end == period_end
+
+    if week_matches:
+        # Same week as Workouts "saved_current_week_plan" path — reuse stored plan,
+        # but drop orphans outside the week bounds (heals stale PATCH week-bound updates).
+        weekly_plan = _filter_plan_to_week(saved_weekly_plan, period_start, period_end)
+        if len(weekly_plan) != len(saved_weekly_plan):
+            try:
+                _persist_weekly_plan(
+                    user_id=user_id,
+                    week_start=period_start,
+                    week_end=period_end,
+                    weekly_plan=weekly_plan,
+                )
+            except Exception as err:
+                print(f"[stress-activities] week-scope heal failed: {err}")
+                return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
+        return _json_response(
+            200,
+            _library_payload(
+                item,
+                weekly_plan=weekly_plan,
+                week_start=period_start,
+                week_end=period_end,
+            ),
+        )
+
+    # Week rolled (Workouts would derive+overwrite current_week_plan). Stress has no
+    # auto-scheduler — persist an empty plan for the requested week.
+    weekly_plan: List[Dict[str, Any]] = []
+    try:
+        _persist_weekly_plan(
+            user_id=user_id,
+            week_start=period_start,
+            week_end=period_end,
+            weekly_plan=weekly_plan,
+        )
+    except Exception as err:
+        print(f"[stress-activities] week-roll persist failed: {err}")
+        return _json_response(503, {"message": "Could not load Stress & Breaks library. Try again shortly."})
+
+    return _json_response(
+        200,
+        _library_payload(
+            item,
+            weekly_plan=weekly_plan,
+            week_start=period_start,
+            week_end=period_end,
+        ),
+    )
 
 
 def _handle_toggle_favorite(user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -792,7 +914,7 @@ def _handle_add_library_activity(user_id: str, payload: Dict[str, Any]) -> Dict[
     if not slot_ok:
         return _json_response(400, {"message": err})
 
-    weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    weekly_plan = _weekly_plan_for_requested_week(item, week_start, week_end)
     weekly_plan.append(
         {
             "id": next_plan_id(weekly_plan),
@@ -809,6 +931,7 @@ def _handle_add_library_activity(user_id: str, payload: Dict[str, Any]) -> Dict[
         }
     )
     weekly_plan = normalize_weekly_break_plan(weekly_plan)
+    weekly_plan = _filter_plan_to_week(weekly_plan, week_start, week_end)
 
     try:
         updated_at = _persist_weekly_plan(
@@ -847,7 +970,7 @@ def _handle_remove_plan_item(user_id: str, payload: Dict[str, Any]) -> Dict[str,
         print(f"[stress-activities] remove load failed: {err}")
         return _json_response(503, {"message": "Could not update weekly break plan. Try again shortly."})
 
-    weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    weekly_plan = _weekly_plan_for_requested_week(item, week_start, week_end)
     plan_item = next((entry for entry in weekly_plan if str(entry.get("id", "")).strip() == plan_id), None)
     filtered = [entry for entry in weekly_plan if str(entry.get("id", "")).strip() != plan_id]
     if len(filtered) == len(weekly_plan):
@@ -925,7 +1048,7 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
         print(f"[stress-activities] add_to_calendar load failed: {err}")
         return _json_response(503, {"message": "Could not update weekly break plan. Try again shortly."})
 
-    weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    weekly_plan = _weekly_plan_for_requested_week(item, week_start, week_end)
     plan_item = next((entry for entry in weekly_plan if str(entry.get("id", "")).strip() == plan_id), None)
     if not plan_item:
         return _json_response(404, {"message": "Weekly plan item not found."})
@@ -1089,7 +1212,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _json_response(401, {"message": "Missing Cognito user id (sub) in request."})
 
     if method == "GET":
-        return _handle_get(user_id)
+        return _handle_get(user_id, event)
     if method == "PATCH":
         return _handle_patch(user_id, event)
     return _json_response(405, {"message": "Method not allowed."})

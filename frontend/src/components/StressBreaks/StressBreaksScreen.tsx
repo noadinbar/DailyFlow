@@ -482,10 +482,15 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
 
   async function loadActivityLibrary(): Promise<void> {
     const token = await getAuthToken();
-    const response = await fetch(buildApiUrl('/stress/activities'), {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await fetch(
+      buildApiUrl(
+        `/stress/activities?start_date=${encodeURIComponent(weekStartIso)}&end_date=${encodeURIComponent(weekEndIso)}`
+      ),
+      {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
     let payload: StressActivitiesResponse = {};
     try {
       payload = (await response.json()) as StressActivitiesResponse;
