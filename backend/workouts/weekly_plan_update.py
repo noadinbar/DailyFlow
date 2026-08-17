@@ -1,8 +1,10 @@
 import json
 import os
+import sys
 from datetime import datetime, time, timezone
 from decimal import Decimal
 from hashlib import sha1
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -10,6 +12,14 @@ from urllib.request import Request, urlopen
 
 import boto3
 from boto3.dynamodb.conditions import Key
+
+_HERE = Path(__file__).resolve().parent
+for candidate in (_HERE, _HERE.parent / "scheduling"):
+    path = str(candidate)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from conflicts import OVERLAP_ERROR_MESSAGE, occupied_slots_for_week  # noqa: E402
 
 WORKOUT_LIBRARY_DEFAULT_TABLE_NAME = "WorkoutLibrary"
 DAILYFLOW_CALENDAR_SUMMARY = "DailyFlow"
@@ -584,7 +594,7 @@ def _slot_is_valid(*, week_start: str, week_end: str, recommended_day: str, reco
         b_start_m = b_start.hour * 60 + b_start.minute
         b_end_m = b_end.hour * 60 + b_end.minute
         if max(start_m, b_start_m) < min(end_m, b_end_m):
-            return False, "", "Selected slot overlaps an existing busy block."
+            return False, "", OVERLAP_ERROR_MESSAGE
     return True, f"{end_m // 60:02d}:{end_m % 60:02d}", ""
 
 
@@ -641,13 +651,14 @@ def _handle_add_library_workout(*, user_id: str, payload: Dict[str, Any]) -> Dic
         return _json_response(400, {"message": "Selected workout has invalid duration."})
 
     busy_blocks = _query_busy_blocks(user_id, week_start, week_end)
+    occupied = occupied_slots_for_week(user_id, week_start, week_end, busy_blocks)
     slot_ok, recommended_end_time, err = _slot_is_valid(
         week_start=week_start,
         week_end=week_end,
         recommended_day=recommended_day,
         recommended_start_time=recommended_start_time,
         duration_minutes=duration_minutes,
-        busy_blocks=busy_blocks,
+        busy_blocks=occupied,
     )
     if not slot_ok:
         return _json_response(400, {"message": err})
@@ -879,6 +890,30 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
     )
     if not isinstance(library_item, dict):
         return _json_response(400, {"message": "Selected workout library item does not exist."})
+
+    duration_minutes = 0
+    start_t = _parse_hh_mm(str(plan_item.get("recommended_start_time", "")).strip())
+    end_t = _parse_hh_mm(str(plan_item.get("recommended_end_time", "")).strip())
+    if start_t and end_t:
+        duration_minutes = (end_t.hour * 60 + end_t.minute) - (start_t.hour * 60 + start_t.minute)
+    if duration_minutes <= 0:
+        duration_minutes = _to_int(library_item.get("duration_minutes"), 0)
+    occupied = occupied_slots_for_week(
+        user_id,
+        week_start,
+        week_end,
+        _query_busy_blocks(user_id, week_start, week_end),
+    )
+    slot_ok, _, err = _slot_is_valid(
+        week_start=week_start,
+        week_end=week_end,
+        recommended_day=str(plan_item.get("recommended_day", "")).strip(),
+        recommended_start_time=str(plan_item.get("recommended_start_time", "")).strip(),
+        duration_minutes=duration_minutes,
+        busy_blocks=occupied,
+    )
+    if not slot_ok:
+        return _json_response(400, {"message": err})
 
     stored_connection = _fetch_google_connection(user_id)
     debug_flags: Dict[str, bool] = {

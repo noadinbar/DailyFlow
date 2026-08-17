@@ -4,10 +4,12 @@ PATCH /meals/saved — persist favorites, week plan, grocery checks, calendar sc
 import json
 import math
 import os
+import sys
 import traceback
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -16,6 +18,14 @@ from urllib.request import Request, urlopen
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+
+_HERE = Path(__file__).resolve().parent
+for candidate in (_HERE, _HERE.parent / "scheduling"):
+    path = str(candidate)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from conflicts import OVERLAP_ERROR_MESSAGE, occupied_slots_for_week  # noqa: E402
 
 DAILYFLOW_CALENDAR_SUMMARY = "DailyFlow"
 APP_TIMEZONE_ID = "Asia/Jerusalem"
@@ -613,7 +623,7 @@ def _slot_is_valid(
         b_start_m = b_start.hour * 60 + b_start.minute
         b_end_m = b_end.hour * 60 + b_end.minute
         if max(start_m, b_start_m) < min(end_m, b_end_m):
-            return False, "", "This time overlaps a busy block on your calendar."
+            return False, "", OVERLAP_ERROR_MESSAGE
     return True, f"{end_m // 60:02d}:{end_m % 60:02d}", ""
 
 
@@ -1088,16 +1098,17 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
                 "Ensure the meals Lambda can read BUSY_BLOCKS_TABLE (DynamoDB Query).",
             },
         )
+    occupied = occupied_slots_for_week(user_id, week_start, week_end, busy)
     ok, end_hhmm, err_msg = _slot_is_valid(
         week_start=week_start,
         week_end=week_end,
         recommended_day=date_iso,
         recommended_start_time=start_time,
         duration_minutes=prep,
-        busy_blocks=busy,
+        busy_blocks=occupied,
     )
     if not ok:
-        return _json_response(409, {"message": err_msg or "Time slot not available."})
+        return _json_response(409, {"message": err_msg or OVERLAP_ERROR_MESSAGE})
 
     try:
         integ_resp = _integrations_table().get_item(Key={"user_id": user_id})

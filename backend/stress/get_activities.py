@@ -3,12 +3,12 @@ GET /stress/activities — load Timed + Flexible library, favorites, weekly plan
 and Potentially Stressful Periods insights for the requested week.
 PATCH /stress/activities — mutate library/plan state:
   - toggle_favorite
-  - add_library_activity (BusyBlocks conflict validation, Workouts-style)
+  - add_library_activity (BusyBlocks + DailyFlow calendar conflict validation, Workouts-style)
   - remove_plan_item (also deletes Google event when stamped, Workouts-style)
   - add_to_calendar (Google Calendar insert, mirrors workouts/weekly_plan_update.py)
 
-Uses StressBreaksLibrary. add_library_activity also reads BusyBlocks (same overlap
-semantics as backend/workouts/weekly_plan_update.py _slot_is_valid).
+Uses StressBreaksLibrary. add_library_activity also reads BusyBlocks and
+calendar-linked DailyFlow events (same half-open overlap as Workouts).
 
 Weekly Break Plan week scoping mirrors Workouts GET /workouts/suggestions:
 a single current_week_plan is reused only when saved week_start/end match the
@@ -33,8 +33,10 @@ import boto3
 from boto3.dynamodb.conditions import Key
 
 _STRESS_DIR = str(Path(__file__).resolve().parent)
-if _STRESS_DIR not in sys.path:
-    sys.path.insert(0, _STRESS_DIR)
+_SCHEDULING_DIR = str(Path(__file__).resolve().parent.parent / "scheduling")
+for _path in (_STRESS_DIR, _SCHEDULING_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 from activity_model import (  # noqa: E402
     FLEXIBLE_PLAN_DURATIONS,
@@ -54,6 +56,7 @@ from activity_model import (  # noqa: E402
     to_int,
 )
 from stressful_periods import build_stressful_periods_insights  # noqa: E402
+from conflicts import OVERLAP_ERROR_MESSAGE, occupied_slots_for_week  # noqa: E402
 
 # Match Workouts weekly_plan_update.py slot window.
 DAY_START_MINUTES = 6 * 60
@@ -273,7 +276,7 @@ def _slot_is_valid(
         b_start_m = b_start.hour * 60 + b_start.minute
         b_end_m = b_end.hour * 60 + b_end.minute
         if max(start_m, b_start_m) < min(end_m, b_end_m):
-            return False, "", "Selected slot overlaps an existing busy block."
+            return False, "", OVERLAP_ERROR_MESSAGE
     return True, f"{end_m // 60:02d}:{end_m % 60:02d}", ""
 
 
@@ -1010,13 +1013,14 @@ def _handle_add_library_activity(user_id: str, payload: Dict[str, Any]) -> Dict[
         print(f"[stress-activities] busyblocks query failed: {err}")
         return _json_response(503, {"message": "Could not validate calendar availability. Try again shortly."})
 
+    occupied = occupied_slots_for_week(user_id, week_start, week_end, busy_blocks)
     slot_ok, recommended_end_time, err = _slot_is_valid(
         week_start=week_start,
         week_end=week_end,
         recommended_day=recommended_day,
         recommended_start_time=recommended_start_time,
         duration_minutes=duration_minutes,
-        busy_blocks=busy_blocks,
+        busy_blocks=occupied,
     )
     if not slot_ok:
         return _json_response(400, {"message": err})
@@ -1176,6 +1180,30 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
                 "message": "Activity already added to DailyFlow calendar.",
             },
         )
+
+    duration_minutes = to_int(plan_item.get("duration_minutes"), 0)
+    start_parsed = parse_hh_mm(str(plan_item.get("recommended_start_time", "")).strip())
+    end_parsed = parse_hh_mm(str(plan_item.get("recommended_end_time", "")).strip())
+    if start_parsed and end_parsed:
+        duration_minutes = (end_parsed[0] * 60 + end_parsed[1]) - (start_parsed[0] * 60 + start_parsed[1])
+    try:
+        busy_blocks = _query_busy_blocks(user_id, week_start, week_end, flow="conflict_validation")
+    except ValueError as err:
+        return _json_response(500, {"message": str(err)})
+    except Exception as err:
+        print(f"[stress-activities] busyblocks query failed: {err}")
+        return _json_response(503, {"message": "Could not validate calendar availability. Try again shortly."})
+    occupied = occupied_slots_for_week(user_id, week_start, week_end, busy_blocks)
+    slot_ok, _, err = _slot_is_valid(
+        week_start=week_start,
+        week_end=week_end,
+        recommended_day=recommended_day,
+        recommended_start_time=str(plan_item.get("recommended_start_time", "")).strip(),
+        duration_minutes=duration_minutes,
+        busy_blocks=occupied,
+    )
+    if not slot_ok:
+        return _json_response(400, {"message": err})
 
     stored_connection = _fetch_google_connection(user_id)
     debug_flags: Dict[str, bool] = {
