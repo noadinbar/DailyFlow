@@ -225,14 +225,23 @@ def _safe_string_list(value: Any) -> List[str]:
     return out
 
 
+def _app_today() -> date:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(APP_TIMEZONE_ID)).date()
+    except Exception:
+        return datetime.now(timezone.utc).date()
+
+
 def _start_of_week_from_date(d: date) -> date:
     days_back = (d.weekday() + 1) % 7
     return d - timedelta(days=days_back)
 
 
-def _current_week_bounds_utc() -> Tuple[str, str]:
-    now_d = datetime.now(timezone.utc).date()
-    ws = _start_of_week_from_date(now_d)
+def _current_week_bounds() -> Tuple[str, str]:
+    """Sunday–Saturday in Asia/Jerusalem. Same definition as GET /meals and Overview."""
+    ws = _start_of_week_from_date(_app_today())
     we = ws + timedelta(days=6)
     return ws.isoformat(), we.isoformat()
 
@@ -897,7 +906,7 @@ def _handle_toggle_grocery(user_id: str, payload: Dict[str, Any]) -> Dict[str, A
         return _json_response(400, {"message": "grocery_key is required."})
     week_key = _safe_string(payload.get("week_record_key"))
     if not week_key.startswith("WEEK#"):
-        week_start, _ = _current_week_bounds_utc()
+        week_start, _ = _current_week_bounds()
         week_key = f"WEEK#{week_start}"
     week = _load_week_item(user_id, week_key)
     saved = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
@@ -922,7 +931,7 @@ def _handle_toggle_grocery(user_id: str, payload: Dict[str, Any]) -> Dict[str, A
 def _handle_clear_checked(user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     week_key = _safe_string(payload.get("week_record_key"))
     if not week_key.startswith("WEEK#"):
-        week_start, _ = _current_week_bounds_utc()
+        week_start, _ = _current_week_bounds()
         week_key = f"WEEK#{week_start}"
     week = _load_week_item(user_id, week_key)
     saved = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
@@ -948,7 +957,7 @@ def _handle_update_servings(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
         return _json_response(400, {"message": "servings must be at least 1."})
     week_key = _safe_string(payload.get("week_record_key"))
     if not week_key.startswith("WEEK#"):
-        week_start, _ = _current_week_bounds_utc()
+        week_start, _ = _current_week_bounds()
         week_key = f"WEEK#{week_start}"
     week = _load_week_item(user_id, week_key)
     saved = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
@@ -984,7 +993,7 @@ def _handle_remove_saved_meal(user_id: str, payload: Dict[str, Any]) -> Dict[str
         return _json_response(400, {"message": "saved_meal_id is required."})
     week_key = _safe_string(payload.get("week_record_key"))
     if not week_key.startswith("WEEK#"):
-        week_start, _ = _current_week_bounds_utc()
+        week_start, _ = _current_week_bounds()
         week_key = f"WEEK#{week_start}"
     week = _load_week_item(user_id, week_key)
     saved = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
@@ -1050,7 +1059,7 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
     start_time = _normalize_time_hh_mm(_safe_string(payload.get("start_time")))
     if not meal_id or not date_iso or not start_time:
         return _json_response(400, {"message": "meal_id, date, and start_time are required."})
-    week_start, week_end = _current_week_bounds_utc()
+    week_start, week_end = _current_week_bounds()
     if date_iso < week_start or date_iso > week_end:
         return _json_response(400, {"message": "Date must be within the current week."})
     try:

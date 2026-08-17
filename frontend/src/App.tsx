@@ -6,6 +6,7 @@ import HomeScreen from './components/Home/HomeScreen';
 import WorkoutsScreen from './components/Workouts/WorkoutsScreen';
 import MealsGroceryScreen from './components/Meals/MealsGroceryScreen';
 import StressBreaksScreen from './components/StressBreaks/StressBreaksScreen';
+import OverviewScreen from './components/Overview/OverviewScreen';
 import QuestionnaireSavedPlaceholder from './components/Questionnaire/QuestionnaireSavedPlaceholder';
 import { fetchOnboardingCompleted, signOutCurrentUser } from './services/auth/cognitoPlaceholders';
 import { configureAmplify } from './services/auth/amplifyConfig';
@@ -36,7 +37,8 @@ function shouldStartHydratingCalendar(): boolean {
     current === '/calendar' ||
     current === '/workouts' ||
     current === '/meals' ||
-    current === '/stress'
+    current === '/stress' ||
+    current === '/overview'
   );
 }
 
@@ -67,7 +69,8 @@ export default function App() {
       normalizedPath !== '/calendar' &&
       normalizedPath !== '/workouts' &&
       normalizedPath !== '/meals' &&
-      normalizedPath !== '/stress'
+      normalizedPath !== '/stress' &&
+      normalizedPath !== '/overview'
     ) {
       setIsHydratingCalendarRoute(false);
       return;
@@ -134,7 +137,8 @@ export default function App() {
       normalizedPath === '/calendar' ||
       normalizedPath === '/workouts' ||
       normalizedPath === '/meals' ||
-      normalizedPath === '/stress';
+      normalizedPath === '/stress' ||
+      normalizedPath === '/overview';
     if (screen === 'home' && authState.isAuthenticated && !isAllowedHomePath) {
       navigate('/calendar', { replace: true });
     }
@@ -203,6 +207,15 @@ export default function App() {
       <Navigate to="/" replace />
     );
 
+  const overviewRouteElement =
+    isHydratingCalendarRoute ? (
+      <></>
+    ) : screen === 'home' && authState.isAuthenticated ? (
+      <OverviewScreen username={authState.user?.username} onLogout={() => handleLogout()} />
+    ) : (
+      <Navigate to="/" replace />
+    );
+
   return (
     <main className="df-page" style={{ position: 'relative' }}>
       {/* Keep Routes mounted during login/calendar hydration so navigate() updates the URL reliably. */}
@@ -236,6 +249,8 @@ export default function App() {
       <Route path="/meals/*" element={mealsRouteElement} />
       <Route path="/stress" element={stressRouteElement} />
       <Route path="/stress/*" element={stressRouteElement} />
+      <Route path="/overview" element={overviewRouteElement} />
+      <Route path="/overview/*" element={overviewRouteElement} />
         <Route
           path="*"
           element={

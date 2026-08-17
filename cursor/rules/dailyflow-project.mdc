@@ -1,7 +1,7 @@
 Project name: DailyFlow
 
 Project overview:
-DailyFlow is a web application that helps users manage schedule, routines, and wellbeing in one place.
+DailyFlow is a web application that helps users manage schedule, routines, meals, workouts, and wellbeing in one place.
 
 Core product areas:
 - onboarding questionnaire
@@ -38,6 +38,8 @@ Existing DynamoDB tables:
 - MealsAndGroceries
   - PK: user_id
   - SK: record_key
+- StressBreaksLibrary
+  - PK: user_id
 
 Current implemented foundation:
 - Cognito sign up / log in works.
@@ -53,7 +55,7 @@ Current implemented foundation:
 - DailyFlow calendar id is stored in Integrations as dailyflow_calendar_id.
 - Workouts screen exists and is connected to real backend/OpenAI/Google Calendar flows.
 - Meals & Grocery screen exists and is connected to real backend/OpenAI/Google Calendar flows.
-- Meals & Grocery includes Meal Library, Saved Meals This Week, Grocery List, favorites, filters, add-to-calendar flow, servings, grocery list generation, and PDF export.
+- Stress & Breaks screen exists and is connected to real backend/BusyBlocks/Google Calendar flows.
 - Google reconnect buttons exist in relevant screens and should appear only when reconnect is required.
 - Meal Preferences was removed from the frontend and backend and must not be reintroduced.
 - Grocery List UI and PDF export currently show product names only, without quantities or units.
@@ -72,16 +74,16 @@ Google Calendar rules:
 - If Google reconnect is triggered from a specific screen, the user should return to the same source screen after OAuth when possible.
 - If implementing a return_to parameter for OAuth, only allow safe internal frontend paths and default to /calendar when missing or invalid.
 - Do not create an open redirect risk.
+- Do not create duplicate Google events when an item is already linked to an existing DailyFlow event.
 
 Calendar / scheduling UI rules:
 - App-owned displayed times should use 24-hour HH:mm format.
 - Do not show AM/PM in DailyFlow UI.
 - Add-to-calendar popups in Meals and Workouts should use controlled 24-hour HH:mm input if native browser time input displays AM/PM.
-- In Meals and Workouts add popups, selectable days should be only from today through Saturday of the current week, inclusive.
+- In scheduling flows, selectable days should not include past days.
 - Day labels should always be in English and should use this format:
   - Sunday 10.05
   - Monday 11.05
-- Do not allow selecting past days from the current week.
 - Do not change actual ISO datetime values sent to Google Calendar unless needed to derive them correctly from the selected date/time.
 
 Profile/settings rules:
@@ -101,43 +103,87 @@ Workouts rules:
 - Items added to Google Calendar should remain marked as added.
 - Add to calendar must not create duplicate Google events.
 - Delete should remove the linked DailyFlow-created event when applicable.
-- Do not change Workouts while working on Meals unless the requested task explicitly depends on shared code.
 - Workout UI should stay consistent with Meals where appropriate, including subtle icons and pastel tag/category styling.
 - If adding icons, use clean UI icons or inline SVGs, not emoji.
+- Overview may READ Workout data and maintain its own completion state, but Overview completion must not modify the Workouts screen or Workouts plan state.
+
+Meals & Grocery rules:
+- Meals & Grocery implementation should remain stable unless explicitly requested.
+- Meal Library, Saved Meals This Week, Grocery List, favorites, filters, servings, calendar flow, grocery generation, and PDF export already exist.
+- Do not reintroduce Meal Preferences.
+- Overview may read Meals calendar/scheduling data but should not duplicate or modify Meals functionality unless explicitly required.
+
+Stress & Breaks current implementation:
+Stress & Breaks is now an implemented product area.
+
+It includes:
+- Mandatory first-entry Stress & Breaks questionnaire.
+- Questionnaire completion is separate from the global onboarding questionnaire.
+- Edit Preferences.
+- Activity Library with Timed / Flexible tabs.
+- Favorites with a favorites-only filter.
+- Generate Activities based on saved Stress preferences.
+- Approximately 2–3 generated activities per relevant Timed category.
+- Backend hard-capping prevents one category from flooding the generated library.
+- Flexible activities come from a fixed catalog where appropriate.
+- Weekly Break Plan.
+- Timed activities are added with day + start time.
+- Flexible activities are added with day + start time + selected duration.
+- Weekly plan persists for the current week.
+- Current-week plan follows Sunday–Saturday week boundaries.
+- Old-week items must not appear in the current week.
+- BusyBlocks conflict validation mirrors Workouts.
+- BusyBlocks times may arrive as HH:MM:SS and must be parsed compatibly with Workouts.
+- Half-open overlap semantics are used:
+  max(start, block_start) < min(end, block_end)
+- Add-to-calendar for individual Break activities.
+- Add all to calendar.
+- Google connect/reconnect behavior mirrors Workouts.
+- Potentially Stressful Periods based on BusyBlocks + saved preferences.
+- Potentially Stressful Periods provides guidance only and must never claim to detect actual stress.
+- Potentially Stressful Periods is collapsible.
+- Refresh Insights recalculates insights from current-week BusyBlocks/preferences and does not regenerate the Activity Library.
+- Potentially Stressful Periods should remain compact and chronological.
+- Generate Activities uses the same loading-overlay visual pattern as Workouts/Meals.
+
+Stress YouTube rules:
+- Curated YouTube support exists only for appropriate Timed categories:
+  - Breathing
+  - Meditation
+  - Music / calming audio
+- Stretching and Walking do not need YouTube videos for now.
+- YouTube URLs must come only from a backend-owned curated catalog.
+- OpenAI must never generate, guess, or override a YouTube URL or youtube_video_id.
+- Curated catalog metadata includes stable IDs, category, URL, title, and exact duration.
+- Video duration used by DailyFlow is:
+  ceil(duration_seconds / 60)
+- Example:
+  - 7:24 video → 8 minutes
+- Rounded video duration must propagate through:
+  - Activity Library
+  - Weekly Break Plan
+  - BusyBlocks conflict validation
+  - Google Calendar duration
+- Relevant YouTube categories should contribute approximately 2–3 activities PER category on Generate.
+- Do not expose the full curated pool at once.
+- Recent curated video IDs are rotated per category so repeated Generate runs prefer different videos.
+- Recent YouTube rotation state is stored in the existing StressBreaksLibrary item.
+- Do not create a new table only for YouTube rotation.
+- Watch Video should appear only for Timed activities with a valid curated video.
+- Existing verified catalog entries must not be silently replaced with invented URLs.
 
 Current active milestone:
-The current active milestone is completing the remaining DailyFlow product areas before final UI/UX polish.
+The current active milestone is implementing the Overview screen.
 
 Current planned order:
-- Stress & Breaks
 - Overview
-- Workout image generation, if an additional image model is approved
+- Workout image generation, only if an additional image model is approved
 - Mobile responsiveness and final cross-screen polish
-
-Current focus areas:
-- Stress & Breaks implementation
-- Keep existing Calendar, Workouts, Meals, Google integration, and profile flows stable
-- Reuse existing UI and backend patterns where appropriate
-- Work incrementally and avoid unrelated changes
-
-Stress & Breaks direction:
-- Stress & Breaks is a separate product area with its own first-time questionnaire and editable preferences.
-- Do not modify the existing global onboarding questionnaire for Stress & Breaks.
-- Use BusyBlocks and user-provided preferences to identify potentially stressful periods; do not claim to detect actual stress.
-- The screen will include:
-  - Potentially Stressful Periods
-  - Weekly Break Plan
-  - Activity Library
-- Activity Library should follow the existing Meals/Workouts library design language and include favorites.
-- Activity Library will distinguish between Timed and Flexible activities.
-- Weekly Break Plan and Google Calendar behavior should reuse existing Workouts patterns where appropriate.
-- DailyFlow should provide recommendations but should not automatically schedule breaks for the user.
-- Do not implement Apple Watch, HRV, or physiological stress detection.
 
 General milestone rules:
 - Work incrementally and in small scoped steps.
 - Do not skip ahead to unrelated milestone work.
-- - Do not implement Apple Watch, Overview logic, workout image generation, mobile responsiveness, or unrelated milestone work unless explicitly requested.
+- Do not implement workout image generation or mobile responsiveness unless explicitly requested.
 - Do not rewrite unrelated parts of the app.
 - Do not add unnecessary architecture changes.
 - Keep Calendar, Workouts, Meals, Stress, and Overview logically separated.
@@ -147,11 +193,321 @@ General milestone rules:
   - BusyBlocks
   - DailyFlow calendar
   - DailyFlowEvents
+- Do not implement Apple Watch, HRV, or physiological stress detection.
+
+==================================================
+OVERVIEW SCREEN SPECIFICATION
+==================================================
+
+Overview purpose:
+The Overview screen gives the user a clear, attractive summary of the CURRENT WEEK across:
+- Workouts
+- Meals
+- Stress & Breaks
+
+It should summarize existing DailyFlow data rather than duplicate the full functionality of those screens.
+
+The design should feel colorful, lively, modern, and visually engaging while remaining consistent with DailyFlow’s pastel design language.
+
+Overview must use only TWO tabs:
+- Summary
+- Insights
+
+Do NOT add a Patterns tab.
+
+--------------------------------------------------
+OVERVIEW WEEK RULES
+--------------------------------------------------
+
+Overview always represents the CURRENT WEEK only.
+
+Week boundaries:
+- Sunday through Saturday.
+
+There is currently:
+- no previous-week navigation
+- no next-week navigation
+- no week picker
+- no historical Overview mode
+
+On every:
+- Overview screen entry
+- browser refresh
+- relevant data refresh
+
+the Overview should derive the current Sunday–Saturday date range and fetch/read current data.
+
+When a new Sunday starts, Overview naturally represents the new week.
+
+Overview must not accidentally carry previous-week summary data into the new week.
+
+All metrics and lists must be scoped to the current week.
+
+--------------------------------------------------
+OVERVIEW SUMMARY TAB
+--------------------------------------------------
+
+Summary contains three main colorful cards:
+
+1. Workouts
+2. Meals
+3. Stress & Breaks
+
+All three cards should be visually distinct but consistent.
+
+Cards should be clickable and navigate to their corresponding screen:
+- Workouts → Workouts screen
+- Meals → Meals & Grocery screen
+- Stress & Breaks → Stress & Breaks screen
+
+Do not recreate the underlying screen inside Overview.
+
+### Workouts card
+
+The Workouts card should show:
+
+- the user's weekly workout goal
+- how many workouts were actually added to Google Calendar during the current week
+
+Example:
+2 / 3 scheduled
+
+IMPORTANT:
+“Scheduled” / “added” in Overview means added to the DailyFlow Google Calendar, not merely present in the Workouts Weekly Plan.
+
+The Workouts card should also contain the workout list required for completion tracking.
+
+For every current-week workout that has been added to Google Calendar, show:
+- workout name
+- day
+- time
+- Completed checkbox
+
+Completed behavior:
+- Completed exists ONLY in Overview.
+- Do not add Completed UI/state to WorkoutsScreen.
+- Checking Completed must not modify the Google Calendar event.
+- Checking Completed must not remove or alter the Workout plan item.
+- Completion state must persist across browser refresh and navigation.
+- Completion state must be scoped to the relevant current-week workout.
+- When the next week begins, previous-week completion state must not appear as current-week completion state.
+
+Use stable IDs rather than workout title alone for completion persistence.
+
+### Meals card
+
+The Meals card should show:
+- how many Meals were actually added to Google Calendar during the current week
+
+Do not show a meal completion checklist.
+
+Do not count Meal Library items that were not added to Google Calendar.
+
+Card is clickable to Meals & Grocery.
+
+### Stress & Breaks card
+
+The Stress & Breaks card should show:
+- how many Break activities were actually added to Google Calendar during the current week
+- which current-week days were identified as potentially busy/stressful by the existing Stress insights logic
+
+Example:
+3 breaks scheduled
+Busy days: Monday, Wednesday
+
+Do not create a Break completion checklist.
+
+Card is clickable to Stress & Breaks.
+
+--------------------------------------------------
+OVERVIEW INSIGHTS TAB
+--------------------------------------------------
+
+The Insights tab contains TWO concepts:
+
+1. AI Weekly Insights
+2. Daily Motivation
+
+### AI Weekly Insights
+
+Use OpenAI for the weekly insights.
+
+Every explicit Insights refresh should generate fresh insight wording.
+
+Generate:
+- minimum 3 insights
+- maximum 7 insights
+
+Insights should be concise, useful, and grounded ONLY in real current-week DailyFlow data.
+
+Relevant data may include:
+- current-week workouts added to Google Calendar
+- workout weekly goal
+- Overview workout completion state
+- current-week meals added to Google Calendar
+- current-week Stress & Breaks activities added to Google Calendar
+- current-week BusyBlocks
+- current potentially busy/stressful days
+- remaining days/time in the current week
+
+OpenAI must not invent:
+- workouts
+- meals
+- breaks
+- BusyBlocks
+- completed items
+- dates
+- calendar events
+- free windows
+
+Provide structured current-week data to OpenAI and validate/normalize the response before returning it to the frontend.
+
+Insights should contain a mix of:
+- observations
+- progress feedback
+- useful suggestions
+
+Avoid repetitive wording.
+
+### Actionable future suggestions
+
+When appropriate, an insight may suggest a future opportunity.
+
+Example:
+The user's weekly workout goal is 3.
+Only 2 workouts are scheduled.
+The system may suggest a suitable open time for one more workout.
+
+Such suggestions must follow these rules:
+
+- Never suggest a day/time in the past.
+- Search only from NOW through Saturday of the current week.
+- Respect actual BusyBlocks/free-time information.
+- Do not automatically schedule anything.
+- Do not modify the Workout plan.
+- The suggestion is guidance only.
+
+If no appropriate future window exists, do not fabricate one.
+
+### Insights refresh behavior
+
+Refresh Insights should:
+- read the latest current-week data
+- call OpenAI again
+- generate fresh insight wording
+- return 3–7 insights
+- update only the Overview Insights content
+
+A refresh may produce different wording even if the underlying week data has not changed.
+
+Use a loading state consistent with existing DailyFlow loading patterns.
+
+--------------------------------------------------
+DAILY MOTIVATION
+--------------------------------------------------
+
+The Insights tab should also include one visually prominent Daily Motivation card.
+
+Daily Motivation does NOT need OpenAI.
+
+Use a curated fixed pool of short motivational sentences appropriate for DailyFlow.
+
+Show exactly ONE motivation sentence at a time.
+
+The motivation sentence should rotate once per calendar day.
+
+It should NOT change every time the user clicks Refresh Insights.
+
+Prefer deterministic daily rotation based on the date so no additional database write is required solely for motivation.
+
+The motivation card should:
+- feel colorful
+- stand out visually
+- remain tasteful and consistent with the pastel DailyFlow style
+- use no emoji unless explicitly requested
+
+--------------------------------------------------
+OVERVIEW DATA / ARCHITECTURE RULES
+--------------------------------------------------
+
+Before implementing Overview backend logic, inspect how existing screens persist:
+- Google Calendar event IDs
+- DailyFlow calendar IDs
+- DailyFlowEvents
+- Workout weekly plan
+- Meals weekly state
+- Stress weekly plan
+- potentially stressful period data
+
+Reuse existing stored state where possible.
+
+Do not create duplicate sources of truth.
+
+Overview should READ existing product data wherever possible.
+
+Only Overview-specific state should be newly persisted when necessary.
+
+The main expected Overview-specific persistent state is:
+- Workout Completed state for Overview
+
+Do not create a new DynamoDB table automatically.
+
+First inspect whether an existing suitable user/product record can safely store Overview completion state.
+
+If a new table is truly required, explain why before implementing it.
+
+Do not make architectural changes just to simplify Overview reads.
+
+Keep Overview logically separate from:
+- Workouts mutations
+- Meals mutations
+- Stress mutations
+
+Overview should not alter those features except for its own Overview completion state.
+
+--------------------------------------------------
+OVERVIEW DESIGN
+--------------------------------------------------
+
+Use the supplied Overview demo screenshots only as visual inspiration, not as an exact implementation.
+
+Preserve the existing actual DailyFlow:
+- sidebar
+- typography
+- spacing system
+- buttons
+- card language
+- navigation behavior
+
+Overview should feel more colorful and visually engaging than a plain statistics dashboard.
+
+Use:
+- soft pastel cards
+- distinct colors for Workouts / Meals / Stress
+- tasteful icons or inline SVG
+- rounded cards
+- clear hover states
+- visually prominent Insights
+- a colorful Daily Motivation card
+
+Do not use emoji as UI icons.
+
+Summary and Insights tab controls should be polished and clearly show the active tab.
+
+Do not add charts merely to fill space.
+Do not add Calendar analytics that are not useful to the defined Overview scope.
+Do not add Work/University/Personal time-split charts.
+Do not add Patterns charts.
+
+Keep the information hierarchy clear and easy to scan.
+
+==================================================
 
 Design / UI style rules:
 - Keep the style clean, soft, modern, and pastel.
 - Prefer subtle UI icons or inline SVGs, not emoji.
 - Use consistent spacing, rounded cards, and clear hover states.
+- Equivalent section headings should use consistent typography.
 - Sidebar navigation should support a collapsible hamburger behavior when requested:
   - open state: icon + screen name
   - closed state: icons only
@@ -163,7 +519,6 @@ Design / UI style rules:
   - Overview
 - Sidebar items should have hover states so they feel clickable.
 - Active screen should be highlighted more strongly than hover.
-- If Stress & Breaks or Overview are less complete, they should still have consistent sidebar icons and hover behavior unless explicitly disabled.
 
 Implementation guidance:
 - Keep code simple and minimal.
@@ -186,21 +541,25 @@ Implementation guidance:
   - dist/
 
 AWS / deployment guidance:
+- The project uses one existing shared IAM Role.
+- Do NOT ask to edit, replace, or inspect IAM as part of normal implementation.
+- Assume the existing Role has the required access.
+- Only revisit IAM if there is an actual runtime AccessDenied/permission error.
 - If a change requires AWS updates, state them explicitly and concretely.
 - If a change requires Google Cloud / Google OAuth updates, state them explicitly and concretely.
-- If a new DynamoDB table is required, list:
+- If a new DynamoDB table is genuinely required, list:
   - table name
   - partition key
   - sort key if any
-  - required Lambda IAM permissions
   - required environment variables
+- Do not instruct the user to modify IAM.
 - If code changes require only redeploy and no AWS configuration changes, say that clearly.
 - Do not write “AWS CHANGES REQUIRED: none” when frontend or Lambda redeploy is still required.
 - Distinguish between:
   - AWS configuration changes
   - deployment/redeploy requirements
 - If frontend code changed, mention Amplify redeploy through Git push.
-- If Lambda code changed, list the exact Lambda files/functions that must be redeployed.
+- If Lambda code changed, list the exact Lambda/files/functions that must be redeployed.
 - If API Gateway routes changed, list the exact route changes.
 - If Google OAuth start/callback code changed, explicitly mention which auth Lambdas must be redeployed.
 - In AWS CHANGES REQUIRED, explain only what must change because of the actual code changes.
@@ -208,12 +567,27 @@ AWS / deployment guidance:
 - If no AWS changes and no deploy are needed, write exactly:
   AWS CHANGES REQUIRED: none
 
+Debugging rules:
+- Do not immediately propose a code change when the root cause is unknown.
+- First inspect evidence such as:
+  - Network request/response
+  - payload
+  - browser Console
+  - CloudWatch logs
+  - current persisted data
+  - relevant existing implementation
+- Only propose a fix once the likely root cause is reasonably established.
+- Temporary debug logging should be clearly marked and removed after the problem is resolved.
+
 Working style:
-- At the beginning of a new agent task, read this rule first.
-- Before generating code, first explain the plan.
-- Before generating code, list which files will be created or updated.
+- At the beginning of a NEW agent conversation/task, read this rule first.
+- Before generating code, first inspect the existing implementation relevant to the requested feature.
+- Before generating code, explain the plan.
+- Before generating code, list which files are expected to be created or updated.
 - Keep changes scoped to the requested step only.
 - Prefer production-oriented structure, but implement only the smallest correct piece for the requested step.
+- Do not silently redesign existing working features.
+- Reuse existing Workouts/Meals/Stress patterns when the requested behavior already exists elsewhere.
 - At the end of every response that includes code changes, include:
   - exact files changed
   - short summary

@@ -63,7 +63,7 @@ export default function AppSidebar(props: AppSidebarProps) {
     { label: 'Meals & Grocery', route: '/meals', icon: <MealsIcon /> },
     { label: 'Workouts', route: '/workouts', icon: <WorkoutsIcon /> },
     { label: 'Stress & Breaks', route: '/stress', icon: <StressIcon /> },
-    { label: 'Overview', route: '/overview', icon: <OverviewIcon />, disabled: true },
+    { label: 'Overview', route: '/overview', icon: <OverviewIcon /> },
   ];
 
   return (

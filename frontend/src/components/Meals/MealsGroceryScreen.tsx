@@ -274,15 +274,33 @@ function formatAddPopupDayLabel(date: Date): string {
   return `${ENGLISH_DAY_NAMES[date.getDay()]} ${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}`;
 }
 
-function buildAddPopupDayOptions(now: Date): { value: string; label: string }[] {
+function buildAddPopupDayOptions(
+  now: Date,
+  weekStartIso?: string,
+  weekEndIso?: string
+): { value: string; label: string }[] {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  const daysUntilSaturday = 6 - today.getDay();
+  const todayIso = toIsoDateLocal(today);
+  const startIso =
+    typeof weekStartIso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(weekStartIso) ? weekStartIso : todayIso;
+  const localSaturday = new Date(today);
+  localSaturday.setDate(today.getDate() + (6 - today.getDay()));
+  const endIso =
+    typeof weekEndIso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(weekEndIso)
+      ? weekEndIso
+      : toIsoDateLocal(localSaturday);
+
   const options: { value: string; label: string }[] = [];
-  for (let i = 0; i <= daysUntilSaturday; i += 1) {
-    const day = new Date(today);
-    day.setDate(today.getDate() + i);
-    options.push({ value: toIsoDateLocal(day), label: formatAddPopupDayLabel(day) });
+  const cursor = new Date(`${startIso}T00:00:00`);
+  const end = new Date(`${endIso}T00:00:00`);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) return options;
+  while (cursor <= end && options.length < 7) {
+    const value = toIsoDateLocal(cursor);
+    if (value >= todayIso) {
+      options.push({ value, label: formatAddPopupDayLabel(cursor) });
+    }
+    cursor.setDate(cursor.getDate() + 1);
   }
   return options;
 }
@@ -373,8 +391,8 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
   const [addMealError, setAddMealError] = React.useState<string>('');
 
   const addMealDayOptions = React.useMemo(
-    () => (addMealSource ? buildAddPopupDayOptions(new Date()) : []),
-    [addMealSource]
+    () => (addMealSource ? buildAddPopupDayOptions(new Date(), weekStartIso, weekEndIso) : []),
+    [addMealSource, weekStartIso, weekEndIso]
   );
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
