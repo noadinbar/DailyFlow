@@ -2356,13 +2356,40 @@ select.df-input {
 .df-overviewInsightsHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
+}
+
+.df-overviewMotivationCard {
+  margin: 0;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid #f0abfc;
+  background: linear-gradient(135deg, #fff7ed 0%, #fce7f3 48%, #ede9fe 100%);
+  color: #6b21a8;
+  box-shadow: 0 8px 20px rgba(124, 58, 237, 0.08);
+}
+
+.df-overviewMotivationKicker {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7c3aed;
+}
+
+.df-overviewMotivationText {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: #4c1d95;
 }
 
 .df-overviewInsightList {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 0;
   padding: 0;
   display: grid;
   gap: 10px;
@@ -2370,11 +2397,11 @@ select.df-input {
 
 .df-overviewInsightCard {
   margin: 0;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--df-border);
-  border-radius: 12px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.82);
-  border-left-width: 4px;
+  border-left-width: 5px;
 }
 
 .df-overviewInsightCard-observation {
@@ -2390,16 +2417,6 @@ select.df-input {
 .df-overviewInsightCard-suggestion {
   border-left-color: #6b6aa8;
   background: #f3f0fb;
-}
-
-.df-overviewInsightKind {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: #4b5563;
-  margin-bottom: 4px;
 }
 
 .df-overviewInsightText {

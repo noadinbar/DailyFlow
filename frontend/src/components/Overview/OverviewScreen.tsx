@@ -40,11 +40,51 @@ type InsightsResponse = {
   message?: string;
 };
 
-const INSIGHT_KIND_LABELS: Record<InsightKind, string> = {
-  observation: 'Observation',
-  progress: 'Progress',
-  suggestion: 'Suggestion',
-};
+const APP_TIMEZONE_ID = 'Asia/Jerusalem';
+
+const DAILY_MOTIVATION_POOL = [
+  'A calm plan today makes the rest of the week easier.',
+  'Protect one small window for movement, meals, or rest.',
+  'Progress is showing up for the plan you already made.',
+  'You do not need a perfect day. You need a steady one.',
+  'Leave a little space between tasks. That space is recovery.',
+  'One completed workout is better than a crowded intention.',
+  'Eat on time, move with purpose, and pause when the day gets loud.',
+  'A short break can reset a long afternoon.',
+  'Keep the plan kind. Consistency lasts longer than intensity.',
+  'Choose the next useful hour, not the whole week at once.',
+  'Your calendar works best when it also protects your energy.',
+  'Small routines compound. Keep the ones that already help.',
+  'If the day is full, keep the next action simple.',
+  'Rest is part of the plan, not a reward after it.',
+  'Finish one thing well before adding another.',
+  'A clear evening starts with a realistic afternoon.',
+  'Take care of today, and tomorrow arrives with more room.',
+  'Wellbeing grows when meals, movement, and pauses share the week.',
+  'You can adjust the plan without abandoning it.',
+  'Give your busiest day one gentle, scheduled pause.',
+  'Show up for the week you are in, not the week you imagined.',
+] as const;
+
+function jerusalemDateIso(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE_ID,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+function dailyMotivationForJerusalemDate(isoDate = jerusalemDateIso()): string {
+  const parts = isoDate.split('-').map((value) => Number(value));
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
+  if (!year || !month || !day) return DAILY_MOTIVATION_POOL[0];
+  const dayIndex = Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+  const poolIndex = ((dayIndex % DAILY_MOTIVATION_POOL.length) + DAILY_MOTIVATION_POOL.length) % DAILY_MOTIVATION_POOL.length;
+  return DAILY_MOTIVATION_POOL[poolIndex];
+}
 
 type OverviewResponse = {
   week_start?: string;
@@ -591,6 +631,7 @@ export default function OverviewScreen(props: OverviewScreenProps) {
   const weekRangeLabel = weekStart && weekEnd ? formatWeekRangeLabel(weekStart, weekEnd) : '';
   const scheduledCount = scheduledWorkouts.length;
   const busyDayLabels = busyDays.map((day) => day.day_label).join(', ');
+  const dailyMotivation = dailyMotivationForJerusalemDate();
 
   return (
     <section
@@ -780,8 +821,11 @@ export default function OverviewScreen(props: OverviewScreenProps) {
 
           {activeTab === 'insights' && (
             <section className="df-workoutsSection" role="tabpanel" aria-label="Insights">
+              <article className="df-overviewMotivationCard" aria-label="Daily motivation">
+                <p className="df-overviewMotivationKicker">Daily Motivation</p>
+                <p className="df-overviewMotivationText">{dailyMotivation}</p>
+              </article>
               <div className="df-overviewInsightsHeader">
-                <h2 className="df-workoutsTitle">Weekly Insights</h2>
                 <button
                   type="button"
                   className="df-iconBtn df-stressRefreshBtn"
@@ -807,7 +851,6 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                 <ul className="df-overviewInsightList">
                   {insights.map((insight) => (
                     <li key={insight.id} className={`df-overviewInsightCard df-overviewInsightCard-${insight.kind}`}>
-                      <span className="df-overviewInsightKind">{INSIGHT_KIND_LABELS[insight.kind]}</span>
                       <p className="df-overviewInsightText">{insight.text}</p>
                     </li>
                   ))}
