@@ -1,9 +1,11 @@
 """
 GET /overview — read-only current-week Summary data.
+PATCH /overview — persist Overview-only workout completion for the current week.
 
 Week bounds are Sunday–Saturday, computed from the current date in the
 DailyFlow app timezone (Asia/Jerusalem), matching Google Calendar event times.
 Overview never mutates Workouts, Meals, Stress, or Google Calendar state.
+Completion is stored on the Users item, not on WorkoutLibrary plan items.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ _CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "https://main.dnp9vhzk0bw8l.amplifyapp.com",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
-    "Access-Control-Allow-Methods": "OPTIONS,GET",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,PATCH",
 }
 
 
@@ -65,6 +67,24 @@ def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         "headers": dict(_CORS_HEADERS),
         "body": json.dumps(_json_safe(body)),
     }
+
+
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = event.get("body")
+    if body is None:
+        return {}
+    if isinstance(body, dict):
+        return body
+    if isinstance(body, str):
+        raw = body.strip()
+        if not raw:
+            return {}
+        return json.loads(raw)
+    return {}
 
 
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
@@ -176,6 +196,30 @@ def _weekly_goal_from_users(item: Dict[str, Any]) -> int:
     return max(1, min(7, _to_int(item.get("workouts_per_week"), 3)))
 
 
+def _completed_ids_for_week(users_item: Dict[str, Any], week_start: str) -> List[str]:
+    raw = users_item.get("overview_completed_workouts")
+    if not isinstance(raw, dict):
+        return []
+    if _safe_string(raw.get("week_start")) != week_start:
+        return []
+    ids = raw.get("completed_ids")
+    if not isinstance(ids, list):
+        return []
+    out: List[str] = []
+    for value in ids:
+        cleaned = _safe_string(value)
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+    return out
+
+
+def _apply_completed_flags(scheduled: List[Dict[str, Any]], completed_ids: List[str]) -> List[Dict[str, Any]]:
+    completed_set = set(completed_ids)
+    for item in scheduled:
+        item["completed"] = _safe_string(item.get("id")) in completed_set
+    return scheduled
+
+
 def _stress_preferences_from_users(item: Dict[str, Any]) -> Dict[str, Any]:
     def _list(attr: str) -> List[str]:
         raw = item.get(attr)
@@ -249,7 +293,7 @@ def _library_categories(item: Dict[str, Any]) -> List[str]:
     return cats
 
 
-def _scheduled_workouts(user_id: str, week_start: str, week_end: str) -> List[Dict[str, str]]:
+def _scheduled_workouts(user_id: str, week_start: str, week_end: str) -> List[Dict[str, Any]]:
     item = (
         _table("WORKOUT_LIBRARY_TABLE", WORKOUT_LIBRARY_DEFAULT_TABLE)
         .get_item(Key={"user_id": user_id})
@@ -271,7 +315,7 @@ def _scheduled_workouts(user_id: str, week_start: str, week_end: str) -> List[Di
         if lib_id:
             library_by_id[lib_id] = raw
 
-    scheduled: List[Dict[str, str]] = []
+    scheduled: List[Dict[str, Any]] = []
     for raw in item.get("current_week_plan") or []:
         if not isinstance(raw, dict) or not _has_google_event(raw):
             continue
@@ -368,26 +412,15 @@ def _busy_days(
     return [{"date": iso_day, "day_label": seen[iso_day]} for iso_day in sorted(seen)]
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    request_context = event.get("requestContext") or {}
-    http = request_context.get("http") or {}
-    method = (http.get("method") or event.get("httpMethod") or "").upper()
-
-    if method == "OPTIONS":
-        return {"statusCode": 200, "headers": dict(_CORS_HEADERS), "body": ""}
-    if method != "GET":
-        return _json_response(405, {"message": "Method not allowed."})
-
-    user_id = _extract_cognito_sub(event)
-    if not user_id:
-        return _json_response(401, {"message": "Missing Cognito user id (sub) in request."})
-
+def _handle_get(user_id: str) -> Dict[str, Any]:
     week_start, week_end = current_week_bounds()
-
     try:
         users_item = _users_item(user_id)
         weekly_goal = _weekly_goal_from_users(users_item)
-        scheduled_workouts = _scheduled_workouts(user_id, week_start, week_end)
+        scheduled_workouts = _apply_completed_flags(
+            _scheduled_workouts(user_id, week_start, week_end),
+            _completed_ids_for_week(users_item, week_start),
+        )
         meals_count = _scheduled_meals_count(user_id, week_start, week_end)
         stress_item = (
             _table("STRESS_BREAKS_LIBRARY_TABLE", STRESS_BREAKS_LIBRARY_DEFAULT_TABLE)
@@ -429,3 +462,73 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             },
         },
     )
+
+
+def _handle_patch_completion(user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    workout_id = _safe_string(payload.get("workout_id"))
+    completed = payload.get("completed")
+    if not workout_id:
+        return _json_response(400, {"message": "workout_id is required."})
+    if not isinstance(completed, bool):
+        return _json_response(400, {"message": "completed must be a boolean."})
+
+    week_start, week_end = current_week_bounds()
+    try:
+        scheduled = _scheduled_workouts(user_id, week_start, week_end)
+        allowed_ids = {_safe_string(item.get("id")) for item in scheduled}
+        if workout_id not in allowed_ids:
+            return _json_response(
+                400,
+                {"message": "Workout is not a current-week calendar-linked workout."},
+            )
+        users_item = _users_item(user_id)
+        completed_ids = _completed_ids_for_week(users_item, week_start)
+        if completed and workout_id not in completed_ids:
+            completed_ids.append(workout_id)
+        if not completed:
+            completed_ids = [item_id for item_id in completed_ids if item_id != workout_id]
+        _table("USERS_TABLE").update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET overview_completed_workouts = :value, updated_at = :updated_at",
+            ExpressionAttributeValues={
+                ":value": {"week_start": week_start, "completed_ids": completed_ids},
+                ":updated_at": _iso_utc_now(),
+            },
+        )
+    except ValueError as err:
+        return _json_response(500, {"message": str(err)})
+    except Exception:
+        return _json_response(500, {"message": "Unexpected error while saving overview completion."})
+
+    return _json_response(
+        200,
+        {
+            "week_start": week_start,
+            "workout_id": workout_id,
+            "completed": completed,
+        },
+    )
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    request_context = event.get("requestContext") or {}
+    http = request_context.get("http") or {}
+    method = (http.get("method") or event.get("httpMethod") or "").upper()
+
+    if method == "OPTIONS":
+        return {"statusCode": 200, "headers": dict(_CORS_HEADERS), "body": ""}
+
+    user_id = _extract_cognito_sub(event)
+    if not user_id:
+        return _json_response(401, {"message": "Missing Cognito user id (sub) in request."})
+
+    if method == "GET":
+        return _handle_get(user_id)
+    if method != "PATCH":
+        return _json_response(405, {"message": "Method not allowed."})
+
+    try:
+        payload = _parse_body(event)
+    except json.JSONDecodeError:
+        return _json_response(400, {"message": "Request body must be valid JSON."})
+    return _handle_patch_completion(user_id, payload)

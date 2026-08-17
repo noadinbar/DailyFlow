@@ -2295,11 +2295,19 @@ select.df-input {
 }
 
 .df-overviewWorkoutRow {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.62);
+}
+
+.df-overviewWorkoutMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .df-overviewWorkoutName {
@@ -2314,4 +2322,23 @@ select.df-input {
   gap: 6px;
   font-size: 13px;
   color: #6b7280;
+}
+
+.df-overviewCompleted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9a3412;
+  cursor: pointer;
+  user-select: none;
+}
+
+.df-overviewCompleted input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #c2410c;
 }

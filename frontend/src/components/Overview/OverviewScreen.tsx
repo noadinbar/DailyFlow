@@ -17,6 +17,7 @@ type ScheduledWorkoutItem = {
   title: string;
   date: string;
   start_time: string;
+  completed: boolean;
 };
 
 type BusyDay = {
@@ -118,7 +119,13 @@ function asScheduledItems(raw: unknown): ScheduledWorkoutItem[] {
     const date = typeof o.date === 'string' ? o.date.trim() : '';
     const startTime = typeof o.start_time === 'string' ? o.start_time.trim() : '';
     if (!id || !date) continue;
-    items.push({ id, title: title || 'Workout', date, start_time: startTime });
+    items.push({
+      id,
+      title: title || 'Workout',
+      date,
+      start_time: startTime,
+      completed: o.completed === true,
+    });
   }
   return items;
 }
@@ -151,6 +158,7 @@ export default function OverviewScreen(props: OverviewScreenProps) {
   const [activeTab, setActiveTab] = React.useState<OverviewTab>('summary');
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [loadError, setLoadError] = React.useState<string>('');
+  const [completionError, setCompletionError] = React.useState<string>('');
   const [weekStart, setWeekStart] = React.useState<string>('');
   const [weekEnd, setWeekEnd] = React.useState<string>('');
   const [weeklyGoal, setWeeklyGoal] = React.useState<number>(0);
@@ -158,6 +166,7 @@ export default function OverviewScreen(props: OverviewScreenProps) {
   const [mealsCount, setMealsCount] = React.useState<number>(0);
   const [breaksCount, setBreaksCount] = React.useState<number>(0);
   const [busyDays, setBusyDays] = React.useState<BusyDay[]>([]);
+  const [savingCompletedIds, setSavingCompletedIds] = React.useState<Record<string, boolean>>({});
 
   const effectiveName = displayName || username || 'there';
 
@@ -333,6 +342,7 @@ export default function OverviewScreen(props: OverviewScreenProps) {
   async function loadOverview(): Promise<void> {
     setIsLoading(true);
     setLoadError('');
+    setCompletionError('');
     try {
       const token = await getAuthToken();
       const response = await fetch(buildApiUrl('/overview'), {
@@ -372,6 +382,59 @@ export default function OverviewScreen(props: OverviewScreenProps) {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function handleToggleCompleted(workoutId: string, nextCompleted: boolean): Promise<void> {
+    if (savingCompletedIds[workoutId]) return;
+    const previous = scheduledWorkouts;
+    setCompletionError('');
+    setScheduledWorkouts((items) =>
+      items.map((item) => (item.id === workoutId ? { ...item, completed: nextCompleted } : item))
+    );
+    setSavingCompletedIds((current) => ({ ...current, [workoutId]: true }));
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(buildApiUrl('/overview'), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ workout_id: workoutId, completed: nextCompleted }),
+      });
+      let payload: { message?: string } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not save completion (${response.status}).`
+        );
+      }
+    } catch (e) {
+      setScheduledWorkouts(previous);
+      const anyErr = e as { message?: string };
+      setCompletionError(
+        typeof anyErr?.message === 'string' && anyErr.message.trim()
+          ? anyErr.message
+          : 'Could not save completion.'
+      );
+    } finally {
+      setSavingCompletedIds((current) => {
+        const next = { ...current };
+        delete next[workoutId];
+        return next;
+      });
+    }
+  }
+
+  function isCardNavigationEvent(event: { target: EventTarget | null }): boolean {
+    const target = event.target as HTMLElement | null;
+    return !target?.closest('label, input, button');
   }
 
   async function handleLogoutClick() {
@@ -467,8 +530,11 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                     role="link"
                     tabIndex={0}
                     aria-label="Open Workouts"
-                    onClick={() => navigate('/workouts')}
+                    onClick={(event) => {
+                      if (isCardNavigationEvent(event)) navigate('/workouts');
+                    }}
                     onKeyDown={(event) => {
+                      if (!isCardNavigationEvent(event)) return;
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         navigate('/workouts');
@@ -484,24 +550,42 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                     <p className="df-overviewCardMetric">
                       {scheduledCount} / {weeklyGoal} scheduled
                     </p>
+                    {completionError && (
+                      <div className="df-errorText" role="alert">
+                        {completionError}
+                      </div>
+                    )}
                     {scheduledWorkouts.length === 0 ? (
                       <p className="df-overviewCardEmpty">No workouts added to Google Calendar this week.</p>
                     ) : (
                       <ul className="df-overviewWorkoutList">
                         {scheduledWorkouts.map((item) => (
                           <li key={item.id} className="df-overviewWorkoutRow">
-                            <span className="df-overviewWorkoutName">{item.title}</span>
-                            <span className="df-overviewWorkoutMeta">
-                              {formatIsoDayLabel(item.date)}
-                              {item.start_time ? (
-                                <>
-                                  <span className="df-inlineIcon" aria-hidden>
-                                    <ClockIcon size={13} />
-                                  </span>
-                                  {formatHHmm(item.start_time)}
-                                </>
-                              ) : null}
-                            </span>
+                            <div className="df-overviewWorkoutMain">
+                              <span className="df-overviewWorkoutName">{item.title}</span>
+                              <span className="df-overviewWorkoutMeta">
+                                {formatIsoDayLabel(item.date)}
+                                {item.start_time ? (
+                                  <>
+                                    <span className="df-inlineIcon" aria-hidden>
+                                      <ClockIcon size={13} />
+                                    </span>
+                                    {formatHHmm(item.start_time)}
+                                  </>
+                                ) : null}
+                              </span>
+                            </div>
+                            <label className="df-overviewCompleted">
+                              <input
+                                type="checkbox"
+                                checked={item.completed}
+                                disabled={Boolean(savingCompletedIds[item.id])}
+                                onChange={(event) => {
+                                  void handleToggleCompleted(item.id, event.target.checked);
+                                }}
+                              />
+                              Completed
+                            </label>
                           </li>
                         ))}
                       </ul>
