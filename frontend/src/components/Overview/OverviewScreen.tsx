@@ -1,7 +1,8 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
-import AppSidebar, { useSidebarCollapsed } from '../Sidebar/AppSidebar';
+import AppSidebar, { ClockIcon, useSidebarCollapsed } from '../Sidebar/AppSidebar';
 import { buildApiUrl } from '../../services/api';
 
 type OverviewScreenProps = {
@@ -51,15 +52,11 @@ const ENGLISH_DAY_NAMES = [
   'Saturday',
 ] as const;
 
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
-}
-
 function formatIsoDayLabel(iso: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const parsed = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return iso;
-  return `${ENGLISH_DAY_NAMES[parsed.getDay()]} ${pad2(parsed.getDate())}.${pad2(parsed.getMonth() + 1)}`;
+  return `${ENGLISH_DAY_NAMES[parsed.getDay()]} ${parsed.getDate()}.${parsed.getMonth() + 1}`;
 }
 
 function formatWeekRangeLabel(weekStartIso: string, weekEndIso: string): string {
@@ -67,12 +64,47 @@ function formatWeekRangeLabel(weekStartIso: string, weekEndIso: string): string 
   const start = new Date(`${weekStartIso}T00:00:00`);
   const end = new Date(`${weekEndIso}T00:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
-  const startDay = start.getDate();
-  const endDay = end.getDate();
-  const startMonth = start.getMonth() + 1;
-  const endMonth = end.getMonth() + 1;
-  if (startMonth === endMonth) return `${startDay}-${endDay}.${endMonth}`;
-  return `${startDay}.${startMonth}-${endDay}.${endMonth}`;
+  return `${start.getDate()}.${start.getMonth() + 1}-${end.getDate()}.${end.getMonth() + 1}`;
+}
+
+function formatHHmm(value: string): string {
+  const raw = value.trim();
+  if (raw.length >= 5 && raw[2] === ':') return raw.slice(0, 5);
+  return raw;
+}
+
+function OverviewWorkoutsGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2.5" y="9" width="3" height="6" rx="1" />
+      <rect x="18.5" y="9" width="3" height="6" rx="1" />
+      <rect x="5.5" y="7" width="3" height="10" rx="1.2" />
+      <rect x="15.5" y="7" width="3" height="10" rx="1.2" />
+      <line x1="8.5" y1="12" x2="15.5" y2="12" />
+    </svg>
+  );
+}
+
+function OverviewMealsGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <ellipse cx="7.5" cy="6.5" rx="2.5" ry="3" />
+      <line x1="7.5" y1="9.5" x2="7.5" y2="20" />
+      <line x1="14" y1="4" x2="14" y2="8" />
+      <line x1="16.5" y1="4" x2="16.5" y2="8" />
+      <line x1="19" y1="4" x2="19" y2="8" />
+      <path d="M14 8h5v2a2.5 2.5 0 0 1-2.5 2.5L16.5 20" />
+    </svg>
+  );
+}
+
+function OverviewStressGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3c2.5 2.2 4 4.5 4 7a4 4 0 1 1-8 0c0-2.5 1.5-4.8 4-7z" />
+      <path d="M9 17c.6.9 1.7 1.5 3 1.5s2.4-.6 3-1.5" />
+    </svg>
+  );
 }
 
 function asScheduledItems(raw: unknown): ScheduledWorkoutItem[] {
@@ -109,6 +141,7 @@ function asBusyDays(raw: unknown): BusyDay[] {
 
 export default function OverviewScreen(props: OverviewScreenProps) {
   const { username, onLogout } = props;
+  const navigate = useNavigate();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useSidebarCollapsed();
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = React.useState<boolean>(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState<boolean>(false);
@@ -428,32 +461,100 @@ export default function OverviewScreen(props: OverviewScreenProps) {
                 </div>
               )}
               {!isLoading && !loadError && (
-                <div className="df-overviewTempGrid">
-                  <article className="df-overviewTempCard">
-                    <h2 className="df-overviewTempTitle">Workouts</h2>
-                    <p className="df-overviewTempMetric">
+                <div className="df-overviewCardGrid">
+                  <article
+                    className="df-overviewCard df-overviewCardWorkouts"
+                    role="link"
+                    tabIndex={0}
+                    aria-label="Open Workouts"
+                    onClick={() => navigate('/workouts')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        navigate('/workouts');
+                      }
+                    }}
+                  >
+                    <div className="df-overviewCardHeader">
+                      <span className="df-overviewCardIcon" aria-hidden>
+                        <OverviewWorkoutsGlyph />
+                      </span>
+                      <h2 className="df-overviewCardTitle">Workouts</h2>
+                    </div>
+                    <p className="df-overviewCardMetric">
                       {scheduledCount} / {weeklyGoal} scheduled
                     </p>
                     {scheduledWorkouts.length === 0 ? (
-                      <p className="df-overviewTempEmpty">No current-week workouts added to Google Calendar.</p>
+                      <p className="df-overviewCardEmpty">No workouts added to Google Calendar this week.</p>
                     ) : (
-                      <ul className="df-overviewTempList">
+                      <ul className="df-overviewWorkoutList">
                         {scheduledWorkouts.map((item) => (
-                          <li key={item.id}>
-                            {item.title} · {formatIsoDayLabel(item.date)} · {item.start_time}
+                          <li key={item.id} className="df-overviewWorkoutRow">
+                            <span className="df-overviewWorkoutName">{item.title}</span>
+                            <span className="df-overviewWorkoutMeta">
+                              {formatIsoDayLabel(item.date)}
+                              {item.start_time ? (
+                                <>
+                                  <span className="df-inlineIcon" aria-hidden>
+                                    <ClockIcon size={13} />
+                                  </span>
+                                  {formatHHmm(item.start_time)}
+                                </>
+                              ) : null}
+                            </span>
                           </li>
                         ))}
                       </ul>
                     )}
                   </article>
-                  <article className="df-overviewTempCard">
-                    <h2 className="df-overviewTempTitle">Meals</h2>
-                    <p className="df-overviewTempMetric">{mealsCount} scheduled</p>
+
+                  <article
+                    className="df-overviewCard df-overviewCardMeals"
+                    role="link"
+                    tabIndex={0}
+                    aria-label="Open Meals & Grocery"
+                    onClick={() => navigate('/meals')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        navigate('/meals');
+                      }
+                    }}
+                  >
+                    <div className="df-overviewCardHeader">
+                      <span className="df-overviewCardIcon" aria-hidden>
+                        <OverviewMealsGlyph />
+                      </span>
+                      <h2 className="df-overviewCardTitle">Meals</h2>
+                    </div>
+                    <p className="df-overviewCardMetric">
+                      {mealsCount} {mealsCount === 1 ? 'meal' : 'meals'} scheduled
+                    </p>
                   </article>
-                  <article className="df-overviewTempCard">
-                    <h2 className="df-overviewTempTitle">Stress & Breaks</h2>
-                    <p className="df-overviewTempMetric">{breaksCount} breaks scheduled</p>
-                    <p className="df-overviewTempMeta">
+
+                  <article
+                    className="df-overviewCard df-overviewCardStress"
+                    role="link"
+                    tabIndex={0}
+                    aria-label="Open Stress & Breaks"
+                    onClick={() => navigate('/stress')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        navigate('/stress');
+                      }
+                    }}
+                  >
+                    <div className="df-overviewCardHeader">
+                      <span className="df-overviewCardIcon" aria-hidden>
+                        <OverviewStressGlyph />
+                      </span>
+                      <h2 className="df-overviewCardTitle">Stress & Breaks</h2>
+                    </div>
+                    <p className="df-overviewCardMetric">
+                      {breaksCount} {breaksCount === 1 ? 'break' : 'breaks'} scheduled
+                    </p>
+                    <p className="df-overviewCardBusy">
                       Busy days: {busyDayLabels || 'none identified'}
                     </p>
                   </article>
