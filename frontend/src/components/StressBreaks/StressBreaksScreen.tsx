@@ -175,6 +175,7 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const [isLoadingLibrary, setIsLoadingLibrary] = React.useState(false);
   const [libraryLoadError, setLibraryLoadError] = React.useState('');
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const isGeneratingRef = React.useRef(false);
   const [generateError, setGenerateError] = React.useState('');
   const [favoriteError, setFavoriteError] = React.useState('');
   const [isTogglingFavorite, setIsTogglingFavorite] = React.useState(false);
@@ -559,6 +560,8 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   }
 
   async function generateActivities(): Promise<void> {
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
     setIsGenerating(true);
     setGenerateError('');
     setFavoriteError('');
@@ -594,6 +597,7 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
           : 'Could not generate activities.'
       );
     } finally {
+      isGeneratingRef.current = false;
       setIsGenerating(false);
     }
   }
@@ -1229,6 +1233,23 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
             </>
           )}
         </div>
+
+        {isGenerating && (
+          <div
+            className="df-workoutsLoadingOverlay"
+            role="status"
+            aria-live="polite"
+            aria-label="Generating stress break activities"
+          >
+            <div className="df-workoutsLoadingShade" aria-hidden />
+            <div className="df-workoutsLoadingCenter">
+              <div className="df-workoutsLoadingCard">
+                <div className="df-workoutsBasicSpinner" aria-hidden />
+                <div className="df-workoutsLoadingText">Generating new activity library...</div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {showQuestionnaire && (

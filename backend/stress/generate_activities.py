@@ -25,9 +25,11 @@ if _STRESS_DIR not in sys.path:
     sys.path.insert(0, _STRESS_DIR)
 
 from activity_categories import (  # noqa: E402
+    ACTIVITIES_PER_TIMED_CATEGORY,
     category_label,
     duration_minutes_options,
     flexible_activities_for_prefs,
+    limit_activities_per_category,
     split_preferred_activities,
     suggested_timed_count,
 )
@@ -49,7 +51,6 @@ from activity_model import (  # noqa: E402
     weekly_plan_referenced_ids,
 )
 from curated_youtube import (  # noqa: E402
-    ACTIVITIES_PER_YOUTUBE_CATEGORY,
     YOUTUBE_CATEGORY_SET,
     generate_youtube_activities_for_categories,
     merge_recent_youtube_by_category,
@@ -122,6 +123,7 @@ def _openai_prompt(
         "timed_categories": category_payload,
         "allowed_duration_minutes": duration_minutes,
         "target_count": target_count,
+        "activities_per_category": ACTIVITIES_PER_TIMED_CATEGORY,
         "avoid_repeating_titles": avoid_titles[:40],
         "rules": {
             "language": "English",
@@ -132,7 +134,8 @@ def _openai_prompt(
             "title_must_not_include_duration": True,
             "only_use_provided_categories": True,
             "duration_minutes_must_be_whole_numbers_from_allowed_list": True,
-            "distribute_across_selected_categories_when_possible": True,
+            "exactly_2_to_3_activities_per_category": True,
+            "do_not_exceed_activities_per_category": True,
             "do_not_pad_with_irrelevant_activities": True,
         },
     }
@@ -143,6 +146,8 @@ def _openai_prompt(
         "Each title must be the activity name only (example: \"Box Breathing\"), never include minutes in the title.\n"
         "Do not invent websites, YouTube links, or any external_url.\n"
         "Provide clear self-contained instructions the user can follow inside DailyFlow.\n"
+        f"Return approximately {ACTIVITIES_PER_TIMED_CATEGORY} activities for EACH selected category "
+        f"(about 2–3 per category). Do not return more than {ACTIVITIES_PER_TIMED_CATEGORY} per category.\n"
         "Schema:\n"
         "{\n"
         '  "timed_activities":[{\n'
@@ -237,6 +242,11 @@ def _generate_timed_from_openai(
 
     if not normalized:
         return [], "openai_invalid_or_incomplete"
+    # Hard backend cap: never keep more than ~2–3 OpenAI activities per category.
+    normalized = limit_activities_per_category(
+        normalized,
+        max_per_category=ACTIVITIES_PER_TIMED_CATEGORY,
+    )
     # Never attach YouTube from OpenAI output; curated videos are selected separately.
     cleaned = []
     for item in assign_timed_ids(normalized):
@@ -364,7 +374,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         youtube_cats,
         recent_by_category=recent_youtube,
         allowed_durations=duration_minutes,
-        per_category_count=ACTIVITIES_PER_YOUTUBE_CATEGORY,
+        per_category_count=ACTIVITIES_PER_TIMED_CATEGORY,
     )
     # Catalog hydration owns duration/URL fields; assign stable ids after merge with OpenAI.
     youtube_generated = [
@@ -372,15 +382,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         for item in (normalize_timed_activity({**raw, "id": ""}) for raw in youtube_generated)
         if item
     ]
+    youtube_generated = limit_activities_per_category(
+        youtube_generated,
+        max_per_category=ACTIVITIES_PER_TIMED_CATEGORY,
+    )
 
     openai_generated: List[Dict[str, Any]] = []
     if openai_timed_cats:
-        target = max(
-            len(openai_timed_cats) * 2,
-            suggested_timed_count(len(openai_timed_cats), len(flexible_activities)),
-        )
-        # Prefer ~2–3 per non-YouTube Timed category.
-        target = max(target, len(openai_timed_cats) * ACTIVITIES_PER_YOUTUBE_CATEGORY)
+        # Exactly ~2–3 per non-YouTube Timed category (do not pad toward SOFT_LIBRARY_TARGET).
+        target = suggested_timed_count(len(openai_timed_cats))
         avoid_titles = [
             str(item.get("title", "")).strip()
             for item in previous_timed
@@ -395,10 +405,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if failure:
             # Keep previous library untouched.
             return _openai_failure_response(failure)
+        openai_generated = limit_activities_per_category(
+            openai_generated,
+            max_per_category=ACTIVITIES_PER_TIMED_CATEGORY,
+        )
         # Re-assign ids together with YouTube activities to avoid timed_N collisions.
         openai_generated = [{**item, "id": ""} for item in openai_generated]
 
     generated: List[Dict[str, Any]] = assign_timed_ids(list(youtube_generated) + list(openai_generated))
+    generated = limit_activities_per_category(
+        generated,
+        max_per_category=ACTIVITIES_PER_TIMED_CATEGORY,
+    )
 
     timed_activities: List[Dict[str, Any]] = []
     if generated or referenced_ids:
@@ -430,6 +448,29 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if cat in preferred_openai or cat in preferred_timed:
             filtered_timed.append(item)
     timed_activities = filtered_timed
+
+    # Final per-category cap for newly generated items. Favorites + plan refs stay protected.
+    fav_keys = {
+        str(f.get("favorite_key", "")).strip() or activity_signature(f)
+        for f in favorite_activities
+        if str(f.get("kind", "")).strip().lower() != "flexible"
+    }
+    protected_ids: Set[str] = set(referenced_ids)
+    for item in timed_activities:
+        item_id = str(item.get("id", "")).strip()
+        if not item_id:
+            continue
+        if item_id in referenced_ids:
+            protected_ids.add(item_id)
+            continue
+        key = str(item.get("favorite_key", "")).strip() or activity_signature(item)
+        if key in fav_keys:
+            protected_ids.add(item_id)
+    timed_activities = limit_activities_per_category(
+        timed_activities,
+        max_per_category=ACTIVITIES_PER_TIMED_CATEGORY,
+        protected_ids=protected_ids,
+    )
 
     next_recent = merge_recent_youtube_by_category(recent_youtube, selected_recent)
 
@@ -464,7 +505,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "youtube_categories": youtube_cats,
                 "timed_count": len(timed_activities),
                 "flexible_count": len(flexible_activities),
-                "youtube_per_category": ACTIVITIES_PER_YOUTUBE_CATEGORY,
+                "activities_per_category": ACTIVITIES_PER_TIMED_CATEGORY,
+                "youtube_per_category": ACTIVITIES_PER_TIMED_CATEGORY,
             },
         },
     )

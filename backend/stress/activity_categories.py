@@ -43,8 +43,11 @@ DURATION_RANGES: Dict[str, Tuple[int, int]] = {
 # When user selected "It depends on my schedule"
 DEPENDS_DURATION_MIX: Tuple[int, ...] = (3, 5, 8, 10, 12, 15)
 
-# Target overall library size (soft guidance for Timed generation)
+# Target overall library size (soft guidance; Generate prefers per-category caps).
 SOFT_LIBRARY_TARGET = 12
+
+# Hard Generate rule: approximately 2–3 Timed activities per relevant category.
+ACTIVITIES_PER_TIMED_CATEGORY = 3
 
 STRESS_BREAKS_LIBRARY_DEFAULT_TABLE = "StressBreaksLibrary"
 
@@ -184,11 +187,52 @@ def flexible_activities_for_prefs(preferred_flexible_ids: List[str]) -> List[Dic
     return out
 
 
-def suggested_timed_count(timed_category_count: int, flexible_count: int) -> int:
-    """Soft target for Timed generation so overall library is near SOFT_LIBRARY_TARGET."""
+def suggested_timed_count(timed_category_count: int, flexible_count: int = 0) -> int:
+    """Exact Generate target: ACTIVITIES_PER_TIMED_CATEGORY per Timed category."""
+    del flexible_count  # kept for call-site compatibility; per-category cap is authoritative
     if timed_category_count <= 0:
         return 0
-    remaining = max(0, SOFT_LIBRARY_TARGET - flexible_count)
-    # At least one per selected Timed category when possible; do not force filler.
-    minimum = timed_category_count
-    return max(minimum, remaining)
+    return timed_category_count * ACTIVITIES_PER_TIMED_CATEGORY
+
+
+def limit_activities_per_category(
+    activities: List[Dict[str, Any]],
+    *,
+    max_per_category: int = ACTIVITIES_PER_TIMED_CATEGORY,
+    protected_ids: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Enforce max N activities per category.
+
+    Protected ids (favorites / plan refs) are always kept even if a category
+    already exceeds the cap; non-protected extras are dropped first.
+    """
+    if max_per_category <= 0:
+        return []
+    protected = {x for x in (protected_ids or set()) if x}
+    by_cat: Dict[str, List[Dict[str, Any]]] = {}
+    order: List[str] = []
+    for item in activities:
+        if not isinstance(item, dict):
+            continue
+        cat = str(item.get("category", "")).strip().lower().replace(" ", "_") or "_unknown"
+        if cat not in by_cat:
+            by_cat[cat] = []
+            order.append(cat)
+        by_cat[cat].append(item)
+
+    out: List[Dict[str, Any]] = []
+    for cat in order:
+        group = by_cat[cat]
+        keep: List[Dict[str, Any]] = []
+        extras: List[Dict[str, Any]] = []
+        for item in group:
+            item_id = str(item.get("id", "")).strip()
+            if item_id and item_id in protected:
+                keep.append(item)
+            else:
+                extras.append(item)
+        remaining = max(0, max_per_category - len(keep))
+        out.extend(keep)
+        out.extend(extras[:remaining])
+    return out

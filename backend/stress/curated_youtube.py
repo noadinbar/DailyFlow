@@ -13,12 +13,12 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
-from activity_categories import category_label
+from activity_categories import ACTIVITIES_PER_TIMED_CATEGORY, category_label
 
 # Design target: ~10 selectable videos per YouTube-supported category.
 TARGET_VIDEOS_PER_CATEGORY = 10
 # How many activities to surface per relevant YouTube category on Generate.
-ACTIVITIES_PER_YOUTUBE_CATEGORY = 3
+ACTIVITIES_PER_YOUTUBE_CATEGORY = ACTIVITIES_PER_TIMED_CATEGORY
 
 YOUTUBE_CATEGORIES: Tuple[str, ...] = ("breathing", "meditation", "music")
 YOUTUBE_CATEGORY_SET: Set[str] = set(YOUTUBE_CATEGORIES)
