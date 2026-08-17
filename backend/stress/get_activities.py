@@ -211,25 +211,10 @@ def _query_busy_blocks(
     flow: str = "unknown",
 ) -> List[Dict[str, Any]]:
     """Mirror workouts/weekly_plan_update.py _query_busy_blocks (same Query + filters)."""
-    print(
-        "[stress-insights-debug] busyblocks_query_enter "
-        f"flow={flow} "
-        f"helper=_query_busy_blocks "
-        f"helper_id={id(_query_busy_blocks)} "
-        f"helper_qualname={_query_busy_blocks.__qualname__} "
-        f"user_id={user_id} "
-        f"week_start={start_date_iso!r} "
-        f"week_end={end_date_iso!r} "
-        f"arg_types=({type(user_id).__name__},{type(start_date_iso).__name__},{type(end_date_iso).__name__}) "
-        f"arg_repr=({user_id!r},{start_date_iso!r},{end_date_iso!r})"
-    )
+    _ = flow  # call-site label only; keep signature stable for insights/conflict paths
     table = _busy_blocks_table()
     items: List[Dict[str, Any]] = []
     last_evaluated_key: Optional[Dict[str, Any]] = None
-    scanned_rows = 0
-    kept_rows = 0
-    dropped_date = 0
-    dropped_time = 0
     while True:
         query_args: Dict[str, Any] = {"KeyConditionExpression": Key("user_id").eq(user_id)}
         if last_evaluated_key:
@@ -238,48 +223,18 @@ def _query_busy_blocks(
         for item in response.get("Items") or []:
             if not isinstance(item, dict):
                 continue
-            scanned_rows += 1
             block_date = str(item.get("date", "")).strip()
             if not block_date or block_date < start_date_iso or block_date > end_date_iso:
-                dropped_date += 1
                 continue
             start_time = str(item.get("start_time", "")).strip()
             end_time = str(item.get("end_time", "")).strip()
             if not _parse_hh_mm_time(start_time) or not _parse_hh_mm_time(end_time):
-                dropped_time += 1
-                print(
-                    "[stress-insights-debug] busyblocks_query_drop_time "
-                    f"flow={flow} date={block_date!r} "
-                    f"start_time={start_time!r} end_time={end_time!r}"
-                )
                 continue
             items.append({"date": block_date, "start_time": start_time, "end_time": end_time})
-            kept_rows += 1
         last_evaluated_key = response.get("LastEvaluatedKey")
         if not last_evaluated_key:
             break
     items.sort(key=lambda x: (x["date"], x["start_time"], x["end_time"]))
-    print(
-        "[stress-insights-debug] busyblocks_query_exit "
-        f"flow={flow} "
-        f"helper=_query_busy_blocks "
-        f"helper_id={id(_query_busy_blocks)} "
-        f"user_id={user_id} "
-        f"week_start={start_date_iso!r} "
-        f"week_end={end_date_iso!r} "
-        f"scanned_rows={scanned_rows} "
-        f"dropped_date={dropped_date} "
-        f"dropped_time={dropped_time} "
-        f"returned_count={len(items)} kept_rows={kept_rows}"
-    )
-    for block in items:
-        print(
-            "[stress-insights-debug] busyblocks_query_row "
-            f"flow={flow} "
-            f"date={block.get('date')} "
-            f"start_time={block.get('start_time')} "
-            f"end_time={block.get('end_time')}"
-        )
     return items
 
 
@@ -772,10 +727,6 @@ def _build_insights_payload(
     week_end: str,
     library_item: Dict[str, Any],
 ) -> Dict[str, Any]:
-    print(
-        "[stress-insights-debug] requested_period "
-        f"user_id={user_id[:8]}… start_date={week_start} end_date={week_end}"
-    )
     try:
         prefs = _read_stress_preferences(user_id)
     except Exception as err:
@@ -789,34 +740,10 @@ def _build_insights_payload(
             "durations": [],
         }
     try:
-        print(
-            "[stress-insights-debug] caller_before_query "
-            f"flow=stress_insights "
-            f"helper=_query_busy_blocks "
-            f"helper_id={id(_query_busy_blocks)} "
-            f"user_id={user_id} "
-            f"week_start={week_start!r} "
-            f"week_end={week_end!r}"
-        )
         busy_blocks = _query_busy_blocks(user_id, week_start, week_end, flow="stress_insights")
     except Exception as err:
         print(f"[stress-activities] busyblocks query for insights failed: {err}")
-        print(f"[stress-insights-debug] raw_busy_blocks count=0 query_error={err} flow=stress_insights")
         busy_blocks = []
-    else:
-        print(
-            "[stress-insights-debug] caller_after_query "
-            f"flow=stress_insights "
-            f"returned_count={len(busy_blocks)}"
-        )
-        print(f"[stress-insights-debug] raw_busy_blocks count={len(busy_blocks)} flow=stress_insights")
-        for block in busy_blocks:
-            print(
-                "[stress-insights-debug] raw_busy_block "
-                f"flow=stress_insights "
-                f"date={block.get('date')} start_time={block.get('start_time')} "
-                f"end_time={block.get('end_time')}"
-            )
     return build_stressful_periods_insights(
         week_start=week_start,
         week_end=week_end,
@@ -1076,35 +1003,11 @@ def _handle_add_library_activity(user_id: str, payload: Dict[str, Any]) -> Dict[
             return _json_response(400, {"message": "Selected activity has invalid duration."})
 
     try:
-        print(
-            "[stress-insights-debug] caller_before_query "
-            f"flow=conflict_validation "
-            f"helper=_query_busy_blocks "
-            f"helper_id={id(_query_busy_blocks)} "
-            f"user_id={user_id} "
-            f"week_start={week_start!r} "
-            f"week_end={week_end!r}"
-        )
         busy_blocks = _query_busy_blocks(user_id, week_start, week_end, flow="conflict_validation")
-        print(
-            "[stress-insights-debug] caller_after_query "
-            f"flow=conflict_validation "
-            f"returned_count={len(busy_blocks)}"
-        )
-        for block in busy_blocks:
-            print(
-                "[stress-insights-debug] conflict_validation_busy_block "
-                f"date={block.get('date')} start_time={block.get('start_time')} "
-                f"end_time={block.get('end_time')}"
-            )
     except ValueError as err:
         return _json_response(500, {"message": str(err)})
     except Exception as err:
         print(f"[stress-activities] busyblocks query failed: {err}")
-        print(
-            "[stress-insights-debug] caller_after_query "
-            f"flow=conflict_validation returned_count=0 query_error={err}"
-        )
         return _json_response(503, {"message": "Could not validate calendar availability. Try again shortly."})
 
     slot_ok, recommended_end_time, err = _slot_is_valid(

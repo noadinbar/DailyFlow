@@ -110,6 +110,8 @@ export function normalizeStressfulPeriodsPayload(raw: unknown): StressfulPeriods
 
 export default function PotentiallyStressfulPeriodsSection(props: PotentiallyStressfulPeriodsSectionProps) {
   const { insightsPayload, isLoading, isRefreshing, error, onRefresh } = props;
+  // Meals-style collapsible sections default open.
+  const [isOpen, setIsOpen] = React.useState(true);
   const insights = insightsPayload?.insights || [];
   const emptyMessage =
     insightsPayload?.empty_message || 'No particularly busy periods were identified this week.';
@@ -117,50 +119,65 @@ export default function PotentiallyStressfulPeriodsSection(props: PotentiallyStr
   return (
     <section className="df-workoutsSection df-stressInsightsSection" aria-label="Potentially Stressful Periods">
       <div className="df-workoutsSectionHeader" style={{ alignItems: 'center', gap: 10 }}>
-        <h2 className="df-workoutsTitle" style={{ fontSize: 22, margin: 0 }}>
-          Potentially Stressful Periods
-        </h2>
         <button
           type="button"
-          className="df-iconBtn df-stressRefreshBtn"
-          onClick={onRefresh}
-          disabled={isLoading || isRefreshing}
-          aria-label="Refresh insights"
-          title="Refresh insights"
+          className="df-sectionToggle"
+          aria-expanded={isOpen}
+          aria-controls="df-stress-insights-panel"
+          onClick={() => setIsOpen((prev) => !prev)}
         >
-          <RefreshIcon size={16} spinning={isRefreshing} />
+          <span className={`df-sectionChevron${isOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
+            ▶
+          </span>
+          <h2 className="df-workoutsTitle">Potentially Stressful Periods</h2>
         </button>
+        {isOpen ? (
+          <button
+            type="button"
+            className="df-iconBtn df-stressRefreshBtn"
+            onClick={onRefresh}
+            disabled={isLoading || isRefreshing}
+            aria-label="Refresh insights"
+            title="Refresh insights"
+          >
+            <RefreshIcon size={16} spinning={isRefreshing} />
+          </button>
+        ) : null}
       </div>
 
-      {error ? (
-        <div className="df-errorText" role="alert">
-          {error}
-        </div>
-      ) : null}
+      {isOpen ? (
+        <div id="df-stress-insights-panel">
+          {error ? (
+            <div className="df-errorText" role="alert">
+              {error}
+            </div>
+          ) : null}
 
-      {(isLoading || isRefreshing) && !error && insights.length === 0 ? (
-        <p className="df-subtitle" style={{ margin: 0, fontSize: 13 }} role="status">
-          Analyzing this week&apos;s busy periods…
-        </p>
-      ) : null}
+          {(isLoading || isRefreshing) && !error && insights.length === 0 ? (
+            <p className="df-subtitle" style={{ margin: 0, fontSize: 13 }} role="status">
+              Analyzing this week&apos;s busy periods…
+            </p>
+          ) : null}
 
-      {!isLoading && !isRefreshing && !error && insights.length === 0 ? (
-        <div className="df-stressInsightEmpty" role="status">
-          <p className="df-subtitle" style={{ margin: 0, fontSize: 13 }}>
-            {emptyMessage}
-          </p>
-        </div>
-      ) : null}
-
-      {insights.length > 0 ? (
-        <div className="df-stressInsightList">
-          {insights.map((insight) => (
-            <article key={insight.id} className="df-stressInsightCard">
-              <p className="df-stressInsightLine">
-                <strong>{insight.lead},</strong> {insight.action}
+          {!isLoading && !isRefreshing && !error && insights.length === 0 ? (
+            <div className="df-stressInsightEmpty" role="status">
+              <p className="df-subtitle" style={{ margin: 0, fontSize: 13 }}>
+                {emptyMessage}
               </p>
-            </article>
-          ))}
+            </div>
+          ) : null}
+
+          {insights.length > 0 ? (
+            <div className="df-stressInsightList">
+              {insights.map((insight) => (
+                <article key={insight.id} className="df-stressInsightCard">
+                  <p className="df-stressInsightLine">
+                    <strong>{insight.lead},</strong> {insight.action}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>

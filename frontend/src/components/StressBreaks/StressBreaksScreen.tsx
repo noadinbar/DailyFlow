@@ -1341,6 +1341,28 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
               <p className="df-subtitle" style={{ margin: 0 }}>
                 {selectedActivity.summary_short}
               </p>
+              {selectedActivity.kind === 'timed' && selectedActivity.youtube_url ? (
+                <div>
+                  <a
+                    className="df-btn"
+                    href={selectedActivity.youtube_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={
+                      selectedActivity.youtube_title
+                        ? `Watch video: ${selectedActivity.youtube_title}`
+                        : 'Watch guidance video on YouTube'
+                    }
+                  >
+                    Watch video
+                  </a>
+                  {selectedActivity.youtube_title ? (
+                    <p className="df-subtitle" style={{ margin: '8px 0 0', fontSize: 13 }}>
+                      {selectedActivity.youtube_title}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {selectedActivity.instructions && selectedActivity.instructions.length > 0 ? (
                 <div>
                   <div className="df-fieldLabel" style={{ marginBottom: 8 }}>

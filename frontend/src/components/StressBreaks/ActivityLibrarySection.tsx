@@ -72,9 +72,7 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
   return (
     <section className="df-workoutsSection" aria-label="Activity Library">
       <div className="df-workoutsSectionHeader" style={{ alignItems: 'center', gap: 12 }}>
-        <h2 className="df-workoutsTitle" style={{ fontSize: 22, margin: 0 }}>
-          Activity Library
-        </h2>
+        <h2 className="df-workoutsTitle">Activity Library</h2>
         <button
           type="button"
           className={`df-workoutFavoriteToggle${isFavoritesMode ? ' df-workoutFavoriteToggleActive' : ''}`}

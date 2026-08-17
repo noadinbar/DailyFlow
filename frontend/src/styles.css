@@ -2111,6 +2111,13 @@ select.df-input {
   margin-bottom: 4px;
 }
 
+.df-stressInsightsSection .df-sectionToggle {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: start;
+}
+
 .df-stressRefreshBtn {
   width: 32px;
   height: 32px;

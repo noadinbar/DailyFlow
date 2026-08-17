@@ -48,6 +48,15 @@ from activity_model import (  # noqa: E402
     to_dynamodb_safe,
     weekly_plan_referenced_ids,
 )
+from curated_youtube import (  # noqa: E402
+    ACTIVITIES_PER_YOUTUBE_CATEGORY,
+    YOUTUBE_CATEGORY_SET,
+    generate_youtube_activities_for_categories,
+    merge_recent_youtube_by_category,
+    normalize_recent_youtube_by_category,
+    strip_untrusted_video_fields,
+    youtube_categories_from_preferences,
+)
 
 OPENAI_MODEL = "gpt-4.1-mini"
 
@@ -211,7 +220,9 @@ def _generate_timed_from_openai(
         if not isinstance(entry, dict):
             continue
         # Strip any model-provided URL fields before normalize.
-        entry = {k: v for k, v in entry.items() if k not in {"external_url", "url", "video_url", "youtube_url"}}
+        # YouTube links come only from the curated backend catalog.
+        entry = strip_untrusted_video_fields(entry)
+        entry.pop("youtube_video_id", None)
         item = normalize_timed_activity(entry, allowed_categories=allowed)
         if not item:
             continue
@@ -226,7 +237,15 @@ def _generate_timed_from_openai(
 
     if not normalized:
         return [], "openai_invalid_or_incomplete"
-    return assign_timed_ids(normalized), ""
+    # Never attach YouTube from OpenAI output; curated videos are selected separately.
+    cleaned = []
+    for item in assign_timed_ids(normalized):
+        next_item = dict(item)
+        next_item.pop("youtube_video_id", None)
+        next_item.pop("youtube_url", None)
+        next_item.pop("youtube_title", None)
+        cleaned.append(next_item)
+    return cleaned, ""
 
 
 def _openai_failure_response(reason: str) -> Dict[str, Any]:
@@ -242,6 +261,7 @@ def _save_library(
     favorite_activities: List[Dict[str, Any]],
     generated_at: str,
     existing_item: Optional[Dict[str, Any]] = None,
+    recent_youtube_by_category: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     existing = existing_item or {}
     item = {
@@ -253,6 +273,11 @@ def _save_library(
         "updated_at": generated_at,
         # Preserve Weekly Break Plan across library regeneration (Workouts-style).
         "current_week_plan": normalize_weekly_break_plan(existing.get("current_week_plan")),
+        "recent_youtube_by_category": normalize_recent_youtube_by_category(
+            recent_youtube_by_category
+            if recent_youtube_by_category is not None
+            else existing.get("recent_youtube_by_category")
+        ),
     }
     week_start = existing.get("current_week_plan_week_start")
     week_end = existing.get("current_week_plan_week_end")
@@ -326,17 +351,43 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         referenced_library_ids=referenced_ids,
     )
 
-    timed_activities: List[Dict[str, Any]] = []
-    if timed_cats:
-        duration_minutes = duration_minutes_options(prefs.get("durations") or [])
-        target = suggested_timed_count(len(timed_cats), len(flexible_activities))
+    duration_minutes = duration_minutes_options(prefs.get("durations") or [])
+    recent_youtube = normalize_recent_youtube_by_category(existing.get("recent_youtube_by_category"))
+    youtube_cats = youtube_categories_from_preferences(
+        timed_categories=timed_cats,
+        flexible_categories=flexible_cats,
+    )
+    # Non-YouTube Timed categories (e.g. stretching) still use OpenAI.
+    openai_timed_cats = [c for c in timed_cats if c not in YOUTUBE_CATEGORY_SET]
+
+    youtube_generated, selected_recent = generate_youtube_activities_for_categories(
+        youtube_cats,
+        recent_by_category=recent_youtube,
+        allowed_durations=duration_minutes,
+        per_category_count=ACTIVITIES_PER_YOUTUBE_CATEGORY,
+    )
+    # Catalog hydration owns duration/URL fields; assign stable ids after merge with OpenAI.
+    youtube_generated = [
+        item
+        for item in (normalize_timed_activity({**raw, "id": ""}) for raw in youtube_generated)
+        if item
+    ]
+
+    openai_generated: List[Dict[str, Any]] = []
+    if openai_timed_cats:
+        target = max(
+            len(openai_timed_cats) * 2,
+            suggested_timed_count(len(openai_timed_cats), len(flexible_activities)),
+        )
+        # Prefer ~2–3 per non-YouTube Timed category.
+        target = max(target, len(openai_timed_cats) * ACTIVITIES_PER_YOUTUBE_CATEGORY)
         avoid_titles = [
             str(item.get("title", "")).strip()
             for item in previous_timed
             if str(item.get("title", "")).strip()
         ]
-        generated, failure = _generate_timed_from_openai(
-            timed_categories=timed_cats,
+        openai_generated, failure = _generate_timed_from_openai(
+            timed_categories=openai_timed_cats,
             duration_minutes=duration_minutes,
             target_count=target,
             avoid_titles=avoid_titles,
@@ -344,7 +395,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if failure:
             # Keep previous library untouched.
             return _openai_failure_response(failure)
+        # Re-assign ids together with YouTube activities to avoid timed_N collisions.
+        openai_generated = [{**item, "id": ""} for item in openai_generated]
 
+    generated: List[Dict[str, Any]] = assign_timed_ids(list(youtube_generated) + list(openai_generated))
+
+    timed_activities: List[Dict[str, Any]] = []
+    if generated or referenced_ids:
         timed_activities = merge_timed_preserving_favorites(
             generated=generated,
             favorite_activities=favorite_activities,
@@ -352,22 +409,29 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             referenced_library_ids=referenced_ids,
         )
     else:
-        # Keep Timed activities that are still referenced by the Weekly Break Plan.
         timed_activities = []
-        previous_by_id = {str(item.get("id", "")).strip(): item for item in previous_timed}
-        used_sigs = set()
-        for ref_id in referenced_ids:
-            source = previous_by_id.get(ref_id)
-            if not source:
-                continue
-            item = normalize_timed_activity(source)
-            if not item:
-                continue
-            sig = activity_signature(item)
-            if sig in used_sigs:
-                continue
-            used_sigs.add(sig)
-            timed_activities.append(item)
+
+    # Drop stale Timed youtube activities whose category is no longer preferred.
+    preferred_youtube = set(youtube_cats)
+    preferred_openai = set(openai_timed_cats)
+    preferred_timed = set(timed_cats)
+    filtered_timed: List[Dict[str, Any]] = []
+    for item in timed_activities:
+        cat = str(item.get("category", "")).strip()
+        lib_id = str(item.get("id", "")).strip()
+        # Always keep plan-referenced items.
+        if lib_id in referenced_ids:
+            filtered_timed.append(item)
+            continue
+        if cat in YOUTUBE_CATEGORY_SET:
+            if cat in preferred_youtube:
+                filtered_timed.append(item)
+            continue
+        if cat in preferred_openai or cat in preferred_timed:
+            filtered_timed.append(item)
+    timed_activities = filtered_timed
+
+    next_recent = merge_recent_youtube_by_category(recent_youtube, selected_recent)
 
     generated_at = iso_utc_now()
     try:
@@ -378,6 +442,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             favorite_activities=favorite_activities,
             generated_at=generated_at,
             existing_item=existing,
+            recent_youtube_by_category=next_recent,
         )
     except Exception as err:
         print(f"[stress-generate] save failed: {err}\n{traceback.format_exc()}")
@@ -396,8 +461,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "metadata": {
                 "timed_categories": timed_cats,
                 "flexible_categories": flexible_cats,
+                "youtube_categories": youtube_cats,
                 "timed_count": len(timed_activities),
                 "flexible_count": len(flexible_activities),
+                "youtube_per_category": ACTIVITIES_PER_YOUTUBE_CATEGORY,
             },
         },
     )

@@ -162,38 +162,19 @@ def _normalize_blocks(busy_blocks: Sequence[Dict[str, Any]], week_start: str, we
     cleaned: List[Dict[str, Any]] = []
     for block in busy_blocks:
         if not isinstance(block, dict):
-            print("[stress-insights-debug] dropped_block reason=not_a_dict")
             continue
         block_date = str(block.get("date", "")).strip()
         start_raw = str(block.get("start_time", "")).strip()
         end_raw = str(block.get("end_time", "")).strip()
         if not block_date:
-            print(
-                "[stress-insights-debug] dropped_block reason=missing_date "
-                f"start_time={start_raw!r} end_time={end_raw!r}"
-            )
             continue
         if block_date < week_start or block_date > week_end:
-            print(
-                "[stress-insights-debug] dropped_block reason=outside_week "
-                f"date={block_date} start_time={start_raw!r} end_time={end_raw!r} "
-                f"week_start={week_start} week_end={week_end}"
-            )
             continue
         start_m = _parse_hh_mm_minutes(start_raw)
         end_m = _parse_hh_mm_minutes(end_raw)
         if start_m is None or end_m is None:
-            print(
-                "[stress-insights-debug] dropped_block reason=invalid_hhmm "
-                f"date={block_date} start_time={start_raw!r} end_time={end_raw!r}"
-            )
             continue
         if end_m <= start_m:
-            print(
-                "[stress-insights-debug] dropped_block reason=end_not_after_start "
-                f"date={block_date} start_time={start_raw!r} end_time={end_raw!r} "
-                f"start_m={start_m} end_m={end_m}"
-            )
             continue
         cleaned.append(
             {
@@ -393,16 +374,6 @@ def build_stressful_periods_insights(
     preferred_activities, durations (lists of preference ids).
     """
     blocks = _normalize_blocks(busy_blocks, week_start, week_end)
-    print(
-        "[stress-insights-debug] normalized_busy_blocks "
-        f"count={len(blocks)} week_start={week_start} week_end={week_end}"
-    )
-    for block in blocks:
-        print(
-            "[stress-insights-debug] normalized_busy_block "
-            f"date={block.get('date')} start_m={block.get('start_m')} "
-            f"end_m={block.get('end_m')} duration_m={block.get('duration_m')}"
-        )
 
     prefs = {
         "busiest_times": _safe_string_list(preferences.get("busiest_times")),
@@ -422,10 +393,6 @@ def build_stressful_periods_insights(
     }
 
     if len(blocks) < 2:
-        print(
-            "[stress-insights-debug] week_gate_failed "
-            f"normalized_count={len(blocks)} required_min=2 → empty insights"
-        )
         return empty_payload
 
     by_day: Dict[str, List[Dict[str, Any]]] = {}
@@ -437,31 +404,17 @@ def build_stressful_periods_insights(
         stats = _analyze_day(day_blocks)
         score, reason = _score_day(stats, iso_day=iso_day, prefs=prefs)
         passed = True
-        fail_reason = ""
 
         if int(stats["busy_minutes"]) < MIN_BUSY_MINUTES_FOR_INSIGHT and int(stats["block_count"]) < MIN_BLOCKS_FOR_INSIGHT + 1:
             # Require meaningful load: either enough minutes or enough blocks.
             if int(stats["busy_minutes"]) < MIN_BUSY_MINUTES_FOR_INSIGHT and int(stats["block_count"]) < 3:
                 passed = False
-                fail_reason = "day_prefilter_minutes_and_blocks"
 
         if passed and score < MIN_SCORE_FOR_INSIGHT:
             passed = False
-            fail_reason = f"score_below_threshold score={score} min={MIN_SCORE_FOR_INSIGHT}"
 
         if passed and int(stats["busy_minutes"]) < 60 and int(stats["block_count"]) < 3:
             passed = False
-            fail_reason = "day_postfilter_minutes_and_blocks"
-
-        print(
-            "[stress-insights-debug] day_stats "
-            f"date={iso_day} busy_minutes={stats.get('busy_minutes')} "
-            f"block_count={stats.get('block_count')} longest_block={stats.get('longest_block')} "
-            f"back_to_back={stats.get('back_to_back')} small_gaps={stats.get('small_gaps')} "
-            f"peak_tod={stats.get('peak_tod')} score={score} primary_reason={reason} "
-            f"passed={passed}"
-            + (f" fail_reason={fail_reason}" if not passed else "")
-        )
 
         if not passed:
             continue
@@ -474,11 +427,6 @@ def build_stressful_periods_insights(
                 "reason": reason,
             }
         )
-
-    print(
-        "[stress-insights-debug] insights_result "
-        f"passing_days={len(scored)} returning={min(len(scored), MAX_INSIGHTS)}"
-    )
 
     if not scored:
         return empty_payload

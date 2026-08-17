@@ -24,6 +24,11 @@ export type StressActivity = {
   summary_short: string;
   instructions?: string[];
   favorite_key?: string;
+  /** Backend-owned curated YouTube id (never from OpenAI). */
+  youtube_video_id?: string;
+  /** Curated whitelist URL only; omit when no video. */
+  youtube_url?: string;
+  youtube_title?: string;
 };
 
 export type StressActivitiesResponse = {
@@ -125,6 +130,18 @@ export function normalizeActivity(raw: unknown): StressActivity | null {
     typeof o.category_label === 'string' && o.category_label.trim()
       ? o.category_label.trim()
       : undefined;
+  const youtube_video_id =
+    typeof o.youtube_video_id === 'string' && o.youtube_video_id.trim()
+      ? o.youtube_video_id.trim()
+      : undefined;
+  const youtube_url =
+    kind === 'timed' &&
+    typeof o.youtube_url === 'string' &&
+    /^https:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]{6,}/i.test(o.youtube_url.trim())
+      ? o.youtube_url.trim()
+      : undefined;
+  const youtube_title =
+    typeof o.youtube_title === 'string' && o.youtube_title.trim() ? o.youtube_title.trim() : undefined;
   return {
     id,
     kind,
@@ -135,6 +152,9 @@ export function normalizeActivity(raw: unknown): StressActivity | null {
     summary_short: summary,
     instructions,
     favorite_key,
+    ...(youtube_video_id && youtube_url
+      ? { youtube_video_id, youtube_url, ...(youtube_title ? { youtube_title } : {}) }
+      : {}),
   };
 }
 

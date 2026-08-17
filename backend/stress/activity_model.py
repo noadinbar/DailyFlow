@@ -19,6 +19,11 @@ from activity_categories import (
     TIMED_ACTIVITY_ID_SET,
     category_label,
 )
+from curated_youtube import (
+    YOUTUBE_CATEGORY_SET,
+    hydrate_curated_youtube,
+    strip_untrusted_video_fields,
+)
 
 
 def iso_utc_now() -> str:
@@ -151,13 +156,16 @@ def _normalize_instructions(raw: Any) -> List[str]:
 
 
 def normalize_timed_activity(raw: Dict[str, Any], *, allowed_categories: Optional[Set[str]] = None) -> Optional[Dict[str, Any]]:
+    # Strip any untrusted URL fields; curated video metadata is rehydrated below.
+    raw = strip_untrusted_video_fields(dict(raw) if isinstance(raw, dict) else {})
     title = str(raw.get("title", "")).strip()
     category = str(raw.get("category", "")).strip().lower().replace(" ", "_")
     if not title or not category:
         return None
     if allowed_categories is not None and category not in allowed_categories:
         return None
-    if category not in TIMED_ACTIVITY_ID_SET:
+    # Timed OpenAI categories + curated YouTube categories (includes music).
+    if category not in TIMED_ACTIVITY_ID_SET and category not in YOUTUBE_CATEGORY_SET:
         return None
     duration = ceil_duration_minutes(raw.get("duration_minutes"))
     if duration is None or duration <= 0:
@@ -167,7 +175,8 @@ def normalize_timed_activity(raw: Dict[str, Any], *, allowed_categories: Optiona
     if not instructions:
         instructions = [summary]
     item_id = str(raw.get("id", "")).strip()
-    # Never persist model-invented external URLs in this phase.
+    # OpenAI must never supply YouTube URLs. Persist only whitelist video ids;
+    # hydrate_curated_youtube resolves URL/title/duration from the catalog.
     normalized = {
         "id": item_id,
         "kind": "timed",
@@ -177,8 +186,9 @@ def normalize_timed_activity(raw: Dict[str, Any], *, allowed_categories: Optiona
         "duration_minutes": duration,
         "summary_short": summary,
         "instructions": instructions,
+        "youtube_video_id": str(raw.get("youtube_video_id", "")).strip(),
     }
-    return normalized
+    return hydrate_curated_youtube(normalized)
 
 
 def normalize_flexible_activity(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
