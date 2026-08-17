@@ -2184,11 +2184,6 @@ select.df-input {
   gap: 8px;
 }
 
-.df-overviewWeekLabel {
-  font-size: 14px;
-  color: #4b5563;
-}
-
 .df-overviewTempGrid {
   display: grid;
   gap: 12px;

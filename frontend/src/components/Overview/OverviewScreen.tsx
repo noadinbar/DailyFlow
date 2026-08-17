@@ -62,6 +62,19 @@ function formatIsoDayLabel(iso: string): string {
   return `${ENGLISH_DAY_NAMES[parsed.getDay()]} ${pad2(parsed.getDate())}.${pad2(parsed.getMonth() + 1)}`;
 }
 
+function formatWeekRangeLabel(weekStartIso: string, weekEndIso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartIso) || !/^\d{4}-\d{2}-\d{2}$/.test(weekEndIso)) return '';
+  const start = new Date(`${weekStartIso}T00:00:00`);
+  const end = new Date(`${weekEndIso}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
+  const startDay = start.getDate();
+  const endDay = end.getDate();
+  const startMonth = start.getMonth() + 1;
+  const endMonth = end.getMonth() + 1;
+  if (startMonth === endMonth) return `${startDay}-${endDay}.${endMonth}`;
+  return `${startDay}.${startMonth}-${endDay}.${endMonth}`;
+}
+
 function asScheduledItems(raw: unknown): ScheduledWorkoutItem[] {
   if (!Array.isArray(raw)) return [];
   const items: ScheduledWorkoutItem[] = [];
@@ -353,8 +366,7 @@ export default function OverviewScreen(props: OverviewScreenProps) {
     })();
   }, []);
 
-  const weekLabel =
-    weekStart && weekEnd ? `${formatIsoDayLabel(weekStart)} – ${formatIsoDayLabel(weekEnd)}` : '';
+  const weekRangeLabel = weekStart && weekEnd ? formatWeekRangeLabel(weekStart, weekEnd) : '';
   const scheduledCount = scheduledWorkouts.length;
   const busyDayLabels = busyDays.map((day) => day.day_label).join(', ');
 
@@ -374,7 +386,9 @@ export default function OverviewScreen(props: OverviewScreenProps) {
       <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
-            <h1 className="df-overviewPageTitle">Overview</h1>
+            {weekRangeLabel ? (
+              <h1 className="df-overviewPageTitle">This week {weekRangeLabel}</h1>
+            ) : null}
           </div>
           <div className="df-calendarTopbarRight">
             <button type="button" className="df-btn" onClick={() => void handleLogoutClick()} disabled={isLoggingOut}>
@@ -407,7 +421,6 @@ export default function OverviewScreen(props: OverviewScreenProps) {
 
           {activeTab === 'summary' && (
             <section className="df-workoutsSection" role="tabpanel" aria-label="Summary">
-              {weekLabel && <div className="df-overviewWeekLabel">Current week: {weekLabel}</div>}
               {isLoading && <div className="df-calendarLegend">Loading current week…</div>}
               {loadError && (
                 <div className="df-errorText" role="alert">
