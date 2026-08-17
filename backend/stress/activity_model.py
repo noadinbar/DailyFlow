@@ -472,6 +472,9 @@ def normalize_weekly_break_plan(raw: Any) -> List[Dict[str, Any]]:
                 "recommended_start_time": rec_start,
                 "recommended_end_time": rec_end,
                 "summary_short": str(item.get("summary_short", "")).strip(),
+                # Preserve Workouts-style calendar stamps when present.
+                "google_event_id": str(item.get("google_event_id", "")).strip(),
+                "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
             }
         )
     cleaned.sort(

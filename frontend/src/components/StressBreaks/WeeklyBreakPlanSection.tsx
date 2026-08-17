@@ -15,6 +15,13 @@ export type WeeklyBreakPlanItem = {
   recommended_start_time: string;
   recommended_end_time: string;
   summary_short?: string;
+  google_event_id?: string;
+  dailyflow_calendar_id?: string;
+};
+
+export type PlanCalendarStatus = {
+  state: 'idle' | 'loading' | 'success' | 'error';
+  message?: string;
 };
 
 type WeekDayCard = { dayLabel: string; dateIso: string };
@@ -24,6 +31,8 @@ type WeeklyBreakPlanSectionProps = {
   planItems: WeeklyBreakPlanItem[];
   isSaving: boolean;
   planError: string;
+  planCalendarStatusById: Record<string, PlanCalendarStatus>;
+  onAddToCalendar: (planId: string) => void;
   onRemove: (planId: string) => void;
   onOpenActivity: (libraryActivityId: string) => void;
 };
@@ -35,7 +44,16 @@ function formatWeeklyPlanDay(value: string): string {
 }
 
 export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProps) {
-  const { weekCards, planItems, isSaving, planError, onRemove, onOpenActivity } = props;
+  const {
+    weekCards,
+    planItems,
+    isSaving,
+    planError,
+    planCalendarStatusById,
+    onAddToCalendar,
+    onRemove,
+    onOpenActivity,
+  } = props;
 
   const suggestionsByDay = React.useMemo(() => {
     const grouped = new Map<string, WeeklyBreakPlanItem[]>();
@@ -69,6 +87,11 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
           const dayItems = suggestionsByDay.get(card.dateIso) || [];
           const item = dayItems[0];
           const canOpen = Boolean(item);
+          const itemCalendarStatus = item ? planCalendarStatusById[item.id] : undefined;
+          const isItemAddLoading = itemCalendarStatus?.state === 'loading';
+          const isItemAdded = Boolean(
+            (item?.google_event_id && item.google_event_id.trim()) || itemCalendarStatus?.state === 'success'
+          );
           return (
             <article
               key={card.dateIso}
@@ -115,6 +138,19 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                   <div className="df-weeklyPlanControls">
                     <button
                       type="button"
+                      className="df-weeklyPlanControlBtn df-weeklyPlanControlAdd"
+                      title="Add to calendar"
+                      aria-label={`Add ${item.title} to calendar`}
+                      disabled={!item || isSaving || isItemAddLoading || isItemAdded}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onAddToCalendar(item.id);
+                      }}
+                    >
+                      {isItemAddLoading ? '…' : isItemAdded ? '✓' : '+'}
+                    </button>
+                    <button
+                      type="button"
                       className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
                       disabled={isSaving}
                       onClick={(event) => {
@@ -127,6 +163,11 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                       🗑
                     </button>
                   </div>
+                  {itemCalendarStatus?.state === 'error' && itemCalendarStatus.message ? (
+                    <div className="df-errorText" style={{ marginTop: 4, fontSize: 12 }}>
+                      {itemCalendarStatus.message}
+                    </div>
+                  ) : null}
                   {dayItems.length > 1 && (
                     <button
                       type="button"
@@ -168,11 +209,28 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
               </button>
             </div>
             <div className="df-settingsContent" style={{ display: 'grid', gap: 10, maxHeight: '70vh', overflowY: 'auto' }}>
-              {dayModalItems.map((planItem) => (
+              {dayModalItems.map((planItem) => {
+                const itemCalendarStatus = planCalendarStatusById[planItem.id];
+                const isItemAddLoading = itemCalendarStatus?.state === 'loading';
+                const isItemAdded = Boolean(
+                  (planItem.google_event_id && planItem.google_event_id.trim()) ||
+                    itemCalendarStatus?.state === 'success'
+                );
+                return (
                 <article key={planItem.id} className="df-workoutLibraryCard">
                   <div className="df-workoutLibraryCardTop">
                     <h3 className="df-workoutLibraryTitle">{planItem.title}</h3>
                     <div className="df-weeklyPlanControls">
+                      <button
+                        type="button"
+                        className="df-weeklyPlanControlBtn df-weeklyPlanControlAdd"
+                        title="Add to calendar"
+                        aria-label={`Add ${planItem.title} to calendar`}
+                        disabled={isSaving || isItemAddLoading || isItemAdded}
+                        onClick={() => void onAddToCalendar(planItem.id)}
+                      >
+                        {isItemAddLoading ? '…' : isItemAdded ? '✓' : '+'}
+                      </button>
                       <button
                         type="button"
                         className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
@@ -198,6 +256,11 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                     {planItem.duration_minutes} min · {planItem.recommended_start_time}-
                     {planItem.recommended_end_time}
                   </div>
+                  {itemCalendarStatus?.state === 'error' && itemCalendarStatus.message ? (
+                    <div className="df-errorText" style={{ fontSize: 12 }}>
+                      {itemCalendarStatus.message}
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     className="df-btn"
@@ -206,7 +269,8 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                     View activity
                   </button>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

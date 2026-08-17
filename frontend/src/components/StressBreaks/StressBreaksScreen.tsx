@@ -2,13 +2,19 @@ import React from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import ProfileSettingsModal from '../Home/ProfileSettingsModal';
 import AppSidebar, { useSidebarCollapsed } from '../Sidebar/AppSidebar';
-import { buildApiUrl } from '../../services/api';
+import { buildApiUrl, getApiBaseUrl } from '../../services/api';
+import {
+  GOOGLE_RECONNECT_MESSAGE_NEW,
+  googleCalendarReconnectDisplayMessage,
+  isGoogleCalendarReconnectOrMissing,
+} from '../../services/googleCalendarConnection';
 import { pastelTagStyle } from '../shared/pastelTags';
 import StressBreaksQuestionnaireWizard from './StressBreaksQuestionnaireWizard';
 import StressBreaksPreferencesModal from './StressBreaksPreferencesModal';
 import ActivityLibrarySection from './ActivityLibrarySection';
 import WeeklyBreakPlanSection, {
   AddToWeeklyPlanModal,
+  type PlanCalendarStatus,
   type WeeklyBreakPlanItem,
 } from './WeeklyBreakPlanSection';
 import {
@@ -31,6 +37,7 @@ type StressBreaksScreenProps = {
 };
 
 type PreferencesLoadState = 'loading' | 'ready' | 'error';
+type GoogleCalendarStatus = 'checking' | 'connected' | 'not_connected' | 'reconnect_required' | 'error';
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -116,6 +123,12 @@ function normalizeWeeklyBreakPlan(raw: unknown): WeeklyBreakPlanItem[] {
     const kindRaw = typeof o.kind === 'string' ? o.kind.trim().toLowerCase() : '';
     const kind: 'timed' | 'flexible' =
       kindRaw === 'flexible' || libraryId.startsWith('flex_') ? 'flexible' : 'timed';
+    const googleEventId =
+      typeof o.google_event_id === 'string' && o.google_event_id.trim() ? o.google_event_id.trim() : undefined;
+    const dailyflowCalendarId =
+      typeof o.dailyflow_calendar_id === 'string' && o.dailyflow_calendar_id.trim()
+        ? o.dailyflow_calendar_id.trim()
+        : undefined;
     out.push({
       id,
       library_activity_id: libraryId,
@@ -128,6 +141,8 @@ function normalizeWeeklyBreakPlan(raw: unknown): WeeklyBreakPlanItem[] {
       recommended_start_time: start,
       recommended_end_time: end,
       summary_short: typeof o.summary_short === 'string' ? o.summary_short : undefined,
+      google_event_id: googleEventId,
+      dailyflow_calendar_id: dailyflowCalendarId,
     });
   }
   return out;
@@ -168,6 +183,13 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
   const [addFromLibraryStartTime, setAddFromLibraryStartTime] = React.useState('18:00');
   const [addFromLibraryDuration, setAddFromLibraryDuration] = React.useState<number | null>(10);
   const [addFromLibraryError, setAddFromLibraryError] = React.useState('');
+  const [googleCalendarStatus, setGoogleCalendarStatus] = React.useState<GoogleCalendarStatus>('checking');
+  const [googleCalendarStatusMessage, setGoogleCalendarStatusMessage] = React.useState('');
+  const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] = React.useState(false);
+  const [isAddingAllToCalendar, setIsAddingAllToCalendar] = React.useState(false);
+  const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>(
+    {}
+  );
 
   const effectiveName = displayName.trim() || username || 'User';
   const questionnaireCompleted = stressBreaks?.questionnaire_completed === true;
@@ -578,13 +600,21 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
         },
         body: JSON.stringify(payload),
       });
-      let responsePayload: { weekly_break_plan?: unknown; message?: string } = {};
+      let responsePayload: {
+        weekly_break_plan?: unknown;
+        message?: string;
+        reconnect_required?: boolean;
+      } = {};
       try {
         responsePayload = (await response.json()) as typeof responsePayload;
       } catch {
         responsePayload = {};
       }
       if (!response.ok) {
+        if (isGoogleCalendarReconnectOrMissing(responsePayload, response.status)) {
+          setGoogleCalendarStatus('reconnect_required');
+          setGoogleCalendarStatusMessage(googleCalendarReconnectDisplayMessage(responsePayload));
+        }
         throw new Error(
           typeof responsePayload.message === 'string' && responsePayload.message.trim()
             ? responsePayload.message
@@ -593,6 +623,19 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
       }
       const savedPlan = normalizeWeeklyBreakPlan(responsePayload.weekly_break_plan);
       setWeeklyBreakPlan(savedPlan);
+      setPlanCalendarStatusById((prev) => {
+        const next: Record<string, PlanCalendarStatus> = {};
+        for (const planItem of savedPlan) {
+          const planId = typeof planItem.id === 'string' ? planItem.id : '';
+          if (!planId) continue;
+          const previous = prev[planId];
+          if (previous) next[planId] = previous;
+          if (typeof planItem.google_event_id === 'string' && planItem.google_event_id.trim()) {
+            next[planId] = { state: 'success' };
+          }
+        }
+        return next;
+      });
       return savedPlan;
     } catch (e) {
       const anyErr = e as { message?: string };
@@ -604,6 +647,155 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     } finally {
       setIsSavingWeeklyPlan(false);
     }
+  }
+
+  function handleConnectGoogleCalendarClick() {
+    setIsConnectingGoogleCalendar(true);
+    void (async () => {
+      try {
+        const baseUrl = getApiBaseUrl();
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString();
+        if (!accessToken) {
+          setWeeklyPlanError('You need to be signed in to connect Google Calendar.');
+          setIsConnectingGoogleCalendar(false);
+          return;
+        }
+        const startUrl = `${baseUrl}/auth/google/start?access_token=${encodeURIComponent(accessToken)}&return_to=${encodeURIComponent('/stress')}`;
+        window.location.assign(startUrl);
+      } catch (e) {
+        const anyErr = e as { message?: string };
+        setWeeklyPlanError(
+          typeof anyErr?.message === 'string'
+            ? anyErr.message
+            : 'Failed to start Google Calendar connection.'
+        );
+        setIsConnectingGoogleCalendar(false);
+      }
+    })();
+  }
+
+  const refreshGoogleCalendarConnectionState = React.useCallback(async () => {
+    try {
+      setGoogleCalendarStatus('checking');
+      setGoogleCalendarStatusMessage('');
+      const token = await getAuthToken();
+      const response = await fetch(buildApiUrl('/auth/google/calendars'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let payload: { message?: string } = {};
+      try {
+        payload = (await response.json()) as { message?: string };
+      } catch {
+        payload = {};
+      }
+      if (response.status === 404) {
+        setGoogleCalendarStatus('not_connected');
+        setGoogleCalendarStatusMessage('');
+        return;
+      }
+      if (!response.ok && isGoogleCalendarReconnectOrMissing(payload, response.status)) {
+        setGoogleCalendarStatus('reconnect_required');
+        setGoogleCalendarStatusMessage(googleCalendarReconnectDisplayMessage(payload));
+        return;
+      }
+      if (!response.ok) {
+        setGoogleCalendarStatus('error');
+        setGoogleCalendarStatusMessage(
+          typeof payload.message === 'string' && payload.message.trim()
+            ? payload.message
+            : `Could not load calendar connection (${response.status}).`
+        );
+        return;
+      }
+      setGoogleCalendarStatus('connected');
+      setGoogleCalendarStatusMessage('');
+    } catch (e) {
+      const anyErr = e as { message?: string };
+      setGoogleCalendarStatus('error');
+      setGoogleCalendarStatusMessage(
+        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to load Google Calendar connection.'
+      );
+    }
+  }, []);
+
+  async function handleAddToCalendar(planId: string) {
+    setPlanCalendarStatusById((prev) => ({
+      ...prev,
+      [planId]: { state: 'loading', message: 'Adding...' },
+    }));
+    const saved = await mutateWeeklyPlan(
+      {
+        action: 'add_to_calendar',
+        week_start: weekStartIso,
+        week_end: weekEndIso,
+        plan_id: planId,
+      },
+      { suppressGlobalError: true }
+    );
+    if (saved) {
+      setPlanCalendarStatusById((prev) => ({
+        ...prev,
+        [planId]: { state: 'success' },
+      }));
+      return;
+    }
+    setPlanCalendarStatusById((prev) => ({
+      ...prev,
+      [planId]: { state: 'error', message: 'Could not add to calendar.' },
+    }));
+  }
+
+  async function handleAddAllToCalendar() {
+    if (isAddingAllToCalendar) return;
+    const eligibleItems = weeklyBreakPlan.filter((item) => {
+      const itemStatus = planCalendarStatusById[item.id];
+      const alreadyAdded =
+        Boolean(item.google_event_id && item.google_event_id.trim()) || itemStatus?.state === 'success';
+      return !alreadyAdded;
+    });
+    if (eligibleItems.length === 0) return;
+    setWeeklyPlanError('');
+    setIsAddingAllToCalendar(true);
+    let successCount = 0;
+    let failCount = 0;
+    for (const item of eligibleItems) {
+      const planId = item.id;
+      if (!planId) continue;
+      setPlanCalendarStatusById((prev) => ({
+        ...prev,
+        [planId]: { state: 'loading', message: 'Adding...' },
+      }));
+      const saved = await mutateWeeklyPlan(
+        {
+          action: 'add_to_calendar',
+          week_start: weekStartIso,
+          week_end: weekEndIso,
+          plan_id: planId,
+        },
+        { suppressGlobalError: true }
+      );
+      if (saved) {
+        successCount += 1;
+        setPlanCalendarStatusById((prev) => ({
+          ...prev,
+          [planId]: { state: 'success' },
+        }));
+      } else {
+        failCount += 1;
+        setPlanCalendarStatusById((prev) => ({
+          ...prev,
+          [planId]: { state: 'error', message: 'Could not add to calendar.' },
+        }));
+      }
+    }
+    if (failCount > 0) {
+      setWeeklyPlanError(`Added ${successCount} activities. Failed to add ${failCount}.`);
+    } else {
+      setWeeklyPlanError('');
+    }
+    setIsAddingAllToCalendar(false);
   }
 
   function openAddFromLibraryModal(activity: StressActivity) {
@@ -728,6 +920,22 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  React.useEffect(() => {
+    void refreshGoogleCalendarConnectionState();
+  }, [refreshGoogleCalendarConnectionState]);
+
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const params = new URLSearchParams(url.search);
+    if (params.get('google_calendar_connected') === '1') {
+      params.delete('google_calendar_connected');
+      const nextSearch = params.toString();
+      const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash || ''}`;
+      window.history.replaceState({}, '', nextUrl);
+      void refreshGoogleCalendarConnectionState();
+    }
+  }, [refreshGoogleCalendarConnectionState]);
+
   async function handleLogoutClick() {
     setErrorMessage('');
     setIsLoggingOut(true);
@@ -814,9 +1022,38 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
       <div className="df-calendarMain" style={{ position: 'relative' }}>
         <header className="df-calendarTopbar">
           <div className="df-calendarTopbarLeft">
-            <h1 className="df-workoutsTitle" style={{ margin: 0, fontSize: 22 }}>
-              Stress &amp; Breaks
-            </h1>
+            {questionnaireCompleted && (
+              <>
+                <button
+                  type="button"
+                  className="df-btn df-btnPrimary"
+                  onClick={() => void generateActivities()}
+                  disabled={isGenerating || isLoadingLibrary || preferencesLoadState !== 'ready'}
+                >
+                  {isGenerating ? 'Generating...' : 'Generate Activities'}
+                </button>
+                <button
+                  type="button"
+                  className="df-btn"
+                  onClick={() => void handleAddAllToCalendar()}
+                  disabled={
+                    isAddingAllToCalendar ||
+                    isSavingWeeklyPlan ||
+                    isGenerating ||
+                    weeklyBreakPlan.length === 0 ||
+                    weeklyBreakPlan.every((item) => {
+                      const itemStatus = planCalendarStatusById[item.id];
+                      return (
+                        Boolean(item.google_event_id && item.google_event_id.trim()) ||
+                        itemStatus?.state === 'success'
+                      );
+                    })
+                  }
+                >
+                  {isAddingAllToCalendar ? 'Adding all...' : 'Add all to calendar'}
+                </button>
+              </>
+            )}
           </div>
           <div className="df-calendarTopbarRight">
             {questionnaireCompleted && (
@@ -827,6 +1064,16 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
                 disabled={preferencesLoadState !== 'ready'}
               >
                 Edit Preferences
+              </button>
+            )}
+            {googleCalendarStatus === 'reconnect_required' && (
+              <button
+                type="button"
+                className="df-btn df-btnPrimary"
+                onClick={handleConnectGoogleCalendarClick}
+                disabled={isConnectingGoogleCalendar}
+              >
+                {isConnectingGoogleCalendar ? 'Connecting...' : 'Connect Google Calendar'}
               </button>
             )}
             <button type="button" className="df-btn" onClick={() => void handleLogoutClick()} disabled={isLoggingOut}>
@@ -840,6 +1087,31 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
             {errorMessage}
           </div>
         ) : null}
+        {generateError ? (
+          <div className="df-errorText" style={{ padding: '6px 16px 0' }} role="alert">
+            {generateError}
+          </div>
+        ) : null}
+        {weeklyPlanError && !addFromLibraryActivity ? (
+          <div className="df-errorText" style={{ padding: '6px 16px 0' }} role="alert">
+            {weeklyPlanError}
+          </div>
+        ) : null}
+        {googleCalendarStatus === 'reconnect_required' && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
+            {googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
+          </div>
+        )}
+        {googleCalendarStatus === 'not_connected' && questionnaireCompleted && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#6b7280' }}>
+            Connect Google Calendar to add breaks directly from Stress &amp; Breaks.
+          </div>
+        )}
+        {googleCalendarStatus === 'error' && googleCalendarStatusMessage && (
+          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b91c1c' }} role="alert">
+            {googleCalendarStatusMessage}
+          </div>
+        )}
 
         <div className="df-workoutsContent">
           {preferencesLoadState === 'loading' && (
@@ -868,8 +1140,10 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
               <WeeklyBreakPlanSection
                 weekCards={weekCards}
                 planItems={weeklyBreakPlan}
-                isSaving={isSavingWeeklyPlan}
-                planError={weeklyPlanError}
+                isSaving={isSavingWeeklyPlan || isAddingAllToCalendar}
+                planError=""
+                planCalendarStatusById={planCalendarStatusById}
+                onAddToCalendar={(planId) => void handleAddToCalendar(planId)}
                 onRemove={(planId) => void handleRemoveWeeklyPlanItem(planId)}
                 onOpenActivity={openActivityFromPlan}
               />
@@ -881,12 +1155,9 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
                 hasLibrary={hasLibrary}
                 isLoadingLibrary={isLoadingLibrary}
                 libraryLoadError={libraryLoadError}
-                isGenerating={isGenerating}
-                generateError={generateError}
                 favoriteError={favoriteError}
                 isTogglingFavorite={isTogglingFavorite}
                 isSavingWeeklyPlan={isSavingWeeklyPlan}
-                onGenerate={() => void generateActivities()}
                 onRetryLoad={handleRetryLibraryLoad}
                 onToggleFavorite={(activity) => void toggleFavorite(activity)}
                 onOpenDetail={setSelectedActivity}

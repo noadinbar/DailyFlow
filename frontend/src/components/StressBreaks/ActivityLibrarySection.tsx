@@ -18,12 +18,9 @@ type ActivityLibrarySectionProps = {
   hasLibrary: boolean;
   isLoadingLibrary: boolean;
   libraryLoadError: string;
-  isGenerating: boolean;
-  generateError: string;
   favoriteError: string;
   isTogglingFavorite: boolean;
   isSavingWeeklyPlan: boolean;
-  onGenerate: () => void;
   onRetryLoad: () => void;
   onToggleFavorite: (activity: StressActivity) => void;
   onOpenDetail: (activity: StressActivity) => void;
@@ -39,12 +36,9 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
     hasLibrary,
     isLoadingLibrary,
     libraryLoadError,
-    isGenerating,
-    generateError,
     favoriteError,
     isTogglingFavorite,
     isSavingWeeklyPlan,
-    onGenerate,
     onRetryLoad,
     onToggleFavorite,
     onOpenDetail,
@@ -52,10 +46,22 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
   } = props;
 
   const [activeTab, setActiveTab] = React.useState<LibraryTab>('timed');
+  const [isFavoritesMode, setIsFavoritesMode] = React.useState(false);
 
-  const displayed = activeTab === 'timed' ? timedActivities : flexibleActivities;
-  const emptyTabMessage =
-    activeTab === 'timed'
+  const tabActivities = activeTab === 'timed' ? timedActivities : flexibleActivities;
+  const displayed = React.useMemo(() => {
+    if (!isFavoritesMode) return tabActivities;
+    return tabActivities.filter((item) => {
+      const favKey = activityFavoriteKey(item);
+      return favoriteKeySet.has(favKey) || favoriteSignatureSet.has(activityMatchSignature(item));
+    });
+  }, [isFavoritesMode, tabActivities, favoriteKeySet, favoriteSignatureSet]);
+
+  const emptyTabMessage = isFavoritesMode
+    ? activeTab === 'timed'
+      ? 'No favorite Timed activities match the current view.'
+      : 'No favorite Flexible activities match the current view.'
+    : activeTab === 'timed'
       ? hasLibrary
         ? 'No Timed activities in your current library. Generate again after selecting Breathing, Meditation, or Stretching preferences.'
         : 'Generate Activities to create Timed break suggestions from your preferences.'
@@ -71,11 +77,12 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
         </h2>
         <button
           type="button"
-          className="df-btn df-btnPrimary"
-          onClick={onGenerate}
-          disabled={isGenerating || isLoadingLibrary}
+          className={`df-workoutFavoriteToggle${isFavoritesMode ? ' df-workoutFavoriteToggleActive' : ''}`}
+          onClick={() => setIsFavoritesMode((prev) => !prev)}
+          aria-label={isFavoritesMode ? 'Show all activities' : 'Show favorite activities only'}
+          title={isFavoritesMode ? 'Showing favorites' : 'Show favorites'}
         >
-          {isGenerating ? 'Generating…' : 'Generate Activities'}
+          ❤
         </button>
       </div>
 
@@ -108,12 +115,6 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
               Retry
             </button>
           </div>
-        </div>
-      ) : null}
-
-      {generateError ? (
-        <div className="df-errorText" role="alert" style={{ marginTop: 12 }}>
-          {generateError}
         </div>
       ) : null}
 

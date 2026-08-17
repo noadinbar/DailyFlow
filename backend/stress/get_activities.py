@@ -3,7 +3,8 @@ GET /stress/activities — load Timed + Flexible library, favorites, and weekly 
 PATCH /stress/activities — mutate library/plan state:
   - toggle_favorite
   - add_library_activity (BusyBlocks conflict validation, Workouts-style)
-  - remove_plan_item
+  - remove_plan_item (also deletes Google event when stamped, Workouts-style)
+  - add_to_calendar (Google Calendar insert, mirrors workouts/weekly_plan_update.py)
 
 Uses StressBreaksLibrary. add_library_activity also reads BusyBlocks (same overlap
 semantics as backend/workouts/weekly_plan_update.py _slot_is_valid).
@@ -17,6 +18,9 @@ import sys
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -47,6 +51,15 @@ from activity_model import (  # noqa: E402
 DAY_START_MINUTES = 6 * 60
 DAY_END_MINUTES = 22 * 60
 
+# Match Workouts Google Calendar constants (weekly_plan_update.py).
+DAILYFLOW_CALENDAR_SUMMARY = "DailyFlow"
+APP_TIMEZONE_ID = "Asia/Jerusalem"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_CALENDAR_LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+GOOGLE_CALENDAR_URL_TEMPLATE = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}"
+GOOGLE_CALENDAR_CREATE_URL = "https://www.googleapis.com/calendar/v3/calendars"
+GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+
 _CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "https://main.dnp9vhzk0bw8l.amplifyapp.com",
@@ -57,6 +70,16 @@ _CORS_HEADERS = {
 
 def _json_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {"statusCode": status_code, "headers": dict(_CORS_HEADERS), "body": json.dumps(json_safe(body))}
+
+
+def _reconnect_required_response() -> Dict[str, Any]:
+    return _json_response(
+        403,
+        {
+            "message": "Google Calendar connection expired. Please reconnect.",
+            "reconnect_required": True,
+        },
+    )
 
 
 def _extract_cognito_sub(event: Dict[str, Any]) -> Optional[str]:
@@ -175,6 +198,404 @@ def _slot_is_valid(
         if max(start_m, b_start_m) < min(end_m, b_end_m):
             return False, "", "Selected slot overlaps an existing busy block."
     return True, f"{end_m // 60:02d}:{end_m % 60:02d}", ""
+
+
+def _dynamodb_resource():
+    region = os.getenv("AWS_REGION")
+    return boto3.resource("dynamodb", region_name=region) if region else boto3.resource("dynamodb")
+
+
+def _integrations_table():
+    table_name = os.getenv("INTEGRATIONS_TABLE", "").strip()
+    if not table_name:
+        raise ValueError("Missing INTEGRATIONS_TABLE env var.")
+    return _dynamodb_resource().Table(table_name)
+
+
+def _dailyflow_events_table():
+    table_name = (os.getenv("DAILYFLOW_EVENTS_TABLE") or "DailyFlowEvents").strip()
+    if not table_name:
+        raise ValueError("Missing DAILYFLOW_EVENTS_TABLE env var.")
+    return _dynamodb_resource().Table(table_name)
+
+
+def _stress_events_plan_id(plan_id: str) -> str:
+    """Namespace DailyFlowEvents plan_id so Stress does not collide with Workouts plan_N keys."""
+    raw = str(plan_id or "").strip()
+    if raw.startswith("stress_"):
+        return raw
+    return f"stress_{raw}"
+
+
+def _extract_google_connection(item: Dict[str, Any]) -> Dict[str, Any]:
+    if not item:
+        return {}
+    if isinstance(item.get("google"), dict):
+        return item.get("google") or {}
+    return item
+
+
+def _fetch_google_connection(user_id: str) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    response = _integrations_table().get_item(Key={"user_id": user_id})
+    item = response.get("Item")
+    if not isinstance(item, dict):
+        return None
+    connection = _extract_google_connection(item)
+    access_token = connection.get("access_token") or connection.get("accessToken")
+    if isinstance(access_token, str) and access_token.strip():
+        return item, connection
+    return None
+
+
+def _refresh_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return None
+    body = urlencode(
+        {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+    ).encode("utf-8")
+    request = Request(
+        GOOGLE_TOKEN_URL,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urlopen(request, timeout=15) as response:
+        raw = response.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def _update_connection_access_token(user_id: str, connection: Dict[str, Any], new_tokens: Dict[str, Any]) -> None:
+    access_token = new_tokens.get("access_token")
+    if not isinstance(access_token, str) or not access_token.strip():
+        return
+    expires_in = int(new_tokens.get("expires_in") or 3600)
+    expires_iso = datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() + expires_in,
+        tz=timezone.utc,
+    ).isoformat()
+    _integrations_table().update_item(
+        Key={"user_id": user_id},
+        UpdateExpression=(
+            "SET access_token = :access_token, accessToken = :access_token, "
+            "token_expires_at = :token_expires_at"
+        ),
+        ExpressionAttributeValues={
+            ":access_token": access_token.strip(),
+            ":token_expires_at": expires_iso,
+        },
+    )
+    connection["access_token"] = access_token.strip()
+    connection["accessToken"] = access_token.strip()
+    connection["token_expires_at"] = expires_iso
+
+
+def _google_request_json(method: str, url: str, access_token: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = None
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+    if body is not None:
+        payload = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=payload, headers=headers, method=method)
+    with urlopen(request, timeout=20) as response:
+        raw = response.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def _google_request_no_content(method: str, url: str, access_token: str) -> None:
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+        },
+        method=method,
+    )
+    with urlopen(request, timeout=20):
+        return
+
+
+def _google_request_json_with_refresh(
+    *,
+    user_id: str,
+    connection: Dict[str, Any],
+    method: str,
+    url: str,
+    body: Optional[Dict[str, Any]] = None,
+    debug_flags: Optional[Dict[str, bool]] = None,
+) -> Dict[str, Any]:
+    access_token = connection.get("access_token") or connection.get("accessToken")
+    refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise PermissionError("Google connection missing access token.")
+    try:
+        return _google_request_json(method, url, access_token.strip(), body)
+    except HTTPError as err:
+        if err.code not in {401, 403}:
+            raise
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_attempted"] = True
+            debug_flags["google_calendar_create_retry"] = True
+        if not isinstance(refresh_token, str) or not refresh_token.strip():
+            raise PermissionError("Google connection expired, reconnect required")
+        new_tokens = _refresh_access_token(refresh_token.strip())
+        if not new_tokens or not isinstance(new_tokens.get("access_token"), str):
+            raise PermissionError("Google connection expired, reconnect required")
+        _update_connection_access_token(user_id, connection, new_tokens)
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_success"] = True
+        refreshed_access_token = connection.get("access_token") or connection.get("accessToken")
+        if not isinstance(refreshed_access_token, str) or not refreshed_access_token.strip():
+            raise PermissionError("Google connection expired, reconnect required")
+        return _google_request_json(method, url, refreshed_access_token.strip(), body)
+
+
+def _google_request_no_content_with_refresh(
+    *,
+    user_id: str,
+    connection: Dict[str, Any],
+    method: str,
+    url: str,
+    debug_flags: Optional[Dict[str, bool]] = None,
+) -> None:
+    access_token = connection.get("access_token") or connection.get("accessToken")
+    refresh_token = connection.get("refresh_token") or connection.get("refreshToken")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise PermissionError("Google connection missing access token.")
+    try:
+        _google_request_no_content(method, url, access_token.strip())
+        return
+    except HTTPError as err:
+        if err.code not in {401, 403}:
+            raise
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_attempted"] = True
+            debug_flags["google_calendar_create_retry"] = True
+        if not isinstance(refresh_token, str) or not refresh_token.strip():
+            raise PermissionError("Google connection expired, reconnect required")
+        new_tokens = _refresh_access_token(refresh_token.strip())
+        if not new_tokens or not isinstance(new_tokens.get("access_token"), str):
+            raise PermissionError("Google connection expired, reconnect required")
+        _update_connection_access_token(user_id, connection, new_tokens)
+        if debug_flags is not None:
+            debug_flags["access_token_refresh_success"] = True
+        refreshed_access_token = connection.get("access_token") or connection.get("accessToken")
+        if not isinstance(refreshed_access_token, str) or not refreshed_access_token.strip():
+            raise PermissionError("Google connection expired, reconnect required")
+        _google_request_no_content(method, url, refreshed_access_token.strip())
+
+
+def _selected_calendar_ids_from_sources(item: Dict[str, Any], connection: Dict[str, Any]) -> List[str]:
+    selected_raw = connection.get("selected_calendar_ids")
+    if not isinstance(selected_raw, list):
+        selected_raw = item.get("selected_calendar_ids") if isinstance(item, dict) else None
+    selected_calendar_ids: List[str] = []
+    for value in selected_raw or []:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if trimmed and trimmed not in selected_calendar_ids:
+            selected_calendar_ids.append(trimmed)
+    return selected_calendar_ids
+
+
+def _persist_dailyflow_calendar_id(user_id: str, calendar_id: str, selected_calendar_ids: List[str]) -> None:
+    selected_next = list(selected_calendar_ids)
+    if calendar_id not in selected_next:
+        selected_next.append(calendar_id)
+    _integrations_table().update_item(
+        Key={"user_id": user_id},
+        UpdateExpression=(
+            "SET dailyflow_calendar_id = :calendar_id, "
+            "selected_calendar_ids = :selected_calendar_ids, "
+            "updated_at = :updated_at"
+        ),
+        ExpressionAttributeValues={
+            ":calendar_id": calendar_id,
+            ":selected_calendar_ids": selected_next,
+            ":updated_at": iso_utc_now(),
+        },
+    )
+
+
+def _dailyflow_calendar_id_from_list_payload(payload: Dict[str, Any]) -> str:
+    items = payload.get("items") if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        return ""
+    matching_ids: List[str] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        calendar_id = entry.get("id")
+        summary = entry.get("summary")
+        if not isinstance(calendar_id, str) or not calendar_id.strip():
+            continue
+        if isinstance(summary, str) and summary.strip() == DAILYFLOW_CALENDAR_SUMMARY:
+            matching_ids.append(calendar_id.strip())
+    if not matching_ids:
+        return ""
+    matching_ids.sort()
+    return matching_ids[0]
+
+
+def _ensure_dailyflow_calendar(
+    user_id: str, item: Dict[str, Any], connection: Dict[str, Any], debug_flags: Optional[Dict[str, bool]] = None
+) -> str:
+    selected_calendar_ids = _selected_calendar_ids_from_sources(item, connection)
+    calendar_list_payload = _google_request_json_with_refresh(
+        user_id=user_id,
+        connection=connection,
+        method="GET",
+        url=GOOGLE_CALENDAR_LIST_URL,
+        debug_flags=debug_flags,
+    )
+    stored_calendar_id = str(connection.get("dailyflow_calendar_id", "")).strip()
+    if not stored_calendar_id:
+        stored_calendar_id = str(connection.get("dailyflowCalendarId", "")).strip()
+    if stored_calendar_id:
+        check_url = GOOGLE_CALENDAR_URL_TEMPLATE.format(calendar_id=quote(stored_calendar_id, safe=""))
+        try:
+            _google_request_json_with_refresh(
+                user_id=user_id,
+                connection=connection,
+                method="GET",
+                url=check_url,
+                debug_flags=debug_flags,
+            )
+            _persist_dailyflow_calendar_id(user_id, stored_calendar_id, selected_calendar_ids)
+            connection["selected_calendar_ids"] = (
+                selected_calendar_ids
+                if stored_calendar_id in selected_calendar_ids
+                else [*selected_calendar_ids, stored_calendar_id]
+            )
+            return stored_calendar_id
+        except HTTPError as err:
+            if err.code != 404:
+                raise
+    existing_id = _dailyflow_calendar_id_from_list_payload(calendar_list_payload)
+    if existing_id:
+        _persist_dailyflow_calendar_id(user_id, existing_id, selected_calendar_ids)
+        connection["dailyflow_calendar_id"] = existing_id
+        connection["dailyflowCalendarId"] = existing_id
+        connection["selected_calendar_ids"] = (
+            selected_calendar_ids if existing_id in selected_calendar_ids else [*selected_calendar_ids, existing_id]
+        )
+        return existing_id
+    created = _google_request_json_with_refresh(
+        user_id=user_id,
+        connection=connection,
+        method="POST",
+        url=GOOGLE_CALENDAR_CREATE_URL,
+        body={"summary": DAILYFLOW_CALENDAR_SUMMARY, "timeZone": APP_TIMEZONE_ID},
+        debug_flags=debug_flags,
+    )
+    created_id = str(created.get("id", "")).strip()
+    if not created_id:
+        raise ValueError("Failed to create DailyFlow Google calendar.")
+    _persist_dailyflow_calendar_id(user_id, created_id, selected_calendar_ids)
+    connection["dailyflow_calendar_id"] = created_id
+    connection["dailyflowCalendarId"] = created_id
+    connection["selected_calendar_ids"] = (
+        selected_calendar_ids if created_id in selected_calendar_ids else [*selected_calendar_ids, created_id]
+    )
+    return created_id
+
+
+def _format_google_event_datetime(date_iso: str, hhmm: str) -> str:
+    return f"{date_iso}T{hhmm}:00"
+
+
+def _build_break_event_payload(plan_item: Dict[str, Any]) -> Dict[str, Any]:
+    title = str(plan_item.get("title", "")).strip() or "Break"
+    category_label = str(plan_item.get("category_label", "")).strip() or str(plan_item.get("category", "")).strip()
+    kind = str(plan_item.get("kind", "")).strip()
+    duration_minutes = to_int(plan_item.get("duration_minutes"), 0)
+    summary_short = str(plan_item.get("summary_short", "")).strip()
+    details: List[str] = []
+    if category_label:
+        details.append(f"Category: {category_label}")
+    if kind:
+        details.append(f"Type: {kind}")
+    if duration_minutes > 0:
+        details.append(f"Duration: {duration_minutes} min")
+    if summary_short:
+        details.append(summary_short)
+    description = "\n".join(details) if details else "Planned in DailyFlow."
+    return {
+        "summary": title,
+        "description": description,
+        "start": {
+            "dateTime": _format_google_event_datetime(
+                str(plan_item.get("recommended_day", "")).strip(),
+                str(plan_item.get("recommended_start_time", "")).strip(),
+            ),
+            "timeZone": APP_TIMEZONE_ID,
+        },
+        "end": {
+            "dateTime": _format_google_event_datetime(
+                str(plan_item.get("recommended_day", "")).strip(),
+                str(plan_item.get("recommended_end_time", "")).strip(),
+            ),
+            "timeZone": APP_TIMEZONE_ID,
+        },
+    }
+
+
+def _persist_dailyflow_event_row(
+    *,
+    user_id: str,
+    plan_id: str,
+    library_activity_id: str,
+    recommended_day: str,
+    dailyflow_calendar_id: str,
+    google_event_id: str,
+) -> None:
+    try:
+        _dailyflow_events_table().put_item(
+            Item={
+                "user_id": user_id,
+                "plan_id": _stress_events_plan_id(plan_id),
+                "library_activity_id": library_activity_id,
+                "recommended_day": recommended_day,
+                "dailyflow_calendar_id": dailyflow_calendar_id,
+                "google_event_id": google_event_id,
+                "source": "stress_breaks",
+                "updated_at": iso_utc_now(),
+            }
+        )
+    except Exception:
+        # Keep scheduling flow resilient if the optional mapping table isn't fully wired yet.
+        return
+
+
+def _delete_dailyflow_event_row(*, user_id: str, plan_id: str) -> None:
+    try:
+        _dailyflow_events_table().delete_item(Key={"user_id": user_id, "plan_id": _stress_events_plan_id(plan_id)})
+    except Exception:
+        return
+
+
+def _mark_busy_blocks_stale(user_id: str) -> None:
+    try:
+        _integrations_table().update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET last_busy_sync_at = :last_busy_sync_at, updated_at = :updated_at",
+            ExpressionAttributeValues={
+                ":last_busy_sync_at": "",
+                ":updated_at": iso_utc_now(),
+            },
+        )
+    except Exception:
+        return
 
 
 def _library_payload(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -427,9 +848,42 @@ def _handle_remove_plan_item(user_id: str, payload: Dict[str, Any]) -> Dict[str,
         return _json_response(503, {"message": "Could not update weekly break plan. Try again shortly."})
 
     weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    plan_item = next((entry for entry in weekly_plan if str(entry.get("id", "")).strip() == plan_id), None)
     filtered = [entry for entry in weekly_plan if str(entry.get("id", "")).strip() != plan_id]
     if len(filtered) == len(weekly_plan):
         return _json_response(404, {"message": "Weekly plan item not found."})
+
+    existing_event_id = str((plan_item or {}).get("google_event_id", "")).strip()
+    existing_calendar_id = str((plan_item or {}).get("dailyflow_calendar_id", "")).strip()
+    if existing_event_id and existing_calendar_id:
+        stored_connection = _fetch_google_connection(user_id)
+        if stored_connection:
+            _, connection = stored_connection
+            delete_url = (
+                f"{GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE.format(calendar_id=quote(existing_calendar_id, safe=''))}"
+                f"/{quote(existing_event_id, safe='')}"
+            )
+            try:
+                _google_request_no_content_with_refresh(
+                    user_id=user_id,
+                    connection=connection,
+                    method="DELETE",
+                    url=delete_url,
+                )
+            except HTTPError as err:
+                if err.code != 404:
+                    if err.code == 401:
+                        return _json_response(403, {"message": "Google connection expired, reconnect required"})
+                    return _json_response(
+                        502,
+                        {"message": f"Google Calendar API request failed with status {err.code}."},
+                    )
+            except PermissionError as err:
+                return _json_response(403, {"message": str(err)})
+            except (URLError, TimeoutError):
+                return _json_response(502, {"message": "Failed to reach Google Calendar API."})
+            except Exception:
+                return _json_response(500, {"message": "Unexpected error while deleting break calendar event."})
 
     try:
         updated_at = _persist_weekly_plan(
@@ -442,6 +896,8 @@ def _handle_remove_plan_item(user_id: str, payload: Dict[str, Any]) -> Dict[str,
         print(f"[stress-activities] remove save failed: {err}")
         return _json_response(503, {"message": "Could not update weekly break plan. Try again shortly."})
 
+    _delete_dailyflow_event_row(user_id=user_id, plan_id=plan_id)
+    _mark_busy_blocks_stale(user_id)
     return _json_response(
         200,
         {
@@ -449,6 +905,147 @@ def _handle_remove_plan_item(user_id: str, payload: Dict[str, Any]) -> Dict[str,
             "week_start": week_start,
             "week_end": week_end,
             "updated_at": updated_at,
+        },
+    )
+
+
+def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Mirror workouts/weekly_plan_update.py _handle_add_plan_item_to_calendar for break plan items."""
+    week_start = str(payload.get("week_start", "")).strip()
+    week_end = str(payload.get("week_end", "")).strip()
+    plan_id = str(payload.get("plan_id", "")).strip()
+    if not week_start or not week_end or not plan_id:
+        return _json_response(400, {"message": "week_start, week_end and plan_id are required."})
+
+    try:
+        item = load_library_item(user_id)
+    except ValueError as err:
+        return _json_response(500, {"message": str(err)})
+    except Exception as err:
+        print(f"[stress-activities] add_to_calendar load failed: {err}")
+        return _json_response(503, {"message": "Could not update weekly break plan. Try again shortly."})
+
+    weekly_plan = normalize_weekly_break_plan(item.get("current_week_plan"))
+    plan_item = next((entry for entry in weekly_plan if str(entry.get("id", "")).strip() == plan_id), None)
+    if not plan_item:
+        return _json_response(404, {"message": "Weekly plan item not found."})
+    recommended_day = str(plan_item.get("recommended_day", "")).strip()
+    if recommended_day < week_start or recommended_day > week_end:
+        return _json_response(400, {"message": "Selected plan item is outside the visible week."})
+
+    existing_event_id = str(plan_item.get("google_event_id", "")).strip()
+    existing_calendar_id = str(plan_item.get("dailyflow_calendar_id", "")).strip()
+    if existing_event_id and existing_calendar_id:
+        return _json_response(
+            200,
+            {
+                "weekly_break_plan": weekly_plan,
+                "already_scheduled": True,
+                "google_event_id": existing_event_id,
+                "dailyflow_calendar_id": existing_calendar_id,
+                "message": "Activity already added to DailyFlow calendar.",
+            },
+        )
+
+    stored_connection = _fetch_google_connection(user_id)
+    debug_flags: Dict[str, bool] = {
+        "google_integration_found": bool(stored_connection),
+        "access_token_refresh_attempted": False,
+        "access_token_refresh_success": False,
+        "google_calendar_create_retry": False,
+        "reconnect_required": False,
+    }
+    print(f"[stress-activities-debug] google_integration_found={debug_flags['google_integration_found']}")
+    if not stored_connection:
+        return _json_response(404, {"message": "Google Calendar is not connected for this user."})
+    integrations_item, connection = stored_connection
+
+    try:
+        dailyflow_calendar_id = _ensure_dailyflow_calendar(user_id, integrations_item, connection, debug_flags)
+        create_event_url = GOOGLE_CALENDAR_EVENTS_URL_TEMPLATE.format(
+            calendar_id=quote(dailyflow_calendar_id, safe="")
+        )
+        created_event = _google_request_json_with_refresh(
+            user_id=user_id,
+            connection=connection,
+            method="POST",
+            url=create_event_url,
+            body=_build_break_event_payload(plan_item),
+            debug_flags=debug_flags,
+        )
+        created_event_id = str(created_event.get("id", "")).strip()
+        if not created_event_id:
+            return _json_response(502, {"message": "Google Calendar event creation failed."})
+    except PermissionError:
+        debug_flags["reconnect_required"] = True
+        print(
+            "[stress-activities-debug] "
+            f"access_token_refresh_attempted={debug_flags['access_token_refresh_attempted']} "
+            f"access_token_refresh_success={debug_flags['access_token_refresh_success']} "
+            f"google_calendar_create_retry={debug_flags['google_calendar_create_retry']} "
+            f"reconnect_required={debug_flags['reconnect_required']}"
+        )
+        return _reconnect_required_response()
+    except HTTPError as err:
+        return _json_response(
+            502,
+            {"message": f"Google Calendar API request failed with status {err.code}."},
+        )
+    except (URLError, TimeoutError):
+        return _json_response(502, {"message": "Failed to reach Google Calendar API."})
+    except ValueError as err:
+        return _json_response(500, {"message": str(err)})
+    except Exception:
+        return _json_response(500, {"message": "Unexpected error while creating break calendar event."})
+
+    print(
+        "[stress-activities-debug] "
+        f"access_token_refresh_attempted={debug_flags['access_token_refresh_attempted']} "
+        f"access_token_refresh_success={debug_flags['access_token_refresh_success']} "
+        f"google_calendar_create_retry={debug_flags['google_calendar_create_retry']} "
+        f"reconnect_required={debug_flags['reconnect_required']}"
+    )
+
+    updated_weekly_plan: List[Dict[str, Any]] = []
+    for entry in weekly_plan:
+        if str(entry.get("id", "")).strip() == plan_id:
+            updated_entry = dict(entry)
+            updated_entry["google_event_id"] = created_event_id
+            updated_entry["dailyflow_calendar_id"] = dailyflow_calendar_id
+            updated_weekly_plan.append(updated_entry)
+        else:
+            updated_weekly_plan.append(entry)
+
+    try:
+        updated_at = _persist_weekly_plan(
+            user_id=user_id,
+            week_start=week_start,
+            week_end=week_end,
+            weekly_plan=updated_weekly_plan,
+        )
+    except Exception as err:
+        print(f"[stress-activities] add_to_calendar save failed: {err}")
+        return _json_response(503, {"message": "Could not update weekly break plan. Try again shortly."})
+
+    _persist_dailyflow_event_row(
+        user_id=user_id,
+        plan_id=plan_id,
+        library_activity_id=str(plan_item.get("library_activity_id", "")).strip(),
+        recommended_day=recommended_day,
+        dailyflow_calendar_id=dailyflow_calendar_id,
+        google_event_id=created_event_id,
+    )
+    _mark_busy_blocks_stale(user_id)
+    return _json_response(
+        200,
+        {
+            "weekly_break_plan": updated_weekly_plan,
+            "week_start": week_start,
+            "week_end": week_end,
+            "updated_at": updated_at,
+            "already_scheduled": False,
+            "google_event_id": created_event_id,
+            "dailyflow_calendar_id": dailyflow_calendar_id,
         },
     )
 
@@ -466,9 +1063,16 @@ def _handle_patch(user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
         return _handle_add_library_activity(user_id, payload)
     if action == "remove_plan_item":
         return _handle_remove_plan_item(user_id, payload)
+    if action == "add_to_calendar":
+        return _handle_add_to_calendar(user_id, payload)
     return _json_response(
         400,
-        {"message": "Unknown action. Use toggle_favorite, add_library_activity, or remove_plan_item."},
+        {
+            "message": (
+                "Unknown action. Use toggle_favorite, add_library_activity, "
+                "remove_plan_item, or add_to_calendar."
+            )
+        },
     )
 
 
