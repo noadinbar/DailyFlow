@@ -1305,10 +1305,10 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
           </div>
         </header>
 
-        {mealsApiError && <div className="df-errorText" style={{ padding: '8px 16px 0' }}>{mealsApiError}</div>}
+        {mealsApiError && <div className="df-errorText df-screenStatus">{mealsApiError}</div>}
         {(googleCalendarStatus === 'reconnect_required' ||
           googleCalendarStatus === 'not_connected') && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
+          <div className="df-calendarLegend df-screenStatus df-legendWarn" role="alert">
             {googleCalendarStatus === 'not_connected'
               ? 'Connect Google Calendar to add meals to your calendar.'
               : googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
@@ -1470,12 +1470,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   ))}
                 </div>
                 {mealLibrary.length > 0 && filteredMealLibrary.length === 0 && (
-                  <div className="df-calendarLegend" style={{ marginTop: 10, color: '#6b7280' }}>
+                  <div className="df-calendarLegend df-emptyHint" style={{ marginTop: 10 }}>
                     No meals match these filters.
                   </div>
                 )}
                 {mealLibrary.length === 0 && (
-                  <div className="df-calendarLegend" style={{ marginTop: 10, color: '#6b7280' }}>
+                  <div className="df-calendarLegend df-emptyHint" style={{ marginTop: 10 }}>
                     No meals in your library yet. Tap Generate to create one.
                   </div>
                 )}
@@ -1518,7 +1518,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         }}
                         aria-label={`Open details for ${savedMeal.meal_name}`}
                       >
-                        <h3 className="df-workoutLibraryTitle" style={{ fontSize: 18 }}>
+                        <h3 className="df-workoutLibraryTitle">
                           {savedMeal.meal_name}
                         </h3>
                         <div className="df-workoutMeta">{formatDateTime(savedMeal.date, savedMeal.start_time)}</div>
@@ -1562,7 +1562,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   </article>
                 ))}
                 {savedMeals.length === 0 && (
-                  <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  <div className="df-calendarLegend df-emptyHint">
                     No meals saved yet. Use &quot;Add to calendar&quot; on a library meal to schedule one.
                   </div>
                 )}
@@ -1607,7 +1607,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
               <div id="grocery-section" className="df-mealsGroceryWrap">
                 {Array.from(groceryItemsByCategory.entries()).map(([category, items]) => (
                   <article key={category} className="df-calendarsList">
-                    <h2 style={{ marginBottom: 8 }}>{category}</h2>
+                    <h2>{category}</h2>
                     <div className="df-checkboxList">
                       {items.map((item) => (
                         <label key={item.key} className="df-checkboxItem">
@@ -1623,7 +1623,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   </article>
                 ))}
                 {groceryItemsByCategory.size === 0 && (
-                  <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  <div className="df-calendarLegend df-emptyHint">
                     Grocery list will populate from Saved Meals This Week.
                   </div>
                 )}
@@ -1672,7 +1672,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 ✕
               </button>
             </div>
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 12 }}>
+            <div className="df-settingsContent df-modalBody">
               <div className="df-workoutMeta">
                 <strong>{addMealSource.title}</strong> · {addMealSource.prep_time_minutes} min prep
               </div>
@@ -1787,7 +1787,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   </span>
                 ))}
               </div>
-              <div className="df-mealLibraryMetaRow" style={{ marginTop: 8 }}>
+              <div className="df-mealLibraryMetaRow">
                 <span className="df-mealLibraryMetaItem">
                   <span className="df-inlineIcon" aria-hidden>
                     <ClockIcon size={14} />
@@ -1824,7 +1824,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                   </ol>
                 </>
               ) : null}
-              <div className="df-weeklyPlanActions" style={{ marginTop: 16 }}>
+              <div className="df-weeklyPlanActions">
                 <button
                   type="button"
                   className="df-weeklyPlanActionBtn"

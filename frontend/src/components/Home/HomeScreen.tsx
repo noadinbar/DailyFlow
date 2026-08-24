@@ -1091,7 +1091,7 @@ export default function HomeScreen(props: HomeScreenProps) {
               </div>
             )}
             {!isSyncingBusyBlocks && busyBlocksError && (
-              <div className="df-calendarLegend" style={{ padding: '0 12px 10px', color: '#b91c1c' }} role="alert">
+              <div className="df-calendarLegend df-legendError" style={{ padding: '0 12px 10px' }} role="alert">
                 {busyBlocksError}
               </div>
             )}
@@ -1206,27 +1206,27 @@ export default function HomeScreen(props: HomeScreenProps) {
                 )}
               </div>
               {calendarSidebarState === 'checking' && (
-                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                <div className="df-calendarLegend df-legendMuted">
                   Checking Google Calendar connection...
                 </div>
               )}
               {calendarSidebarState === 'not_connected' && (
-                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                <div className="df-calendarLegend df-legendMuted">
                   Connect Google Calendar to load your calendar list.
                 </div>
               )}
               {calendarSidebarState === 'reconnect_required' && (
-                <div className="df-calendarLegend" style={{ color: '#b45309' }} role="alert">
+                <div className="df-calendarLegend df-legendWarn" role="alert">
                   {calendarsListError || GOOGLE_RECONNECT_MESSAGE_NEW}
                 </div>
               )}
               {calendarSidebarState === 'error' && (
-                <div className="df-calendarLegend" style={{ color: '#b91c1c' }} role="alert">
+                <div className="df-calendarLegend df-legendError" role="alert">
                   {calendarsListError}
                 </div>
               )}
               {calendarSidebarState === 'ready' && googleCalendars.length === 0 && (
-                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                <div className="df-calendarLegend df-legendMuted">
                   No calendars returned for this account.
                 </div>
               )}
@@ -1234,7 +1234,7 @@ export default function HomeScreen(props: HomeScreenProps) {
                 !isEditingCalendars &&
                 googleCalendars.length > 0 &&
                 visibleCalendars.length === 0 && (
-                  <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                  <div className="df-calendarLegend df-legendMuted">
                     No calendars are currently selected. Use Edit calendars to choose which calendars to show.
                   </div>
                 )}

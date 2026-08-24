@@ -71,7 +71,7 @@ export default function ActivityLibrarySection(props: ActivityLibrarySectionProp
 
   return (
     <section className="df-workoutsSection" aria-label="Activity Library">
-      <div className="df-workoutsSectionHeader" style={{ alignItems: 'center', gap: 12 }}>
+      <div className="df-workoutsSectionHeader">
         <h2 className="df-workoutsTitle">Activity Library</h2>
         <button
           type="button"

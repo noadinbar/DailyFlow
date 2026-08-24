@@ -1040,24 +1040,24 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           </div>
         </header>
 
-        {generateError && <div className="df-errorText" style={{ padding: '6px 16px 0' }}>{generateError}</div>}
+        {generateError && <div className="df-errorText df-screenStatus">{generateError}</div>}
         {googleCalendarStatus === 'reconnect_required' && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
+          <div className="df-calendarLegend df-screenStatus df-legendWarn" role="alert">
             {googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
           </div>
         )}
         {googleCalendarStatus === 'not_connected' && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#6b7280' }}>
+          <div className="df-calendarLegend df-screenStatus df-legendMuted">
             Connect Google Calendar to add workouts directly from Workouts.
           </div>
         )}
         {googleCalendarStatus === 'error' && googleCalendarStatusMessage && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b91c1c' }} role="alert">
+          <div className="df-calendarLegend df-screenStatus df-legendError" role="alert">
             {googleCalendarStatusMessage}
           </div>
         )}
         {!generateError && generateHint && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#6b7280' }}>
+          <div className="df-calendarLegend df-screenStatus df-legendMuted">
             {generateHint}
           </div>
         )}
@@ -1180,7 +1180,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               })}
             </div>
             {!isGeneratingPlan && weeklyPlanSuggestions.length === 0 && (
-              <div className="df-calendarLegend" style={{ color: '#6b7280', marginBottom: 0 }}>
+              <div className="df-calendarLegend df-emptyHint">
                 Generate a plan to see weekly workout suggestions.
               </div>
             )}
@@ -1310,7 +1310,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               ))}
             </div>
             {!isGeneratingPlan && displayedLibrary.length === 0 && (
-              <div className="df-calendarLegend" style={{ color: '#6b7280', marginBottom: 0 }}>
+              <div className="df-calendarLegend df-emptyHint">
                 {isFavoritesMode
                   ? 'No favorite workouts match the current filters.'
                   : 'No workouts match the current filters.'}
@@ -1365,7 +1365,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               </button>
             </div>
 
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
+            <div className="df-settingsContent df-modalBody">
               {selectedWeeklyPlanItem && selectedPlanImageUrl && !workoutImageFailed && (
                 <div className="df-workoutPlanImageWrap">
                   <img
@@ -1470,7 +1470,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 ✕
               </button>
             </div>
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 12 }}>
+            <div className="df-settingsContent df-modalBody">
               <div className="df-workoutMeta">
                 {addFromLibraryWorkout.title} · {addFromLibraryWorkout.duration_minutes} min
               </div>
@@ -1514,7 +1514,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 />
               </label>
               {addFromLibraryError && (
-                <div className="df-errorText" style={{ marginTop: -2 }}>{addFromLibraryError}</div>
+                <div className="df-errorText">{addFromLibraryError}</div>
               )}
               <div className="df-weeklyPlanActions">
                 <button
@@ -1559,7 +1559,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 ✕
               </button>
             </div>
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 10, maxHeight: '70vh', overflowY: 'auto' }}>
+            <div className="df-settingsContent df-modalBody">
               {dayPlanModalSuggestions.map((planItem) => {
                 const planWorkout = libraryById.get(planItem.library_workout_id);
                 const itemCalendarStatus = planCalendarStatusById[planItem.id];
@@ -1641,7 +1641,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 );
               })}
               {dayPlanModalSuggestions.length === 0 && (
-                <div className="df-calendarLegend" style={{ color: '#6b7280' }}>
+                <div className="df-calendarLegend df-emptyHint">
                   No workouts for this day.
                 </div>
               )}

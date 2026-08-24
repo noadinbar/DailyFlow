@@ -1114,32 +1114,32 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
         </header>
 
         {errorMessage ? (
-          <div className="df-errorText" style={{ padding: '8px 16px 0' }} role="alert">
+          <div className="df-errorText df-screenStatus" role="alert">
             {errorMessage}
           </div>
         ) : null}
         {generateError ? (
-          <div className="df-errorText" style={{ padding: '6px 16px 0' }} role="alert">
+          <div className="df-errorText df-screenStatus" role="alert">
             {generateError}
           </div>
         ) : null}
         {weeklyPlanError && !addFromLibraryActivity ? (
-          <div className="df-errorText" style={{ padding: '6px 16px 0' }} role="alert">
+          <div className="df-errorText df-screenStatus" role="alert">
             {weeklyPlanError}
           </div>
         ) : null}
         {googleCalendarStatus === 'reconnect_required' && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b45309' }} role="alert">
+          <div className="df-calendarLegend df-screenStatus df-legendWarn" role="alert">
             {googleCalendarStatusMessage || GOOGLE_RECONNECT_MESSAGE_NEW}
           </div>
         )}
         {googleCalendarStatus === 'not_connected' && questionnaireCompleted && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#6b7280' }}>
+          <div className="df-calendarLegend df-screenStatus df-legendMuted">
             Connect Google Calendar to add breaks directly from Stress &amp; Breaks.
           </div>
         )}
         {googleCalendarStatus === 'error' && googleCalendarStatusMessage && (
-          <div className="df-calendarLegend" style={{ padding: '6px 16px 0', color: '#b91c1c' }} role="alert">
+          <div className="df-calendarLegend df-screenStatus df-legendError" role="alert">
             {googleCalendarStatusMessage}
           </div>
         )}
@@ -1314,7 +1314,7 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
                 ✕
               </button>
             </div>
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
+            <div className="df-settingsContent df-modalBody">
               <div>
                 <span
                   className="df-workoutTypePill"

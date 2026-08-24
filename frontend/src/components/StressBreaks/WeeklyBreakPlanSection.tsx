@@ -164,7 +164,7 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                     </button>
                   </div>
                   {itemCalendarStatus?.state === 'error' && itemCalendarStatus.message ? (
-                    <div className="df-errorText" style={{ marginTop: 4, fontSize: 12 }}>
+                    <div className="df-errorText" style={{ marginTop: 4 }}>
                       {itemCalendarStatus.message}
                     </div>
                   ) : null}
@@ -208,7 +208,7 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                 ✕
               </button>
             </div>
-            <div className="df-settingsContent" style={{ display: 'grid', gap: 10, maxHeight: '70vh', overflowY: 'auto' }}>
+            <div className="df-settingsContent df-modalBody">
               {dayModalItems.map((planItem) => {
                 const itemCalendarStatus = planCalendarStatusById[planItem.id];
                 const isItemAddLoading = itemCalendarStatus?.state === 'loading';
@@ -257,7 +257,7 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
                     {planItem.recommended_end_time}
                   </div>
                   {itemCalendarStatus?.state === 'error' && itemCalendarStatus.message ? (
-                    <div className="df-errorText" style={{ fontSize: 12 }}>
+                    <div className="df-errorText">
                       {itemCalendarStatus.message}
                     </div>
                   ) : null}
@@ -339,7 +339,7 @@ export function AddToWeeklyPlanModal(props: AddToWeeklyPlanModalProps) {
             ✕
           </button>
         </div>
-        <div className="df-settingsContent" style={{ display: 'grid', gap: 12 }}>
+        <div className="df-settingsContent df-modalBody">
           <div className="df-workoutMeta">
             {activity.title} · {durationLabel}
           </div>
