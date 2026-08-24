@@ -30,6 +30,7 @@ type WeeklyPlanSuggestion = {
   reason_short: string;
   google_event_id?: string;
   dailyflow_calendar_id?: string;
+  workout_image_url?: string;
 };
 
 type WorkoutLibraryItem = {
@@ -191,6 +192,24 @@ function sanitizeHHmmTyping(raw: string): string {
   return `${digits.slice(0, 2)}:${digits.slice(2)}`;
 }
 
+function planWorkoutImageUrl(item: WeeklyPlanSuggestion | null | undefined): string {
+  const url = typeof item?.workout_image_url === 'string' ? item.workout_image_url.trim() : '';
+  if (url.startsWith('https://') || url.startsWith('http://')) return url;
+  return '';
+}
+
+function mergeWeeklyPlanImageUrls(
+  incoming: WeeklyPlanSuggestion[],
+  previous: WeeklyPlanSuggestion[]
+): WeeklyPlanSuggestion[] {
+  const previousById = new Map(previous.map((item) => [item.id, item]));
+  return incoming.map((item) => {
+    if (planWorkoutImageUrl(item)) return item;
+    const priorUrl = planWorkoutImageUrl(previousById.get(item.id));
+    return priorUrl ? { ...item, workout_image_url: priorUrl } : item;
+  });
+}
+
 export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const { username, onLogout } = props;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useSidebarCollapsed();
@@ -220,6 +239,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
   const [generateError, setGenerateError] = React.useState<string>('');
   const [generateHint, setGenerateHint] = React.useState<string>('Click Generate plan to load suggestions.');
   const [selectedLibraryWorkout, setSelectedLibraryWorkout] = React.useState<WorkoutLibraryItem | null>(null);
+  const [selectedWeeklyPlanId, setSelectedWeeklyPlanId] = React.useState<string | null>(null);
+  const [workoutImageFailed, setWorkoutImageFailed] = React.useState<boolean>(false);
+  const weeklyPlanImageRefreshRef = React.useRef<string | null>(null);
   const [dayPlanModal, setDayPlanModal] = React.useState<DayPlanModalState | null>(null);
   const [planCalendarStatusById, setPlanCalendarStatusById] = React.useState<Record<string, PlanCalendarStatus>>({});
 
@@ -314,6 +336,11 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     if (!dayPlanModal) return [];
     return suggestionsByDay.get(dayPlanModal.dayIso) || [];
   }, [dayPlanModal, suggestionsByDay]);
+  const selectedWeeklyPlanItem = React.useMemo(() => {
+    if (!selectedWeeklyPlanId) return null;
+    return weeklyPlanSuggestions.find((item) => item.id === selectedWeeklyPlanId) || null;
+  }, [selectedWeeklyPlanId, weeklyPlanSuggestions]);
+  const selectedPlanImageUrl = planWorkoutImageUrl(selectedWeeklyPlanItem);
 
   async function getAuthToken(): Promise<string> {
     const session = await fetchAuthSession();
@@ -543,11 +570,17 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
   }, []);
 
-  async function loadWorkoutsData(args: { mode: 'saved' | 'generate'; startDate: string; endDate: string }) {
+  async function loadWorkoutsData(
+    args: { mode: 'saved' | 'generate'; startDate: string; endDate: string },
+    options?: { silent?: boolean }
+  ): Promise<WeeklyPlanSuggestion[]> {
     const { mode, startDate, endDate } = args;
-    setGenerateError('');
-    setGenerateHint('');
-    setIsGeneratingPlan(mode === 'generate');
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+      setGenerateError('');
+      setGenerateHint('');
+    }
+    setIsGeneratingPlan(mode === 'generate' && !silent);
     try {
       const token = await getAuthToken();
       const isGenerate = mode === 'generate';
@@ -593,6 +626,9 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       setWeeklyPlanSuggestions(weekly);
       setWorkoutLibrary(library);
       setFavoriteWorkouts(favorites);
+      if (silent) {
+        return weekly;
+      }
       if (weekly.length === 0 && library.length === 0) {
         setGenerateHint('No saved workout library yet. Click Generate plan.');
       } else if (typeof payload.metadata?.generation_warning === 'string' && payload.metadata.generation_warning) {
@@ -602,13 +638,19 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
       } else {
         setGenerateHint('');
       }
+      return weekly;
     } catch (e) {
       const anyErr = e as { message?: string };
-      setGenerateError(
-        typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to generate workout suggestions.'
-      );
+      if (!silent) {
+        setGenerateError(
+          typeof anyErr?.message === 'string' ? anyErr.message : 'Failed to generate workout suggestions.'
+        );
+      }
+      return [];
     } finally {
-      setIsGeneratingPlan(false);
+      if (!silent) {
+        setIsGeneratingPlan(false);
+      }
     }
   }
 
@@ -655,7 +697,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
         ? responsePayload.weekly_plan_suggestions
         : null;
       if (!savedPlan) throw new Error('Weekly plan update returned invalid payload.');
-      setWeeklyPlanSuggestions(savedPlan);
+      setWeeklyPlanSuggestions((prev) => mergeWeeklyPlanImageUrls(savedPlan, prev));
       setPlanCalendarStatusById((prev) => {
         const next: Record<string, PlanCalendarStatus> = {};
         for (const planItem of savedPlan) {
@@ -853,6 +895,34 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
     }
   }
 
+  function closeWorkoutDetails() {
+    setSelectedLibraryWorkout(null);
+    setSelectedWeeklyPlanId(null);
+    setWorkoutImageFailed(false);
+    weeklyPlanImageRefreshRef.current = null;
+  }
+
+  function openLibraryWorkoutDetails(workout: WorkoutLibraryItem) {
+    weeklyPlanImageRefreshRef.current = null;
+    setWorkoutImageFailed(false);
+    setSelectedWeeklyPlanId(null);
+    setSelectedLibraryWorkout(workout);
+  }
+
+  function openWeeklyPlanWorkoutDetails(planItem: WeeklyPlanSuggestion, workout: WorkoutLibraryItem) {
+    setWorkoutImageFailed(false);
+    setSelectedWeeklyPlanId(planItem.id);
+    setSelectedLibraryWorkout(workout);
+    const scheduled = Boolean(planItem.google_event_id && planItem.google_event_id.trim());
+    if (!scheduled || planWorkoutImageUrl(planItem)) return;
+    if (weeklyPlanImageRefreshRef.current === planItem.id) return;
+    weeklyPlanImageRefreshRef.current = planItem.id;
+    void loadWorkoutsData(
+      { mode: 'saved', startDate: weekStartIso, endDate: weekEndIso },
+      { silent: true }
+    );
+  }
+
   function toggleTypeFilter(type: string) {
     setSelectedTypeFilters((prev) =>
       prev.includes(type) ? prev.filter((value) => value !== type) : [...prev, type]
@@ -871,11 +941,15 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setSelectedLibraryWorkout(null);
+      if (event.key === 'Escape') closeWorkoutDetails();
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  React.useEffect(() => {
+    setWorkoutImageFailed(false);
+  }, [selectedPlanImageUrl]);
 
   React.useEffect(() => {
     void (async () => {
@@ -1011,7 +1085,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                     key={card.dateIso}
                     className={`df-workoutDayCard${canOpenWeeklyDetails ? ' df-workoutLibraryCardClickable' : ''}`}
                     onClick={() => {
-                      if (libraryWorkout) setSelectedLibraryWorkout(libraryWorkout);
+                      if (item && libraryWorkout) openWeeklyPlanWorkoutDetails(item, libraryWorkout);
                     }}
                     role={canOpenWeeklyDetails ? 'button' : undefined}
                     tabIndex={canOpenWeeklyDetails ? 0 : undefined}
@@ -1019,7 +1093,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                       if (!canOpenWeeklyDetails) return;
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        if (libraryWorkout) setSelectedLibraryWorkout(libraryWorkout);
+                        if (item && libraryWorkout) openWeeklyPlanWorkoutDetails(item, libraryWorkout);
                       }
                     }}
                     aria-label={
@@ -1170,13 +1244,13 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 <article
                   key={item.id}
                   className="df-workoutLibraryCard df-workoutLibraryCardClickable"
-                  onClick={() => setSelectedLibraryWorkout(item)}
+                  onClick={() => openLibraryWorkoutDetails(item)}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
-                      setSelectedLibraryWorkout(item);
+                      openLibraryWorkoutDetails(item);
                     }
                   }}
                   aria-label={`Open details for ${item.title}`}
@@ -1275,7 +1349,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
           className="df-modalBackdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setSelectedLibraryWorkout(null);
+            if (event.target === event.currentTarget) closeWorkoutDetails();
           }}
         >
           <div className="df-modalPanel" role="dialog" aria-modal="true" aria-label="Workout details">
@@ -1284,7 +1358,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               <button
                 type="button"
                 className="df-iconBtn"
-                onClick={() => setSelectedLibraryWorkout(null)}
+                onClick={closeWorkoutDetails}
                 aria-label="Close workout details"
               >
                 ✕
@@ -1292,6 +1366,22 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
             </div>
 
             <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
+              {selectedWeeklyPlanItem && selectedPlanImageUrl && !workoutImageFailed && (
+                <div style={{ width: '100%', borderRadius: 12, overflow: 'hidden', background: '#f8fafc' }}>
+                  <img
+                    src={selectedPlanImageUrl}
+                    alt=""
+                    onError={() => setWorkoutImageFailed(true)}
+                    style={{
+                      width: '100%',
+                      height: 'auto',
+                      maxHeight: '48vh',
+                      display: 'block',
+                      objectFit: 'contain',
+                    }}
+                  />
+                </div>
+              )}
               <div
                 className="df-workoutTypePill"
                 style={pastelTagStyle(selectedLibraryWorkout.workout_type)}
@@ -1483,7 +1573,26 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 const isItemAdded =
                   Boolean(planItem.google_event_id) || itemCalendarStatus?.state === 'success';
                 return (
-                  <article key={planItem.id} className="df-workoutLibraryCard">
+                  <article
+                    key={planItem.id}
+                    className="df-workoutLibraryCard df-workoutLibraryCardClickable"
+                    onClick={() => {
+                      if (planWorkout) {
+                        setDayPlanModal(null);
+                        openWeeklyPlanWorkoutDetails(planItem, planWorkout);
+                      }
+                    }}
+                    role={planWorkout ? 'button' : undefined}
+                    tabIndex={planWorkout ? 0 : undefined}
+                    onKeyDown={(event) => {
+                      if (!planWorkout) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setDayPlanModal(null);
+                        openWeeklyPlanWorkoutDetails(planItem, planWorkout);
+                      }
+                    }}
+                  >
                     <div className="df-workoutLibraryCardTop">
                       <h3 className="df-workoutLibraryTitle">{planWorkout?.title || 'Workout'}</h3>
                       <div className="df-weeklyPlanControls">
@@ -1493,7 +1602,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                           title="Add to calendar"
                           aria-label="Add to calendar"
                           disabled={isItemAddLoading || isItemAdded}
-                          onClick={() => void handleAddToCalendar(planItem.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleAddToCalendar(planItem.id);
+                          }}
                         >
                           {isItemAddLoading ? '…' : isItemAdded ? '✓' : '+'}
                         </button>
@@ -1501,7 +1613,10 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                           type="button"
                           className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
                           disabled={isSavingWeeklyPlan}
-                          onClick={() => void handleRemoveWeeklyWorkout(planItem.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleRemoveWeeklyWorkout(planItem.id);
+                          }}
                           aria-label={`Remove ${planWorkout?.title || 'workout'} from weekly plan`}
                           title="Remove"
                         >

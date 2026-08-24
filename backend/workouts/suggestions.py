@@ -90,6 +90,11 @@ def _lambda_client():
     return boto3.client("lambda", region_name=region) if region else boto3.client("lambda")
 
 
+def _s3_client():
+    region = os.getenv("AWS_REGION")
+    return boto3.client("s3", region_name=region) if region else boto3.client("s3")
+
+
 def _scheduled_keep_plan_ids(weekly_plan: List[Dict[str, Any]]) -> List[str]:
     keep: List[str] = []
     for item in weekly_plan:
@@ -573,6 +578,37 @@ def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
     return cleaned
 
 
+def _workout_image_presigned_url(*, user_id: str, object_key: str) -> str:
+    bucket = os.getenv("WORKOUT_IMAGES_BUCKET", "").strip()
+    if not bucket:
+        raise ValueError("Missing WORKOUT_IMAGES_BUCKET env var.")
+    expected_prefix = f"users/{user_id}/workout-image/"
+    if not object_key.startswith(expected_prefix) or ".." in object_key:
+        raise ValueError("workout_image_key is outside the user workout-image prefix.")
+    return _s3_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": object_key},
+        ExpiresIn=3600,
+    )
+
+
+def _attach_workout_image_urls(user_id: str, weekly_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    attached: List[Dict[str, Any]] = []
+    for item in weekly_plan:
+        next_item = dict(item)
+        image_key = str(next_item.get("workout_image_key", "")).strip()
+        if image_key:
+            try:
+                next_item["workout_image_url"] = _workout_image_presigned_url(
+                    user_id=user_id, object_key=image_key
+                )
+            except Exception as err:
+                plan_id = str(next_item.get("id", "")).strip() or "-"
+                print(f"[workouts-suggestions-debug] workout image url failed plan_id={plan_id}: {err}")
+        attached.append(next_item)
+    return attached
+
+
 def _library_signature(workout_library: List[Dict[str, Any]]) -> str:
     normalized = []
     for item in workout_library:
@@ -794,12 +830,18 @@ def _response_payload(
     weekly_plan_suggestions: List[Dict[str, Any]],
     generated_at: str,
     library_source: str,
+    user_id: str = "",
 ) -> Dict[str, Any]:
+    weekly = (
+        _attach_workout_image_urls(user_id, weekly_plan_suggestions)
+        if user_id
+        else list(weekly_plan_suggestions)
+    )
     return {
         "period": period,
         "workout_library": workout_library,
         "favorite_workouts": favorite_workouts,
-        "weekly_plan_suggestions": weekly_plan_suggestions,
+        "weekly_plan_suggestions": weekly,
         "metadata": {
             "generated_at": generated_at or _iso_utc_now(),
             "library_source": library_source,
@@ -840,6 +882,7 @@ def _handle_common_weekly_derivation(
         weekly_plan_suggestions=weekly_plan,
         generated_at=generated_at,
         library_source=library_source,
+        user_id=user_id,
     )
 
 
@@ -879,6 +922,7 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 weekly_plan_suggestions=[],
                 generated_at=generated_at,
                 library_source="saved",
+                user_id=user_id,
             )
             return _json_response(200, payload)
 
@@ -913,6 +957,7 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 weekly_plan_suggestions=saved_weekly_plan,
                 generated_at=generated_at,
                 library_source="saved",
+                user_id=user_id,
             )
             payload["metadata"]["weekly_plan_source"] = "saved_current_week_plan"
             return _json_response(200, payload)
@@ -941,6 +986,7 @@ def handle_get(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             weekly_plan_suggestions=weekly_plan,
             generated_at=generated_at or plan_updated_at,
             library_source="saved",
+            user_id=user_id,
         )
         payload["metadata"]["weekly_plan_source"] = "derived_and_saved_current_week_plan"
         return _json_response(200, payload)
