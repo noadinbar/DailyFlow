@@ -360,6 +360,13 @@ function mapLegacyGroceryKey(rawKey: string): string {
   return groceryNameKey(raw);
 }
 
+function nameKeyFromGroceryItemKey(rawKey: string): string {
+  const mapped = mapLegacyGroceryKey(rawKey);
+  if (!mapped) return '';
+  const sep = mapped.indexOf('::');
+  return sep === -1 ? mapped : mapped.slice(0, sep);
+}
+
 function remapCheckedGroceryKeys(checked: string[], grocery: GroceryItem[]): string[] {
   const valid = new Set(grocery.map((item) => item.key).filter(Boolean));
   const remapped: string[] = [];
@@ -372,6 +379,47 @@ function remapCheckedGroceryKeys(checked: string[], grocery: GroceryItem[]): str
     }
   }
   return remapped;
+}
+
+function collapseGroceryDisplayByName(items: GroceryItem[]): GroceryItem[] {
+  const map = new Map<string, GroceryItem>();
+  for (const item of items) {
+    const nameKey = groceryNameKey(item.name);
+    if (!nameKey) continue;
+    const category = collapseGroceryWs(item.category || '');
+    const existing = map.get(nameKey);
+    if (!existing) {
+      map.set(nameKey, {
+        key: nameKey,
+        name: sentenceCaseGroceryName(item.name),
+        unit: item.unit,
+        category,
+        quantity: item.quantity,
+      });
+    } else if (!existing.category && category) {
+      existing.category = category;
+    }
+  }
+  return Array.from(map.values()).map((item) => ({
+    ...item,
+    category: item.category || 'Pantry',
+  }));
+}
+
+function resolveSavedMealDetail(savedMeal: SavedMealItem, library: MealLibraryItem[]): MealLibraryItem {
+  const fromLibrary = library.find((meal) => meal.id === savedMeal.meal_id);
+  if (fromLibrary) return fromLibrary;
+  const ingredients = Array.isArray(savedMeal.ingredients) ? savedMeal.ingredients : [];
+  return {
+    id: savedMeal.meal_id || savedMeal.id,
+    title: savedMeal.meal_name,
+    meal_type: 'Dinner',
+    diet_tags: [],
+    prep_time_minutes: savedMeal.prep_time_minutes,
+    short_ingredients_preview: ingredients.map((ing) => ing.name).filter(Boolean).join(', '),
+    base_servings: savedMeal.base_servings,
+    ingredients,
+  };
 }
 
 function groceryFromSavedMeals(savedMeals: SavedMealItem[]): GroceryItem[] {
@@ -783,19 +831,30 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     });
   }, [mealLibrary, selectedMealTypes, selectedDietTags, selectedPrepFilters, showFavoritesOnly, favoriteMealIds]);
 
-  const groceryItemsByCategory = React.useMemo(() => {
-    const flat =
-      groceryListServer.length > 0 || savedMeals.length === 0
-        ? groceryListServer
-        : groceryFromSavedMeals(savedMeals);
-    return groupGroceryFromFlat(flat);
+  const groceryUnitItems = React.useMemo(() => {
+    if (groceryListServer.length > 0 || savedMeals.length === 0) return groceryListServer;
+    return groceryFromSavedMeals(savedMeals);
   }, [groceryListServer, savedMeals]);
 
-  const displayCheckedGroceryKeys = React.useMemo(() => {
-    const flat: GroceryItem[] = [];
-    for (const items of groceryItemsByCategory.values()) flat.push(...items);
-    return remapCheckedGroceryKeys(checkedGroceryKeys, flat);
-  }, [checkedGroceryKeys, groceryItemsByCategory]);
+  const groceryItemsByCategory = React.useMemo(() => {
+    return groupGroceryFromFlat(collapseGroceryDisplayByName(groceryUnitItems));
+  }, [groceryUnitItems]);
+
+  const checkedGroceryNameKeys = React.useMemo(() => {
+    const remapped = remapCheckedGroceryKeys(checkedGroceryKeys, groceryUnitItems);
+    const names = new Set<string>();
+    for (const key of remapped) {
+      const nameKey = nameKeyFromGroceryItemKey(key);
+      if (nameKey) names.add(nameKey);
+    }
+    for (const item of groceryUnitItems) {
+      if (remapped.includes(item.key)) {
+        const nameKey = groceryNameKey(item.name);
+        if (nameKey) names.add(nameKey);
+      }
+    }
+    return names;
+  }, [checkedGroceryKeys, groceryUnitItems]);
 
   const groceryItemTotal = React.useMemo(() => {
     let total = 0;
@@ -813,7 +872,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     const contentLeft = margin;
     const contentRight = pageWidth - margin;
     const contentWidth = contentRight - contentLeft;
-    const checkedSet = new Set(displayCheckedGroceryKeys);
+    const checkedSet = checkedGroceryNameKeys;
 
     const COLOR_HEADER_BG: [number, number, number] = [244, 228, 226];
     const COLOR_HEADER_ACCENT: [number, number, number] = [201, 158, 156];
@@ -1446,9 +1505,27 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 {savedMeals.map((savedMeal) => (
                   <article key={savedMeal.id} className="df-workoutLibraryCard">
                     <div className="df-workoutLibraryCardTop">
-                      <h3 className="df-workoutLibraryTitle" style={{ fontSize: 18 }}>
-                        {savedMeal.meal_name}
-                      </h3>
+                      <div
+                        className="df-mealLibraryCardBody df-savedMealDetailHit"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setMealDetail(resolveSavedMealDetail(savedMeal, mealLibrary))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setMealDetail(resolveSavedMealDetail(savedMeal, mealLibrary));
+                          }
+                        }}
+                        aria-label={`Open details for ${savedMeal.meal_name}`}
+                      >
+                        <h3 className="df-workoutLibraryTitle" style={{ fontSize: 18 }}>
+                          {savedMeal.meal_name}
+                        </h3>
+                        <div className="df-workoutMeta">{formatDateTime(savedMeal.date, savedMeal.start_time)}</div>
+                        <div className="df-workoutMeta">
+                          {savedMeal.start_time} - {savedMeal.end_time} ({savedMeal.prep_time_minutes} min)
+                        </div>
+                      </div>
                       <button
                         type="button"
                         className="df-weeklyPlanControlBtn df-weeklyPlanControlRemove"
@@ -1457,10 +1534,6 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                       >
                         🗑
                       </button>
-                    </div>
-                    <div className="df-workoutMeta">{formatDateTime(savedMeal.date, savedMeal.start_time)}</div>
-                    <div className="df-workoutMeta">
-                      {savedMeal.start_time} - {savedMeal.end_time} ({savedMeal.prep_time_minutes} min)
                     </div>
                     <div className="df-weeklyPlanControls">
                       <span className="df-workoutFilterLabel">Servings</span>
@@ -1540,7 +1613,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         <label key={item.key} className="df-checkboxItem">
                           <input
                             type="checkbox"
-                            checked={displayCheckedGroceryKeys.includes(item.key)}
+                            checked={checkedGroceryNameKeys.has(item.key)}
                             onChange={() => void toggleGroceryChecked(item.key)}
                           />
                           <span>{(item.name && item.name.trim()) || 'Item'}</span>
@@ -1696,12 +1769,14 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
             </div>
             <div className="df-settingsContent df-mealDetailModalBody">
               <div className="df-mealDetailChips">
-                <span
-                  className="df-mealLibraryDietPill"
-                  style={pastelTagStyle(mealDetail.meal_type)}
-                >
-                  {mealDetail.meal_type}
-                </span>
+                {mealLibrary.some((meal) => meal.id === mealDetail.id) ? (
+                  <span
+                    className="df-mealLibraryDietPill"
+                    style={pastelTagStyle(mealDetail.meal_type)}
+                  >
+                    {mealDetail.meal_type}
+                  </span>
+                ) : null}
                 {normalizedMealDietTags(mealDetail.diet_tags).map((tag) => (
                   <span
                     key={`d-${tag}`}

@@ -1215,7 +1215,9 @@ body {
   }
 
   .df-calendarTopbar .df-btn {
-    white-space: nowrap;
+    white-space: normal;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .df-homeCalendar .df-errorText {
@@ -1340,6 +1342,19 @@ body {
 
   .df-workoutPlanImage {
     max-height: min(40vh, 280px);
+  }
+
+  .df-workoutsScreen .df-workoutPlanImageWrap {
+    max-width: 100%;
+    max-height: min(40vh, 280px);
+  }
+
+  .df-workoutsScreen .df-workoutPlanImage {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: min(40vh, 280px);
+    object-fit: contain;
   }
 
   .df-workoutsScreen .df-modalPanel,
@@ -2363,6 +2378,14 @@ select.df-input {
   align-items: center;
 }
 
+.df-savedMealDetailHit {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 2px 8px;
+  gap: 6px;
+}
+
 .df-sectionToggle {
   appearance: none;
   border: 0;
@@ -2991,9 +3014,29 @@ select.df-input {
     max-width: 100%;
   }
 
+  .df-mealsScreen .df-checkboxItem {
+    min-height: 44px;
+  }
+
+  .df-mealsScreen .df-checkboxItem input {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
   .df-mealsScreen .df-checkboxItem span {
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-mealDetailList,
+  .df-mealsScreen .df-mealDetailSummary,
+  .df-mealsScreen .df-savedMealDetailHit {
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-mealDetailModalBody {
+    max-height: min(70dvh, 520px);
   }
 
   .df-mealsScreen .df-modalPanel,
@@ -3019,7 +3062,9 @@ select.df-input {
 @media (max-width: 760px) {
   .df-mealsScreen .df-workoutLibraryGrid,
   .df-stressBreaksPage .df-workoutLibraryGrid,
-  .df-stressBreaksPage .df-workoutWeekGrid {
+  .df-stressBreaksPage .df-workoutWeekGrid,
+  .df-workoutsScreen .df-workoutLibraryGrid,
+  .df-workoutsScreen .df-workoutWeekGrid {
     grid-template-columns: 1fr;
   }
 }

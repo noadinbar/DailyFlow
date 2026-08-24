@@ -264,6 +264,36 @@ def _remap_checked_grocery_keys(checked: List[str], grocery: List[Dict[str, Any]
     return remapped
 
 
+def _grocery_item_name_key(item: Dict[str, Any]) -> str:
+    return _grocery_name_key(str(item.get("name") or ""))
+
+
+def _sync_checked_grocery_keys(checked: List[str], grocery: List[Dict[str, Any]]) -> List[str]:
+    remapped = _remap_checked_grocery_keys(checked, grocery)
+    remapped_set = set(remapped)
+    checked_names = set()
+    for item in grocery:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("key") or "") in remapped_set:
+            checked_names.add(_grocery_item_name_key(item))
+    for key in remapped:
+        if "::" not in key:
+            checked_names.add(key)
+    expanded: List[str] = []
+    seen = set()
+    for item in grocery:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "")
+        if not key or key in seen:
+            continue
+        if _grocery_item_name_key(item) in checked_names:
+            expanded.append(key)
+            seen.add(key)
+    return expanded
+
+
 def _load_records_for_user(user_id: str, week_key: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     table = _meals_table()
     library = table.get_item(Key={"user_id": user_id, "record_key": "LIBRARY#current"}).get("Item") or {}
@@ -373,7 +403,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     saved_meals_this_week = _raw_dict_list(week_item.get("saved_meals_this_week"))
     grocery_list = _aggregate_grocery(saved_meals_this_week)
-    checked_grocery_items = _remap_checked_grocery_keys(
+    checked_grocery_items = _sync_checked_grocery_keys(
         _safe_string_list(week_item.get("checked_grocery_items")),
         grocery_list,
     )

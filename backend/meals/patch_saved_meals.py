@@ -787,14 +787,67 @@ def _remap_checked_grocery_keys(checked: List[str], grocery: List[Dict[str, Any]
     return remapped
 
 
-def _canonical_grocery_key(raw_key: str, grocery: List[Dict[str, Any]]) -> str:
-    valid = {str(item.get("key", "")) for item in grocery if isinstance(item, dict) and item.get("key")}
-    if raw_key in valid:
-        return raw_key
+def _grocery_item_name_key(item: Dict[str, Any]) -> str:
+    return _grocery_name_key(str(item.get("name") or ""))
+
+
+def _name_key_from_grocery_raw(raw_key: str, grocery: List[Dict[str, Any]]) -> str:
+    by_key = {
+        str(item.get("key", "")): item
+        for item in grocery
+        if isinstance(item, dict) and item.get("key")
+    }
+    if raw_key in by_key:
+        return _grocery_item_name_key(by_key[raw_key])
     mapped = _map_legacy_grocery_key(raw_key)
-    if mapped in valid:
-        return mapped
-    return mapped or raw_key
+    if mapped in by_key:
+        return _grocery_item_name_key(by_key[mapped])
+    if "::" in mapped:
+        return mapped.split("::", 1)[0]
+    return mapped
+
+
+def _grocery_keys_for_name(name_key: str, grocery: List[Dict[str, Any]]) -> List[str]:
+    if not name_key:
+        return []
+    keys: List[str] = []
+    seen = set()
+    for item in grocery:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "")
+        if not key or key in seen:
+            continue
+        if _grocery_item_name_key(item) == name_key:
+            keys.append(key)
+            seen.add(key)
+    return keys
+
+
+def _sync_checked_grocery_keys(checked: List[str], grocery: List[Dict[str, Any]]) -> List[str]:
+    remapped = _remap_checked_grocery_keys(checked, grocery)
+    remapped_set = set(remapped)
+    checked_names = set()
+    for item in grocery:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("key") or "") in remapped_set:
+            checked_names.add(_grocery_item_name_key(item))
+    for key in remapped:
+        if "::" not in key:
+            checked_names.add(key)
+    expanded: List[str] = []
+    seen = set()
+    for item in grocery:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "")
+        if not key or key in seen:
+            continue
+        if _grocery_item_name_key(item) in checked_names:
+            expanded.append(key)
+            seen.add(key)
+    return expanded
 
 
 def _build_meal_event_payload(
@@ -985,12 +1038,16 @@ def _handle_toggle_grocery(user_id: str, payload: Dict[str, Any]) -> Dict[str, A
     week = _load_week_item(user_id, week_key)
     saved = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
     grocery = _aggregate_grocery(saved)
-    checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
-    canonical_key = _canonical_grocery_key(key, grocery)
-    if canonical_key in checked:
-        checked = [x for x in checked if x != canonical_key]
-    elif canonical_key in {str(item.get("key", "")) for item in grocery}:
-        checked = [*checked, canonical_key]
+    checked = _sync_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
+    name_key = _name_key_from_grocery_raw(key, grocery)
+    group_keys = _grocery_keys_for_name(name_key, grocery)
+    if group_keys:
+        checked_set = set(checked)
+        if any(item_key in checked_set for item_key in group_keys):
+            drop = set(group_keys)
+            checked = [item_key for item_key in checked if item_key not in drop]
+        else:
+            checked = [*checked, *group_keys]
     updated_at = _save_week_bundle(user_id, week_key, saved, checked, grocery)
     return _json_response(
         200,
@@ -1049,7 +1106,7 @@ def _handle_update_servings(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
     if not found:
         return _json_response(404, {"message": "Saved meal not found."})
     grocery = _aggregate_grocery(next_saved)
-    checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
+    checked = _sync_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
     updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
     return _json_response(
         200,
@@ -1114,7 +1171,7 @@ def _handle_remove_saved_meal(user_id: str, payload: Dict[str, Any]) -> Dict[str
                 return _json_response(500, {"message": "Unexpected error while deleting calendar event."})
     _delete_dailyflow_event_row(user_id=user_id, plan_id=saved_meal_id)
     grocery = _aggregate_grocery(next_saved)
-    checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
+    checked = _sync_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
     updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
     _mark_busy_blocks_stale(user_id)
     return _json_response(
@@ -1274,7 +1331,7 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
         existing = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
         next_saved = [*existing, new_entry]
         grocery = _aggregate_grocery(next_saved)
-        checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
+        checked = _sync_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
         print(f"[meals-saved] add_to_calendar: before DynamoDB week save key={week_key}")
         updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
         print("[meals-saved] add_to_calendar: after DynamoDB week save")
