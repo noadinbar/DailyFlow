@@ -335,10 +335,8 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                   </div>
 
                   <div className="df-settingsRowBody">
-                    <div className="df-field">
-                      <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
-                        Username
-                      </div>
+                    <div className="df-settingsUsernameRow">
+                      <div className="df-fieldLabel">Username</div>
                       <div className="df-settingsReadOnlyValue">{sessionUsername}</div>
                     </div>
 

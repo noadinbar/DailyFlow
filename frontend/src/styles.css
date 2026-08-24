@@ -1245,6 +1245,18 @@ select.df-input {
   color: var(--df-muted);
 }
 
+.df-settingsUsernameRow {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.df-settingsUsernameRow .df-fieldLabel {
+  margin-bottom: 0;
+  text-align: start;
+  flex: 0 0 auto;
+}
+
 .df-settingsReadOnlyValue {
   font-size: 14px;
   line-height: 1.4;
