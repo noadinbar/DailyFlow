@@ -678,6 +678,41 @@ def _find_library_meal(meal_library: List[Dict[str, Any]], meal_id: str) -> Opti
     return None
 
 
+def _collapse_ws(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _grocery_name_key(name: str) -> str:
+    return _collapse_ws(name).casefold()
+
+
+def _grocery_unit_key(unit: str) -> str:
+    cleaned = _collapse_ws(str(unit)).lower()
+    return cleaned or "unit"
+
+
+def _sentence_case_grocery_name(name: str) -> str:
+    collapsed = _collapse_ws(name)
+    if not collapsed:
+        return ""
+    return collapsed[0].upper() + collapsed[1:].lower()
+
+
+def _grocery_merge_key(name: str, unit: str) -> str:
+    return f"{_grocery_name_key(name)}::{_grocery_unit_key(unit)}"
+
+
+def _map_legacy_grocery_key(raw_key: str) -> str:
+    """Map stored keys onto name::unit. Old format was category::name::unit."""
+    raw = _safe_string(raw_key)
+    if not raw:
+        return ""
+    parts = raw.split("::")
+    if len(parts) >= 2:
+        return _grocery_merge_key(parts[-2], parts[-1])
+    return _grocery_name_key(raw)
+
+
 def _aggregate_grocery(saved_meals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     acc: Dict[str, Dict[str, Any]] = {}
     for meal in saved_meals:
@@ -692,16 +727,21 @@ def _aggregate_grocery(saved_meals: List[Dict[str, Any]]) -> List[Dict[str, Any]
         for ing in ingredients:
             if not isinstance(ing, dict):
                 continue
-            name = str(ing.get("name", "")).strip()
+            raw_name = ing.get("name")
+            if not isinstance(raw_name, str):
+                continue
+            name = _sentence_case_grocery_name(raw_name)
             if not name:
                 continue
-            unit = str(ing.get("unit", "unit")).lower()
-            category = str(ing.get("category", "Pantry")).strip() or "Pantry"
+            unit_raw = ing.get("unit")
+            unit = _grocery_unit_key(unit_raw if isinstance(unit_raw, str) else "")
+            raw_category = ing.get("category")
+            category = _collapse_ws(raw_category) if isinstance(raw_category, str) else ""
             qty = _to_float(ing.get("quantity"), 0.0)
-            rounding = str(ing.get("rounding", "none")).lower()
+            rounding = str(ing.get("rounding", "none")).strip().lower()
             if rounding not in {"none", "ceil"}:
                 rounding = "none"
-            key = f"{category}::{name.lower()}::{unit}"
+            key = _grocery_merge_key(name, unit)
             scaled = qty * scale
             if key not in acc:
                 acc[key] = {
@@ -712,6 +752,8 @@ def _aggregate_grocery(saved_meals: List[Dict[str, Any]]) -> List[Dict[str, Any]
                     "quantity": 0.0,
                     "rounding": rounding,
                 }
+            elif not acc[key]["category"] and category:
+                acc[key]["category"] = category
             acc[key]["quantity"] += scaled
     result: List[Dict[str, Any]] = []
     for g in acc.values():
@@ -725,12 +767,34 @@ def _aggregate_grocery(saved_meals: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 "key": g["key"],
                 "name": g["name"],
                 "unit": g["unit"],
-                "category": g["category"],
+                "category": g["category"] or "Pantry",
                 "quantity": q,
             }
         )
     result.sort(key=lambda x: (x["category"], x["name"]))
     return result
+
+
+def _remap_checked_grocery_keys(checked: List[str], grocery: List[Dict[str, Any]]) -> List[str]:
+    valid = {str(item.get("key", "")) for item in grocery if isinstance(item, dict) and item.get("key")}
+    remapped: List[str] = []
+    seen = set()
+    for old_key in checked:
+        candidate = old_key if old_key in valid else _map_legacy_grocery_key(old_key)
+        if candidate in valid and candidate not in seen:
+            remapped.append(candidate)
+            seen.add(candidate)
+    return remapped
+
+
+def _canonical_grocery_key(raw_key: str, grocery: List[Dict[str, Any]]) -> str:
+    valid = {str(item.get("key", "")) for item in grocery if isinstance(item, dict) and item.get("key")}
+    if raw_key in valid:
+        return raw_key
+    mapped = _map_legacy_grocery_key(raw_key)
+    if mapped in valid:
+        return mapped
+    return mapped or raw_key
 
 
 def _build_meal_event_payload(
@@ -920,12 +984,13 @@ def _handle_toggle_grocery(user_id: str, payload: Dict[str, Any]) -> Dict[str, A
         week_key = f"WEEK#{week_start}"
     week = _load_week_item(user_id, week_key)
     saved = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
-    checked = _safe_string_list(week.get("checked_grocery_items"))
-    if key in checked:
-        checked = [x for x in checked if x != key]
-    else:
-        checked = [*checked, key]
     grocery = _aggregate_grocery(saved)
+    checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
+    canonical_key = _canonical_grocery_key(key, grocery)
+    if canonical_key in checked:
+        checked = [x for x in checked if x != canonical_key]
+    elif canonical_key in {str(item.get("key", "")) for item in grocery}:
+        checked = [*checked, canonical_key]
     updated_at = _save_week_bundle(user_id, week_key, saved, checked, grocery)
     return _json_response(
         200,
@@ -983,8 +1048,8 @@ def _handle_update_servings(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
             next_saved.append(m)
     if not found:
         return _json_response(404, {"message": "Saved meal not found."})
-    checked = _safe_string_list(week.get("checked_grocery_items"))
     grocery = _aggregate_grocery(next_saved)
+    checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
     updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
     return _json_response(
         200,
@@ -1048,8 +1113,8 @@ def _handle_remove_saved_meal(user_id: str, payload: Dict[str, Any]) -> Dict[str
             except Exception:
                 return _json_response(500, {"message": "Unexpected error while deleting calendar event."})
     _delete_dailyflow_event_row(user_id=user_id, plan_id=saved_meal_id)
-    checked = _safe_string_list(week.get("checked_grocery_items"))
     grocery = _aggregate_grocery(next_saved)
+    checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
     updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
     _mark_busy_blocks_stale(user_id)
     return _json_response(
@@ -1208,8 +1273,8 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
         week = _load_week_item(user_id, week_key)
         existing = _normalize_saved_meals_list(week.get("saved_meals_this_week"))
         next_saved = [*existing, new_entry]
-        checked = _safe_string_list(week.get("checked_grocery_items"))
         grocery = _aggregate_grocery(next_saved)
+        checked = _remap_checked_grocery_keys(_safe_string_list(week.get("checked_grocery_items")), grocery)
         print(f"[meals-saved] add_to_calendar: before DynamoDB week save key={week_key}")
         updated_at = _save_week_bundle(user_id, week_key, next_saved, checked, grocery)
         print("[meals-saved] add_to_calendar: after DynamoDB week save")

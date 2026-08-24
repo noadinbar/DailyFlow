@@ -327,25 +327,97 @@ function groupGroceryFromFlat(items: GroceryItem[]): Map<string, GroceryItem[]> 
   return grouped;
 }
 
-function groceryFromSavedMeals(savedMeals: SavedMealItem[]): GroceryItem[] {
-  const map = new Map<string, GroceryItem>();
-  for (const savedMeal of savedMeals) {
-    for (const ingredient of savedMeal.ingredients) {
-      const key = `${ingredient.category}::${ingredient.name.toLowerCase()}::${ingredient.unit}`;
-      const servingScale = savedMeal.servings / Math.max(1, savedMeal.base_servings);
-      const scaledQty = ingredient.quantity * servingScale;
-      const existing = map.get(key);
-      const nextQty = (existing?.quantity || 0) + scaledQty;
-      map.set(key, {
-        key,
-        name: ingredient.name,
-        unit: ingredient.unit,
-        category: ingredient.category,
-        quantity: ingredient.rounding === 'ceil' ? Math.ceil(nextQty) : Number(nextQty.toFixed(2)),
-      });
+function collapseGroceryWs(value: string): string {
+  return value.trim().split(/\s+/).join(' ');
+}
+
+function groceryNameKey(name: string): string {
+  return collapseGroceryWs(name).toLowerCase();
+}
+
+function groceryUnitKey(unit: string): string {
+  const cleaned = collapseGroceryWs(unit).toLowerCase();
+  return cleaned || 'unit';
+}
+
+function sentenceCaseGroceryName(name: string): string {
+  const collapsed = collapseGroceryWs(name);
+  if (!collapsed) return '';
+  return collapsed.charAt(0).toUpperCase() + collapsed.slice(1).toLowerCase();
+}
+
+function groceryMergeKey(name: string, unit: string): string {
+  return `${groceryNameKey(name)}::${groceryUnitKey(unit)}`;
+}
+
+function mapLegacyGroceryKey(rawKey: string): string {
+  const raw = rawKey.trim();
+  if (!raw) return '';
+  const parts = raw.split('::');
+  if (parts.length >= 2) {
+    return groceryMergeKey(parts[parts.length - 2], parts[parts.length - 1]);
+  }
+  return groceryNameKey(raw);
+}
+
+function remapCheckedGroceryKeys(checked: string[], grocery: GroceryItem[]): string[] {
+  const valid = new Set(grocery.map((item) => item.key).filter(Boolean));
+  const remapped: string[] = [];
+  const seen = new Set<string>();
+  for (const oldKey of checked) {
+    const candidate = valid.has(oldKey) ? oldKey : mapLegacyGroceryKey(oldKey);
+    if (valid.has(candidate) && !seen.has(candidate)) {
+      remapped.push(candidate);
+      seen.add(candidate);
     }
   }
-  return Array.from(map.values()).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  return remapped;
+}
+
+function groceryFromSavedMeals(savedMeals: SavedMealItem[]): GroceryItem[] {
+  type Acc = {
+    key: string;
+    name: string;
+    unit: string;
+    category: string;
+    quantity: number;
+    rounding: IngredientRounding;
+  };
+  const map = new Map<string, Acc>();
+  for (const savedMeal of savedMeals) {
+    const servingScale = savedMeal.servings / Math.max(1, savedMeal.base_servings);
+    for (const ingredient of savedMeal.ingredients || []) {
+      const name = sentenceCaseGroceryName(ingredient.name || '');
+      if (!name) continue;
+      const unit = groceryUnitKey(ingredient.unit || '');
+      const category = collapseGroceryWs(ingredient.category || '');
+      const key = groceryMergeKey(name, unit);
+      const scaledQty = ingredient.quantity * servingScale;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          key,
+          name,
+          unit,
+          category,
+          quantity: scaledQty,
+          rounding: ingredient.rounding === 'ceil' ? 'ceil' : 'none',
+        });
+      } else {
+        if (!existing.category && category) existing.category = category;
+        existing.quantity += scaledQty;
+      }
+    }
+  }
+  return Array.from(map.values())
+    .map((item) => ({
+      key: item.key,
+      name: item.name,
+      unit: item.unit,
+      category: item.category || 'Pantry',
+      quantity: item.rounding === 'ceil' ? Math.ceil(item.quantity) : Number(item.quantity.toFixed(2)),
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 }
 
 export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
@@ -719,6 +791,12 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     return groupGroceryFromFlat(flat);
   }, [groceryListServer, savedMeals]);
 
+  const displayCheckedGroceryKeys = React.useMemo(() => {
+    const flat: GroceryItem[] = [];
+    for (const items of groceryItemsByCategory.values()) flat.push(...items);
+    return remapCheckedGroceryKeys(checkedGroceryKeys, flat);
+  }, [checkedGroceryKeys, groceryItemsByCategory]);
+
   const groceryItemTotal = React.useMemo(() => {
     let total = 0;
     for (const items of groceryItemsByCategory.values()) total += items.length;
@@ -735,7 +813,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
     const contentLeft = margin;
     const contentRight = pageWidth - margin;
     const contentWidth = contentRight - contentLeft;
-    const checkedSet = new Set(checkedGroceryKeys);
+    const checkedSet = new Set(displayCheckedGroceryKeys);
 
     const COLOR_HEADER_BG: [number, number, number] = [244, 228, 226];
     const COLOR_HEADER_ACCENT: [number, number, number] = [201, 158, 156];
@@ -1462,7 +1540,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                         <label key={item.key} className="df-checkboxItem">
                           <input
                             type="checkbox"
-                            checked={checkedGroceryKeys.includes(item.key)}
+                            checked={displayCheckedGroceryKeys.includes(item.key)}
                             onChange={() => void toggleGroceryChecked(item.key)}
                           />
                           <span>{(item.name && item.name.trim()) || 'Item'}</span>

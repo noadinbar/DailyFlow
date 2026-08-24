@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -136,6 +137,133 @@ def _to_dynamodb_safe(value: Any) -> Any:
     return value
 
 
+def _to_float(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except Exception:
+            return default
+    return default
+
+
+def _collapse_ws(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _grocery_name_key(name: str) -> str:
+    return _collapse_ws(name).casefold()
+
+
+def _grocery_unit_key(unit: str) -> str:
+    cleaned = _collapse_ws(str(unit)).lower()
+    return cleaned or "unit"
+
+
+def _sentence_case_grocery_name(name: str) -> str:
+    collapsed = _collapse_ws(name)
+    if not collapsed:
+        return ""
+    return collapsed[0].upper() + collapsed[1:].lower()
+
+
+def _grocery_merge_key(name: str, unit: str) -> str:
+    return f"{_grocery_name_key(name)}::{_grocery_unit_key(unit)}"
+
+
+def _map_legacy_grocery_key(raw_key: str) -> str:
+    """Map stored keys onto name::unit. Old format was category::name::unit."""
+    raw = _safe_string(raw_key)
+    if not raw:
+        return ""
+    parts = raw.split("::")
+    if len(parts) >= 2:
+        return _grocery_merge_key(parts[-2], parts[-1])
+    return _grocery_name_key(raw)
+
+
+def _aggregate_grocery(saved_meals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    acc: Dict[str, Dict[str, Any]] = {}
+    for meal in saved_meals:
+        if not isinstance(meal, dict):
+            continue
+        ingredients = meal.get("ingredients")
+        if not isinstance(ingredients, list):
+            continue
+        servings = _to_float(meal.get("servings"), 1.0)
+        base = _to_float(meal.get("base_servings"), 1.0)
+        scale = servings / max(1.0, base)
+        for ing in ingredients:
+            if not isinstance(ing, dict):
+                continue
+            raw_name = ing.get("name")
+            if not isinstance(raw_name, str):
+                continue
+            name = _sentence_case_grocery_name(raw_name)
+            if not name:
+                continue
+            unit_raw = ing.get("unit")
+            unit = _grocery_unit_key(unit_raw if isinstance(unit_raw, str) else "")
+            raw_category = ing.get("category")
+            category = _collapse_ws(raw_category) if isinstance(raw_category, str) else ""
+            qty = _to_float(ing.get("quantity"), 0.0)
+            rounding = str(ing.get("rounding", "none")).strip().lower()
+            if rounding not in {"none", "ceil"}:
+                rounding = "none"
+            key = _grocery_merge_key(name, unit)
+            scaled = qty * scale
+            if key not in acc:
+                acc[key] = {
+                    "key": key,
+                    "name": name,
+                    "unit": unit,
+                    "category": category,
+                    "quantity": 0.0,
+                    "rounding": rounding,
+                }
+            elif not acc[key]["category"] and category:
+                acc[key]["category"] = category
+            acc[key]["quantity"] += scaled
+    result: List[Dict[str, Any]] = []
+    for g in acc.values():
+        q = float(g["quantity"])
+        if g.get("rounding") == "ceil":
+            q = float(math.ceil(q))
+        else:
+            q = round(q, 2)
+        result.append(
+            {
+                "key": g["key"],
+                "name": g["name"],
+                "unit": g["unit"],
+                "category": g["category"] or "Pantry",
+                "quantity": q,
+            }
+        )
+    result.sort(key=lambda x: (x["category"], x["name"]))
+    return result
+
+
+def _remap_checked_grocery_keys(checked: List[str], grocery: List[Dict[str, Any]]) -> List[str]:
+    valid = {str(item.get("key", "")) for item in grocery if isinstance(item, dict) and item.get("key")}
+    remapped: List[str] = []
+    seen = set()
+    for old_key in checked:
+        candidate = old_key if old_key in valid else _map_legacy_grocery_key(old_key)
+        if candidate in valid and candidate not in seen:
+            remapped.append(candidate)
+            seen.add(candidate)
+    return remapped
+
+
 def _load_records_for_user(user_id: str, week_key: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     table = _meals_table()
     library = table.get_item(Key={"user_id": user_id, "record_key": "LIBRARY#current"}).get("Item") or {}
@@ -243,12 +371,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         return _json_response(500, {"message": "Unexpected error while loading meals state."})
 
+    saved_meals_this_week = _raw_dict_list(week_item.get("saved_meals_this_week"))
+    grocery_list = _aggregate_grocery(saved_meals_this_week)
+    checked_grocery_items = _remap_checked_grocery_keys(
+        _safe_string_list(week_item.get("checked_grocery_items")),
+        grocery_list,
+    )
     response_body = {
         "meal_library": _safe_list_of_dicts(library_item.get("meal_library")),
         "favorite_meals": _safe_string_list(library_item.get("favorite_meals")),
-        "saved_meals_this_week": _safe_list_of_dicts(week_item.get("saved_meals_this_week")),
-        "grocery_list": _safe_list_of_dicts(week_item.get("grocery_list")),
-        "checked_grocery_items": _safe_string_list(week_item.get("checked_grocery_items")),
+        "saved_meals_this_week": _safe_list_of_dicts(saved_meals_this_week),
+        "grocery_list": _to_json_safe(grocery_list),
+        "checked_grocery_items": checked_grocery_items,
         "metadata": {
             "week_record_key": week_key,
             "week_start": week_start_iso,
