@@ -1269,47 +1269,7 @@ body {
     overflow-wrap: anywhere;
   }
 
-  .df-overviewPageTitle {
-    overflow-wrap: anywhere;
-  }
-
-  .df-overviewCardGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .df-overviewCard,
-  .df-overviewMotivationCard,
-  .df-overviewInsightCard {
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .df-overviewWorkoutName,
-  .df-overviewWorkoutMeta,
-  .df-overviewCardBusy,
-  .df-overviewCardEmpty,
-  .df-overviewMotivationText,
-  .df-overviewInsightText {
-    overflow-wrap: anywhere;
-  }
-
-  .df-overviewWorkoutMeta {
-    margin-left: 0;
-    flex-wrap: wrap;
-  }
-
-  .df-overviewCompleted {
-    width: 36px;
-    height: 36px;
-  }
-
-  .df-overviewCompleted input {
-    width: 22px;
-    height: 22px;
-  }
-
-  .df-workoutsScreen .df-workoutsContent,
-  .df-overviewPage .df-workoutsContent {
+  .df-workoutsScreen .df-workoutsContent {
     min-width: 0;
     max-width: 100%;
     overflow-x: hidden;
@@ -1378,14 +1338,6 @@ body {
     overflow-wrap: anywhere;
   }
 
-  .df-overviewTabs {
-    flex-wrap: wrap;
-  }
-
-  .df-overviewWorkoutRow {
-    align-items: flex-start;
-  }
-
   .df-workoutPlanImage {
     max-height: min(40vh, 280px);
   }
@@ -1394,10 +1346,6 @@ body {
   .df-workoutsScreen .df-modalPanel .df-settingsContent {
     min-width: 0;
     overflow-x: hidden;
-  }
-
-  .df-overviewPage .df-errorText {
-    overflow-wrap: anywhere;
   }
 }
 
@@ -2404,6 +2352,17 @@ select.df-input {
   padding: 6px 8px;
 }
 
+.df-mealsScreen .df-workoutsTitle {
+  font-size: 26px;
+}
+
+.df-mealsHeaderActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .df-sectionToggle {
   appearance: none;
   border: 0;
@@ -2619,6 +2578,7 @@ select.df-input {
   flex-direction: column;
   gap: 10px;
   min-height: 168px;
+  min-width: 0;
   padding: 16px 16px 18px;
   border: 1px solid transparent;
   border-radius: 18px;
@@ -2857,4 +2817,209 @@ select.df-input {
   background: rgba(255, 255, 255, 0.7);
   color: #6b7280;
   font-size: 13px;
+}
+
+/*
+  Overview / Meals / Stress mobile rules MUST come after those screens' base
+  styles. An earlier @media (max-width: 1100px) block cannot override later
+  unscoped rules of equal specificity — that is why Overview stayed 3-column
+  on real phones.
+*/
+@media (max-width: 1100px) {
+  .df-overviewPage .df-workoutsContent,
+  .df-mealsScreen .df-workoutsContent,
+  .df-stressBreaksPage .df-workoutsContent {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .df-overviewPage .df-calendarTopbarLeft {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .df-overviewPage .df-overviewPageTitle {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewPage .df-overviewTabs {
+    flex-wrap: wrap;
+  }
+
+  .df-overviewPage .df-overviewCardGrid {
+    grid-template-columns: 1fr;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .df-overviewPage .df-overviewCard,
+  .df-overviewPage .df-overviewMotivationCard,
+  .df-overviewPage .df-overviewInsightCard {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .df-overviewPage .df-overviewCardMetric,
+  .df-overviewPage .df-overviewCardTitle,
+  .df-overviewPage .df-overviewCardBusy,
+  .df-overviewPage .df-overviewCardEmpty,
+  .df-overviewPage .df-overviewMotivationText,
+  .df-overviewPage .df-overviewInsightText,
+  .df-overviewPage .df-errorText {
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewPage .df-overviewWorkoutRow {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .df-overviewPage .df-overviewWorkoutName {
+    display: block;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .df-overviewPage .df-overviewWorkoutMeta {
+    display: flex;
+    flex-wrap: wrap;
+    margin-left: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewPage .df-overviewCompleted {
+    width: 36px;
+    height: 36px;
+  }
+
+  .df-overviewPage .df-overviewCompleted input {
+    width: 22px;
+    height: 22px;
+  }
+
+  .df-mealsScreen .df-workoutsSectionHeader,
+  .df-stressBreaksPage .df-workoutsSectionHeader {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .df-mealsScreen .df-workoutsTitle,
+  .df-stressBreaksPage .df-workoutsTitle {
+    font-size: 22px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-workoutsGoal,
+  .df-stressBreaksPage .df-workoutsGoal {
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-workoutLibraryGrid,
+  .df-stressBreaksPage .df-workoutLibraryGrid,
+  .df-stressBreaksPage .df-workoutWeekGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .df-stressBreaksPage .df-workoutDayCard {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  .df-stressBreaksPage .df-workoutDayCard .df-workoutMeta,
+  .df-stressBreaksPage .df-workoutSlot {
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-weeklyPlanControlBtn,
+  .df-stressBreaksPage .df-weeklyPlanControlBtn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .df-mealsScreen .df-weeklyPlanControls {
+    flex-wrap: wrap;
+  }
+
+  .df-mealsScreen .df-workoutLibraryTitle,
+  .df-mealsScreen .df-mealLibraryCardTitle,
+  .df-mealsScreen .df-mealLibraryIngredientsPreview,
+  .df-mealsScreen .df-workoutMeta,
+  .df-stressBreaksPage .df-workoutLibraryTitle,
+  .df-stressBreaksPage .df-workoutLibrarySummary {
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-workoutFilterChip,
+  .df-stressBreaksPage .df-workoutFilterChip {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-weeklyPlanActionBtn,
+  .df-stressBreaksPage .df-weeklyPlanActionBtn {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
+  .df-mealsScreen .df-input,
+  .df-mealsScreen .df-select,
+  .df-stressBreaksPage .df-input,
+  .df-stressBreaksPage .df-select {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .df-mealsScreen .df-mealServingsInput {
+    width: 72px;
+    max-width: 100%;
+  }
+
+  .df-mealsScreen .df-mealsGroceryWrap,
+  .df-mealsScreen .df-calendarsList,
+  .df-mealsScreen .df-checkboxItem {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .df-mealsScreen .df-checkboxItem span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .df-mealsScreen .df-modalPanel,
+  .df-mealsScreen .df-modalPanel .df-settingsContent,
+  .df-stressBreaksPage .df-modalPanel,
+  .df-stressBreaksPage .df-modalPanel .df-settingsContent {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .df-stressBreaksPage .df-stressInsightLine,
+  .df-stressBreaksPage .df-stressLibraryEmpty,
+  .df-mealsScreen .df-errorText,
+  .df-stressBreaksPage .df-errorText {
+    overflow-wrap: anywhere;
+  }
+
+  .df-stressBreaksPage .df-sectionToggle {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .df-mealsScreen .df-workoutLibraryGrid,
+  .df-stressBreaksPage .df-workoutLibraryGrid,
+  .df-stressBreaksPage .df-workoutWeekGrid {
+    grid-template-columns: 1fr;
+  }
 }

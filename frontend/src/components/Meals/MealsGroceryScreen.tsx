@@ -1113,7 +1113,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
 
   return (
     <section
-      className={`df-calendarPage df-workoutsPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      className={`df-calendarPage df-workoutsPage df-mealsScreen${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
       aria-label="DailyFlow meals and grocery screen"
     >
       <AppSidebar
@@ -1196,7 +1196,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <span className={`df-sectionChevron${mealLibraryOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
                   ▶
                 </span>
-                <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
+                <h2 className="df-workoutsTitle">
                   Meal Library
                 </h2>
               </button>
@@ -1358,7 +1358,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <span className={`df-sectionChevron${savedMealsOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
                   ▶
                 </span>
-                <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
+                <h2 className="df-workoutsTitle">
                   Saved Meals This Week
                 </h2>
               </button>
@@ -1431,11 +1431,11 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <span className={`df-sectionChevron${groceryOpen ? ' df-sectionChevronOpen' : ''}`} aria-hidden>
                   ▶
                 </span>
-                <h2 className="df-workoutsTitle" style={{ fontSize: 26 }}>
+                <h2 className="df-workoutsTitle">
                   Grocery List
                 </h2>
               </button>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="df-mealsHeaderActions">
                 <button
                   type="button"
                   className="df-btn"
