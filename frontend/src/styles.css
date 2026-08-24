@@ -472,13 +472,8 @@ body {
 }
 
 .df-mobileHeader,
-.df-navDrawerBackdrop,
-.df-navDrawerClose {
+.df-navDrawerBackdrop {
   display: none;
-}
-
-.df-navDrawerTop {
-  display: contents;
 }
 
 .df-calendarPage.df-calendarPageNavCollapsed {
@@ -1176,25 +1171,6 @@ body {
     display: none;
   }
 
-  .df-navDrawerTop {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .df-navDrawerTop .df-calendarBrand {
-    flex: 1 1 auto;
-    min-width: 0;
-    margin-bottom: 0;
-  }
-
-  .df-navDrawerClose {
-    display: inline-flex;
-    flex: none;
-  }
-
   .df-sidebarToggle {
     display: none;
   }
@@ -1229,16 +1205,16 @@ body {
     max-width: 100%;
   }
 
-  .df-homeCalendar .df-calendarTopbarLeft,
-  .df-homeCalendar .df-calendarTopbarRight {
-    flex-wrap: wrap;
-  }
-
-  .df-homeCalendar .df-calendarTopbar {
+  .df-calendarTopbar {
     align-items: flex-start;
   }
 
-  .df-homeCalendar .df-calendarTopbar .df-btn {
+  .df-calendarTopbarLeft,
+  .df-calendarTopbarRight {
+    flex-wrap: wrap;
+  }
+
+  .df-calendarTopbar .df-btn {
     white-space: nowrap;
   }
 
@@ -1277,6 +1253,151 @@ body {
 
   .df-modalHeader {
     flex-shrink: 0;
+  }
+
+  .df-modalTitle {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .df-workoutsLoadingCard {
+    max-width: calc(100% - 24px);
+    box-sizing: border-box;
+  }
+
+  .df-workoutsLoadingText {
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewPageTitle {
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewCardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .df-overviewCard,
+  .df-overviewMotivationCard,
+  .df-overviewInsightCard {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .df-overviewWorkoutName,
+  .df-overviewWorkoutMeta,
+  .df-overviewCardBusy,
+  .df-overviewCardEmpty,
+  .df-overviewMotivationText,
+  .df-overviewInsightText {
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewWorkoutMeta {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .df-overviewCompleted {
+    width: 36px;
+    height: 36px;
+  }
+
+  .df-overviewCompleted input {
+    width: 22px;
+    height: 22px;
+  }
+
+  .df-workoutsScreen .df-workoutsContent,
+  .df-overviewPage .df-workoutsContent {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .df-workoutsScreen .df-workoutsSectionHeader {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .df-workoutsScreen .df-workoutsTitle {
+    font-size: 22px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .df-workoutsScreen .df-workoutsGoal {
+    overflow-wrap: anywhere;
+  }
+
+  .df-workoutsScreen .df-workoutWeekGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .df-workoutsScreen .df-workoutLibraryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .df-workoutsScreen .df-workoutDayCard {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  .df-workoutsScreen .df-workoutDayCard .df-workoutMeta,
+  .df-workoutsScreen .df-workoutSlot {
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .df-workoutsScreen .df-weeklyPlanControlBtn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .df-workoutsScreen .df-workoutLibraryTitle,
+  .df-workoutsScreen .df-workoutLibrarySummary {
+    overflow-wrap: anywhere;
+  }
+
+  .df-workoutsScreen .df-weeklyPlanActionBtn {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
+  .df-workoutsScreen .df-input,
+  .df-workoutsScreen .df-select {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .df-workoutsScreen .df-workoutFilterChip {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .df-overviewTabs {
+    flex-wrap: wrap;
+  }
+
+  .df-overviewWorkoutRow {
+    align-items: flex-start;
+  }
+
+  .df-workoutPlanImage {
+    max-height: min(40vh, 280px);
+  }
+
+  .df-workoutsScreen .df-modalPanel,
+  .df-workoutsScreen .df-modalPanel .df-settingsContent {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .df-overviewPage .df-errorText {
+    overflow-wrap: anywhere;
   }
 }
 
@@ -1843,6 +1964,24 @@ select.df-input {
   margin-top: auto;
 }
 
+.df-workoutPlanImageWrap {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f8fafc;
+  box-sizing: border-box;
+}
+
+.df-workoutPlanImage {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: min(48vh, 420px);
+  display: block;
+  object-fit: contain;
+}
+
 .df-workoutLibraryActionBtn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -1997,7 +2136,9 @@ select.df-input {
 
 @media (max-width: 760px) {
   .df-workoutWeekGrid,
-  .df-workoutLibraryGrid {
+  .df-workoutLibraryGrid,
+  .df-workoutsScreen .df-workoutWeekGrid,
+  .df-workoutsScreen .df-workoutLibraryGrid {
     grid-template-columns: 1fr;
   }
 }

@@ -76,7 +76,6 @@ export default function AppSidebar(props: AppSidebarProps) {
   const isMobileNav = useMobileNavBreakpoint();
   const [isMobileNavOpen, setIsMobileNavOpen] = React.useState<boolean>(false);
   const navRef = React.useRef<HTMLElement | null>(null);
-  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const menuButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   const initials = (displayName || 'N').slice(0, 2).toUpperCase();
@@ -124,8 +123,6 @@ export default function AppSidebar(props: AppSidebarProps) {
     document.body.style.position = 'fixed';
     document.body.style.top = `-${scrollY}px`;
     document.body.style.width = '100%';
-
-    closeButtonRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setIsMobileNavOpen(false);
@@ -201,26 +198,15 @@ export default function AppSidebar(props: AppSidebarProps) {
           </span>
         </button>
 
-        <div className="df-navDrawerTop">
-          <div className="df-calendarBrand">
-            <span className="df-calendarBrandLogoWrap" aria-hidden>
-              <img
-                src={dailyflowLogoUrl}
-                alt=""
-                className="df-calendarBrandLogo"
-              />
-            </span>
-            <span className="df-calendarBrandLabel">DailyFlow</span>
-          </div>
-          <button
-            ref={closeButtonRef}
-            type="button"
-            className="df-iconBtn df-navDrawerClose"
-            onClick={closeMobileNav}
-            aria-label="Close navigation menu"
-          >
-            <CloseIcon />
-          </button>
+        <div className="df-calendarBrand">
+          <span className="df-calendarBrandLogoWrap" aria-hidden>
+            <img
+              src={dailyflowLogoUrl}
+              alt=""
+              className="df-calendarBrandLogo"
+            />
+          </span>
+          <span className="df-calendarBrandLabel">DailyFlow</span>
         </div>
 
         <div className="df-calendarProfile">
@@ -288,15 +274,6 @@ function HamburgerIcon() {
       <line x1="4" y1="7" x2="20" y2="7" />
       <line x1="4" y1="12" x2="20" y2="12" />
       <line x1="4" y1="17" x2="20" y2="17" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <line x1="6" y1="6" x2="18" y2="18" />
-      <line x1="18" y1="6" x2="6" y2="18" />
     </svg>
   );
 }

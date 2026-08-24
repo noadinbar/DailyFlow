@@ -976,7 +976,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
   return (
     <section
-      className={`df-calendarPage df-workoutsPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      className={`df-calendarPage df-workoutsPage df-workoutsScreen${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
       aria-label="DailyFlow workouts screen"
     >
       <AppSidebar
@@ -1367,18 +1367,12 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
 
             <div className="df-settingsContent" style={{ display: 'grid', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
               {selectedWeeklyPlanItem && selectedPlanImageUrl && !workoutImageFailed && (
-                <div style={{ width: '100%', borderRadius: 12, overflow: 'hidden', background: '#f8fafc' }}>
+                <div className="df-workoutPlanImageWrap">
                   <img
+                    className="df-workoutPlanImage"
                     src={selectedPlanImageUrl}
                     alt=""
                     onError={() => setWorkoutImageFailed(true)}
-                    style={{
-                      width: '100%',
-                      height: 'auto',
-                      maxHeight: '48vh',
-                      display: 'block',
-                      objectFit: 'contain',
-                    }}
                   />
                 </div>
               )}

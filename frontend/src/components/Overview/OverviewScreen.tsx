@@ -606,7 +606,7 @@ export default function OverviewScreen(props: OverviewScreenProps) {
 
   return (
     <section
-      className={`df-calendarPage df-workoutsPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      className={`df-calendarPage df-workoutsPage df-overviewPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
       aria-label="DailyFlow overview screen"
     >
       <AppSidebar
