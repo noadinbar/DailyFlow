@@ -1245,6 +1245,14 @@ select.df-input {
   color: var(--df-muted);
 }
 
+.df-settingsReadOnlyValue {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 650;
+  color: var(--df-text);
+  word-break: break-word;
+}
+
 .df-settingsActionsRow {
   display: flex;
   align-items: center;

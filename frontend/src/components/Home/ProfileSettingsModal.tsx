@@ -41,7 +41,8 @@ type SettingsTab = 'profile' | 'preferences';
 
 type ProfileSettingsModalProps = {
   isOpen: boolean;
-  initialName: string;
+  /** Authenticated Cognito username from the current app session. Read-only. */
+  username?: string;
   /** Presigned GET URL from GET /profile; updates when parent loads profile. */
   savedProfileImageUrl?: string;
   /** Questionnaire fields from GET /profile `questionnaire` (optional). */
@@ -51,7 +52,6 @@ type ProfileSettingsModalProps = {
     profileImageUrl: string;
     questionnaire?: Record<string, unknown> | null;
   }>;
-  onSaveDisplayName?: (nextName: string) => Promise<void>;
   onRequestProfileImageUploadUrl?: (args: { contentType: string }) => Promise<{
     uploadUrl: string;
     objectKey: string;
@@ -65,19 +65,18 @@ type ProfileSettingsModalProps = {
 export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
   const {
     isOpen,
-    initialName,
+    username = '',
     savedProfileImageUrl = '',
     savedQuestionnaire = null,
     onClose,
     onLoadProfile,
-    onSaveDisplayName,
     onRequestProfileImageUploadUrl,
     onSaveProfileImageKey,
     onSaveQuestionnaire,
   } = props;
 
   const [activeTab, setActiveTab] = React.useState<SettingsTab>('profile');
-  const [name, setName] = React.useState<string>(initialName);
+  const sessionUsername = typeof username === 'string' ? username : '';
   const [localImageUrl, setLocalImageUrl] = React.useState<string>('');
   const [selectedImageFile, setSelectedImageFile] = React.useState<File | null>(null);
   /** Background refresh from GET /profile — never blocks interaction. */
@@ -108,7 +107,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
       return;
     }
     setActiveTab('profile');
-    setName(initialName);
     setSaveError('');
     setSaveSuccess('');
     setSelectedImageFile(null);
@@ -117,7 +115,7 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
     setQForm({ ...EMPTY_QUESTIONNAIRE });
     setPreferencesError('');
     setPreferencesSuccess('');
-  }, [isOpen, initialName]);
+  }, [isOpen]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -132,8 +130,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
       try {
         const loaded = await loadProfile();
         if (cancelled) return;
-        const clean = typeof loaded.displayName === 'string' ? loaded.displayName.trim() : '';
-        if (clean) setName(clean);
         if (loaded.questionnaire != null) {
           setQForm(questionnaireFromApi(loaded.questionnaire));
           hasInitializedQuestionnaireRef.current = true;
@@ -207,39 +203,35 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
   }
 
   async function handleSaveChangesClick() {
-    if (!onSaveDisplayName) return;
+    if (!selectedImageFile || !onRequestProfileImageUploadUrl || !onSaveProfileImageKey) return;
     setSaveError('');
     setSaveSuccess('');
     setImagePickError('');
     setIsSavingProfile(true);
     try {
-      await onSaveDisplayName(name);
-
-      if (selectedImageFile && onRequestProfileImageUploadUrl && onSaveProfileImageKey) {
-        const validationError = validateProfileImageFile(selectedImageFile);
-        if (validationError) {
-          setImagePickError(validationError);
-          return;
-        }
-
-        const contentType = selectedImageFile.type;
-        const { uploadUrl, objectKey } = await onRequestProfileImageUploadUrl({ contentType });
-
-        const putResponse = await fetch(uploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': contentType },
-          body: selectedImageFile,
-        });
-        if (!putResponse.ok) {
-          throw new Error(`Upload failed (${putResponse.status}).`);
-        }
-
-        await onSaveProfileImageKey(objectKey);
-        setSelectedImageFile(null);
-        if (localImageUrl) URL.revokeObjectURL(localImageUrl);
-        setLocalImageUrl('');
-        if (fileInputRef.current) fileInputRef.current.value = '';
+      const validationError = validateProfileImageFile(selectedImageFile);
+      if (validationError) {
+        setImagePickError(validationError);
+        return;
       }
+
+      const contentType = selectedImageFile.type;
+      const { uploadUrl, objectKey } = await onRequestProfileImageUploadUrl({ contentType });
+
+      const putResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType },
+        body: selectedImageFile,
+      });
+      if (!putResponse.ok) {
+        throw new Error(`Upload failed (${putResponse.status}).`);
+      }
+
+      await onSaveProfileImageKey(objectKey);
+      setSelectedImageFile(null);
+      if (localImageUrl) URL.revokeObjectURL(localImageUrl);
+      setLocalImageUrl('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
 
       setSaveSuccess('Changes saved.');
     } catch (e) {
@@ -337,28 +329,18 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                       />
                     ) : (
                       <span className="df-settingsAvatarInitial" aria-hidden>
-                        {(name || 'U').trim().slice(0, 1).toUpperCase()}
+                        {(sessionUsername || 'U').trim().slice(0, 1).toUpperCase()}
                       </span>
                     )}
                   </div>
 
                   <div className="df-settingsRowBody">
-                    <label className="df-field">
-                      <span className="df-fieldLabel" style={{ textAlign: 'start' }}>
-                        Name
-                      </span>
-                      <input
-                        className="df-input"
-                        value={name}
-                        onChange={(e) => {
-                          setName(e.target.value);
-                          setSaveSuccess('');
-                        }}
-                        placeholder="Your name"
-                        autoComplete="name"
-                        disabled={isSavingProfile}
-                      />
-                    </label>
+                    <div className="df-field">
+                      <div className="df-fieldLabel" style={{ textAlign: 'start' }}>
+                        Username
+                      </div>
+                      <div className="df-settingsReadOnlyValue">{sessionUsername}</div>
+                    </div>
 
                     <div className="df-settingsFileRow">
                       <input
@@ -390,7 +372,7 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                         type="button"
                         className="df-btn df-btnPrimary"
                         onClick={() => void handleSaveChangesClick()}
-                        disabled={!onSaveDisplayName || isSavingProfile}
+                        disabled={isSavingProfile || !selectedImageFile}
                       >
                         {isSavingProfile ? 'Saving...' : 'Save changes'}
                       </button>

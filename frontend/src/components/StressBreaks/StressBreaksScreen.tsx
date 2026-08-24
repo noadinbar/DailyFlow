@@ -308,35 +308,6 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
     return { displayName: name, profileImageUrl: imageUrl, questionnaire: q, stressBreaks: sb };
   }
 
-  async function saveProfileDisplayName(nextName: string): Promise<void> {
-    const token = await getAuthToken();
-    const response = await fetch(buildApiUrl('/profile'), {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ display_name: nextName }),
-    });
-    let payload: { display_name?: string; profile_image_url?: string; message?: string } = {};
-    try {
-      payload = (await response.json()) as typeof payload;
-    } catch {
-      payload = {};
-    }
-    if (!response.ok) {
-      const message =
-        typeof payload.message === 'string' && payload.message.trim()
-          ? payload.message
-          : `Could not save profile (${response.status}).`;
-      throw new Error(message);
-    }
-    const name = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
-    setDisplayName(name);
-    const imageUrl = typeof payload.profile_image_url === 'string' ? payload.profile_image_url.trim() : '';
-    if (imageUrl) setProfileImageUrl(imageUrl);
-  }
-
   async function saveQuestionnairePreferences(patch: Record<string, unknown>): Promise<void> {
     const token = await getAuthToken();
     const response = await fetch(buildApiUrl('/profile'), {
@@ -1404,7 +1375,7 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
       <ProfileSettingsModal
         isOpen={isProfileSettingsOpen}
         onClose={() => setIsProfileSettingsOpen(false)}
-        initialName={effectiveName}
+        username={username}
         savedProfileImageUrl={profileImageUrl}
         savedQuestionnaire={savedQuestionnaire}
         onLoadProfile={async () => {
@@ -1415,7 +1386,6 @@ export default function StressBreaksScreen(props: StressBreaksScreenProps) {
             questionnaire: loaded.questionnaire,
           };
         }}
-        onSaveDisplayName={saveProfileDisplayName}
         onSaveQuestionnaire={saveQuestionnairePreferences}
         onRequestProfileImageUploadUrl={requestProfileImageUploadUrl}
         onSaveProfileImageKey={saveProfileImageKey}
