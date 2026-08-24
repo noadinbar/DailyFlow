@@ -793,7 +793,25 @@ def _format_google_event_datetime(date_iso: str, hhmm: str) -> str:
     return f"{date_iso}T{hhmm}:00"
 
 
-def _build_workout_event_payload(plan_item: Dict[str, Any], library_item: Dict[str, Any]) -> Dict[str, Any]:
+def _workout_images_public_base_url() -> str:
+    return os.getenv("WORKOUT_IMAGES_PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+
+def _workout_image_public_url(*, user_id: str, plan_id: str) -> str:
+    base = _workout_images_public_base_url()
+    if not base or not user_id or not plan_id:
+        return ""
+    if "/" in user_id or ".." in user_id or "/" in plan_id or ".." in plan_id:
+        return ""
+    return f"{base}/users/{user_id}/workout-image/{plan_id}.png"
+
+
+def _build_workout_event_payload(
+    plan_item: Dict[str, Any],
+    library_item: Dict[str, Any],
+    *,
+    user_id: str,
+) -> Dict[str, Any]:
     workout_title = str(library_item.get("title", "")).strip() or "Workout"
     workout_type = str(library_item.get("workout_type", "")).strip()
     intensity = str(library_item.get("intensity", "")).strip()
@@ -833,6 +851,12 @@ def _build_workout_event_payload(plan_item: Dict[str, Any], library_item: Dict[s
         append_steps("Cooldown", "cooldown_steps")
         append_steps("Notes", "notes")
     description = "\n".join(details) if details else "Planned in DailyFlow."
+    image_url = _workout_image_public_url(
+        user_id=user_id,
+        plan_id=str(plan_item.get("id", "")).strip(),
+    )
+    if image_url:
+        description = f"{description}\n\nWorkout visual guide:\n{image_url}"
     return {
         "summary": workout_title,
         "description": description,
@@ -972,7 +996,7 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
             connection=connection,
             method="POST",
             url=create_event_url,
-            body=_build_workout_event_payload(plan_item, library_item),
+            body=_build_workout_event_payload(plan_item, library_item, user_id=user_id),
             debug_flags=debug_flags,
         )
         created_event_id = str(created_event.get("id", "")).strip()
