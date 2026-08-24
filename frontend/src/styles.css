@@ -2151,6 +2151,22 @@ select.df-input {
   background: rgba(255, 255, 255, 0.78);
 }
 
+/* Soft DailyFlow pastels so consecutive insights stay distinct and readable. */
+.df-stressInsightCard:nth-child(3n + 1) {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+}
+
+.df-stressInsightCard:nth-child(3n + 2) {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+}
+
+.df-stressInsightCard:nth-child(3n + 3) {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
 .df-stressInsightLine {
   margin: 0;
   font-size: 13px;
