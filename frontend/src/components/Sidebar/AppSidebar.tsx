@@ -4,6 +4,24 @@ import dailyflowLogoUrl from '../../../visuals/small_logo.png';
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'dailyflow_sidebar_collapsed';
 
+/** Must stay in sync with the `@media (max-width: 1100px)` app-shell rules in styles.css. */
+const MOBILE_NAV_QUERY = '(max-width: 1100px)';
+
+function useMobileNavBreakpoint(): boolean {
+  const [isMobile, setIsMobile] = React.useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia(MOBILE_NAV_QUERY).matches : false
+  );
+
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia(MOBILE_NAV_QUERY);
+    const onChange = () => setIsMobile(mediaQuery.matches);
+    mediaQuery.addEventListener('change', onChange);
+    return () => mediaQuery.removeEventListener('change', onChange);
+  }, []);
+
+  return isMobile;
+}
+
 /**
  * Persisted, screen-shared collapsed state for the left sidebar.
  *
@@ -55,8 +73,15 @@ export default function AppSidebar(props: AppSidebarProps) {
   const { displayName, profileImageUrl, onOpenSettings, isCollapsed, onToggleCollapsed } = props;
   const navigate = useNavigate();
   const location = useLocation();
+  const isMobileNav = useMobileNavBreakpoint();
+  const [isMobileNavOpen, setIsMobileNavOpen] = React.useState<boolean>(false);
+  const navRef = React.useRef<HTMLElement | null>(null);
+  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const menuButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   const initials = (displayName || 'N').slice(0, 2).toUpperCase();
+  const isDrawerOpen = isMobileNav && isMobileNavOpen;
+  const showCollapsed = isCollapsed && !isMobileNav;
 
   const items: SidebarItem[] = [
     { label: 'Calendar', route: '/calendar', icon: <CalendarIcon /> },
@@ -66,88 +91,192 @@ export default function AppSidebar(props: AppSidebarProps) {
     { label: 'Overview', route: '/overview', icon: <OverviewIcon /> },
   ];
 
+  const closeMobileNav = React.useCallback(() => {
+    setIsMobileNavOpen(false);
+  }, []);
+
+  React.useEffect(() => {
+    setIsMobileNavOpen(false);
+  }, [location.pathname]);
+
+  React.useEffect(() => {
+    if (!isMobileNav) setIsMobileNavOpen(false);
+  }, [isMobileNav]);
+
+  React.useEffect(() => {
+    const navEl = navRef.current;
+    if (!navEl) return;
+    if (typeof (navEl as HTMLElement & { inert?: boolean }).inert === 'boolean') {
+      (navEl as HTMLElement & { inert: boolean }).inert = isMobileNav && !isMobileNavOpen;
+    }
+  }, [isMobileNav, isMobileNavOpen]);
+
+  React.useEffect(() => {
+    if (!isDrawerOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousPosition = document.body.style.position;
+    const previousTop = document.body.style.top;
+    const previousWidth = document.body.style.width;
+    const scrollY = window.scrollY;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+
+    closeButtonRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.position = previousPosition;
+      document.body.style.top = previousTop;
+      document.body.style.width = previousWidth;
+      window.scrollTo(0, scrollY);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isDrawerOpen]);
+
+  function handleNavigate(route: string) {
+    closeMobileNav();
+    navigate(route);
+  }
+
+  function handleOpenSettings() {
+    closeMobileNav();
+    onOpenSettings();
+  }
+
   return (
-    <aside
-      className={`df-calendarLeftNav${isCollapsed ? ' df-calendarLeftNavCollapsed' : ''}`}
-      aria-label="Primary navigation"
-    >
-      <button
-        type="button"
-        className="df-sidebarToggle"
-        onClick={onToggleCollapsed}
-        aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        aria-expanded={!isCollapsed}
-        title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        <span className="df-sidebarToggleIcon" aria-hidden>
+    <div className={`df-appNavShell${isDrawerOpen ? ' df-appNavShellDrawerOpen' : ''}`}>
+      <header className="df-mobileHeader">
+        <button
+          ref={menuButtonRef}
+          type="button"
+          className="df-mobileHeaderMenuBtn"
+          onClick={() => setIsMobileNavOpen((open) => !open)}
+          aria-label={isDrawerOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={isDrawerOpen}
+          aria-controls="df-primary-nav"
+        >
           <HamburgerIcon />
-        </span>
-      </button>
-
-      <div className="df-calendarBrand">
-        <span className="df-calendarBrandLogoWrap" aria-hidden>
-          <img
-            src={dailyflowLogoUrl}
-            alt=""
-            className="df-calendarBrandLogo"
-          />
-        </span>
-        <span className="df-calendarBrandLabel">DailyFlow</span>
-      </div>
-
-      <div className="df-calendarProfile">
-        <div className="df-calendarProfileAvatar">
-          {profileImageUrl ? (
-            <img
-              key={profileImageUrl}
-              src={profileImageUrl}
-              alt=""
-              className="df-calendarProfileAvatarImg"
-            />
-          ) : (
-            initials
-          )}
+        </button>
+        <div className="df-calendarBrand df-mobileHeaderBrand">
+          <span className="df-calendarBrandLogoWrap" aria-hidden>
+            <img src={dailyflowLogoUrl} alt="" className="df-calendarBrandLogo" />
+          </span>
+          <span className="df-calendarBrandLabel">DailyFlow</span>
         </div>
-        <div className="df-calendarProfileInfo">
-          <div className="df-calendarProfileName">{displayName}</div>
-        </div>
+      </header>
+
+      <div
+        className="df-navDrawerBackdrop"
+        role="presentation"
+        hidden={!isDrawerOpen}
+        onClick={closeMobileNav}
+      />
+
+      <aside
+        ref={navRef}
+        id="df-primary-nav"
+        className={`df-calendarLeftNav${showCollapsed ? ' df-calendarLeftNavCollapsed' : ''}`}
+        aria-label="Primary navigation"
+        aria-hidden={isMobileNav && !isMobileNavOpen}
+      >
         <button
           type="button"
-          className="df-iconBtn df-calendarProfileSettings"
-          onClick={onOpenSettings}
-          aria-label="Open profile settings"
-          title="Settings"
+          className="df-sidebarToggle"
+          onClick={onToggleCollapsed}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!isCollapsed}
+          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          <SettingsIcon />
+          <span className="df-sidebarToggleIcon" aria-hidden>
+            <HamburgerIcon />
+          </span>
         </button>
-      </div>
 
-      <nav className="df-calendarMenu" aria-label="Main sections">
-        {items.map((item) => {
-          const isActive = location.pathname.startsWith(item.route);
-          return (
-            <button
-              key={item.route}
-              type="button"
-              className={`df-calendarMenuItem${isActive ? ' df-calendarMenuItemActive' : ''}`}
-              onClick={() => {
-                if (item.disabled) return;
-                navigate(item.route);
-              }}
-              disabled={item.disabled}
-              title={isCollapsed ? item.label : undefined}
-              aria-label={item.label}
-              aria-current={isActive ? 'page' : undefined}
-            >
-              <span className="df-calendarMenuItemIcon" aria-hidden>
-                {item.icon}
-              </span>
-              <span className="df-calendarMenuItemLabel">{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-    </aside>
+        <div className="df-navDrawerTop">
+          <div className="df-calendarBrand">
+            <span className="df-calendarBrandLogoWrap" aria-hidden>
+              <img
+                src={dailyflowLogoUrl}
+                alt=""
+                className="df-calendarBrandLogo"
+              />
+            </span>
+            <span className="df-calendarBrandLabel">DailyFlow</span>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="df-iconBtn df-navDrawerClose"
+            onClick={closeMobileNav}
+            aria-label="Close navigation menu"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div className="df-calendarProfile">
+          <div className="df-calendarProfileAvatar">
+            {profileImageUrl ? (
+              <img
+                key={profileImageUrl}
+                src={profileImageUrl}
+                alt=""
+                className="df-calendarProfileAvatarImg"
+              />
+            ) : (
+              initials
+            )}
+          </div>
+          <div className="df-calendarProfileInfo">
+            <div className="df-calendarProfileName">{displayName}</div>
+          </div>
+          <button
+            type="button"
+            className="df-iconBtn df-calendarProfileSettings"
+            onClick={handleOpenSettings}
+            aria-label="Open profile settings"
+            title="Settings"
+          >
+            <SettingsIcon />
+          </button>
+        </div>
+
+        <nav className="df-calendarMenu" aria-label="Main sections">
+          {items.map((item) => {
+            const isActive = location.pathname.startsWith(item.route);
+            return (
+              <button
+                key={item.route}
+                type="button"
+                className={`df-calendarMenuItem${isActive ? ' df-calendarMenuItemActive' : ''}`}
+                onClick={() => {
+                  if (item.disabled) return;
+                  handleNavigate(item.route);
+                }}
+                disabled={item.disabled}
+                title={showCollapsed ? item.label : undefined}
+                aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
+              >
+                <span className="df-calendarMenuItemIcon" aria-hidden>
+                  {item.icon}
+                </span>
+                <span className="df-calendarMenuItemLabel">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+    </div>
   );
 }
 
@@ -159,6 +288,15 @@ function HamburgerIcon() {
       <line x1="4" y1="7" x2="20" y2="7" />
       <line x1="4" y1="12" x2="20" y2="12" />
       <line x1="4" y1="17" x2="20" y2="17" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
     </svg>
   );
 }

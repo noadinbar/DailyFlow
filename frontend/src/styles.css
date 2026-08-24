@@ -4,6 +4,7 @@
   --df-text: #111827;
   --df-muted: #6b7280;
   --df-border: #e5e7eb;
+  --df-mobile-header-height: 56px;
   /* Accent: deep indigo (darker than the previous bright blue, harmonizes with brand text). */
   --df-primary: #3730a3;
   --df-primary-strong: #2e2880;
@@ -443,7 +444,8 @@ body {
      Internal panels that need their own scroll (library grids with max-height,
      etc.) keep overflow-y:auto on those elements only. */
   width: 100%;
-  max-width: none;
+  max-width: 100%;
+  min-width: 0;
   min-height: 100vh;
   min-height: 100dvh;
   border: 0;
@@ -453,6 +455,30 @@ body {
   grid-template-columns: 220px 1fr;
   overflow-x: hidden;
   transition: grid-template-columns 180ms ease;
+}
+
+.df-appNavShell {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fafafb;
+}
+
+.df-appNavShell .df-calendarLeftNav {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.df-mobileHeader,
+.df-navDrawerBackdrop,
+.df-navDrawerClose {
+  display: none;
+}
+
+.df-navDrawerTop {
+  display: contents;
 }
 
 .df-calendarPage.df-calendarPageNavCollapsed {
@@ -466,6 +492,8 @@ body {
   /* Scroll internally only when the sidebar content is taller than the
      viewport (e.g. many nav items on a short screen). */
   overflow-y: auto;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .df-calendarBrand {
@@ -706,6 +734,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  max-width: 100%;
 }
 
 .df-calendarTopbar {
@@ -751,6 +780,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 260px;
   min-height: 0;
+  min-width: 0;
   flex: 1;
 }
 
@@ -790,6 +820,33 @@ body {
   overflow: auto;
 }
 
+.df-calendarHScroll {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.df-calendarHScroll .df-weekColumns {
+  overflow: visible;
+}
+
+.df-calendarHScroll .df-weekHeader,
+.df-calendarHScroll .df-weekColumns {
+  min-width: 698px;
+  box-sizing: border-box;
+}
+
+.df-monthView .df-weekHeader,
+.df-calendarHScroll .df-monthGrid {
+  min-width: 838px;
+  box-sizing: border-box;
+}
+
+.df-monthView .df-weekHeader {
+  grid-template-columns: repeat(7, minmax(110px, 1fr));
+}
+
 .df-dayView {
   display: flex;
   flex-direction: column;
@@ -827,10 +884,12 @@ body {
   text-align: left;
   padding: 8px;
   min-height: 88px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 .df-monthCellDate {
@@ -862,6 +921,7 @@ body {
 
 .df-weekColumn {
   min-height: 520px;
+  min-width: 0;
   border-right: 1px dashed #eef2f7;
   padding-right: 8px;
   background-image: linear-gradient(to bottom, rgba(241, 245, 249, 0.45) 1px, transparent 1px);
@@ -875,6 +935,9 @@ body {
   font-size: 12px;
   line-height: 1.25;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .df-eventBlock strong {
@@ -1004,6 +1067,7 @@ body {
   font-size: 13px;
   color: #374151;
   margin-bottom: 8px;
+  min-width: 0;
 }
 
 .df-dot {
@@ -1029,20 +1093,190 @@ body {
 }
 
 @media (max-width: 1100px) {
-  .df-calendarPage {
+  .df-calendarPage,
+  .df-calendarPage.df-calendarPageNavCollapsed {
     grid-template-columns: 1fr;
-    /* On narrow viewports the sidebar stacks on top of the main content, so
-       fall back to a natural height with page-level scroll instead of trying
-       to cram both into a single viewport. */
     height: auto;
     min-height: 100vh;
     min-height: 100dvh;
   }
 
-  .df-calendarLeftNav {
-    border-right: 0;
+  .df-appNavShell {
+    height: auto;
+  }
+
+  .df-mobileHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: var(--df-mobile-header-height);
+    padding: 0 10px;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--df-border);
-    overflow-y: visible;
+    background: #fafafb;
+    position: sticky;
+    top: 0;
+    z-index: 62;
+    min-width: 0;
+  }
+
+  .df-mobileHeaderMenuBtn {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    color: #374151;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex: none;
+  }
+
+  .df-mobileHeaderMenuBtn:hover {
+    background: #f3f4f6;
+    border-color: #e5e7eb;
+  }
+
+  .df-mobileHeaderMenuBtn:focus-visible {
+    outline: 2px solid #a5a8e5;
+    outline-offset: 2px;
+  }
+
+  .df-mobileHeaderBrand {
+    margin: 0;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .df-mobileHeaderBrand .df-calendarBrandLogoWrap {
+    width: 36px;
+    height: 36px;
+  }
+
+  .df-mobileHeaderBrand .df-calendarBrandLabel {
+    font-size: 18px;
+  }
+
+  .df-navDrawerBackdrop {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: var(--df-mobile-header-height);
+    background: rgba(15, 23, 42, 0.35);
+    z-index: 60;
+  }
+
+  .df-navDrawerBackdrop[hidden] {
+    display: none;
+  }
+
+  .df-navDrawerTop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .df-navDrawerTop .df-calendarBrand {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+  }
+
+  .df-navDrawerClose {
+    display: inline-flex;
+    flex: none;
+  }
+
+  .df-sidebarToggle {
+    display: none;
+  }
+
+  .df-calendarLeftNav {
+    position: fixed;
+    top: var(--df-mobile-header-height);
+    left: 0;
+    bottom: 0;
+    width: min(280px, 86vw);
+    z-index: 61;
+    border-right: 1px solid var(--df-border);
+    border-bottom: 0;
+    background: #fafafb;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    transform: translateX(-105%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 180ms ease, visibility 180ms ease;
+    box-sizing: border-box;
+  }
+
+  .df-appNavShellDrawerOpen .df-calendarLeftNav {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .df-calendarMain {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .df-homeCalendar .df-calendarTopbarLeft,
+  .df-homeCalendar .df-calendarTopbarRight {
+    flex-wrap: wrap;
+  }
+
+  .df-homeCalendar .df-calendarTopbar {
+    align-items: flex-start;
+  }
+
+  .df-homeCalendar .df-calendarTopbar .df-btn {
+    white-space: nowrap;
+  }
+
+  .df-homeCalendar .df-errorText {
+    padding: 0 16px;
+    overflow-wrap: anywhere;
+  }
+
+  .df-homeCalendar .df-dayViewHeader {
+    overflow-wrap: anywhere;
+  }
+
+  .df-homeCalendar .df-calendarsList .df-calendarLegend {
+    flex-wrap: wrap;
+  }
+
+  .df-modalBackdrop {
+    padding: 8px;
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+  }
+
+  .df-modalPanel {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(92dvh, 100%);
+    margin-block: auto;
+    box-sizing: border-box;
+  }
+
+  .df-modalPanel:has(.df-settingsLayout) {
+    height: min(92dvh, 720px);
+  }
+
+  .df-modalHeader {
+    flex-shrink: 0;
   }
 }
 
@@ -1054,6 +1288,18 @@ body {
   .df-weekGrid {
     border-right: 0;
     border-bottom: 1px solid var(--df-border);
+  }
+
+  .df-homeCalendar .df-calendarSidebar {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-calendarLeftNav {
+    transition: none;
   }
 }
 

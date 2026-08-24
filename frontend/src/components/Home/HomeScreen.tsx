@@ -878,7 +878,7 @@ export default function HomeScreen(props: HomeScreenProps) {
 
   return (
     <section
-      className={`df-calendarPage${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
+      className={`df-calendarPage df-homeCalendar${isSidebarCollapsed ? ' df-calendarPageNavCollapsed' : ''}`}
       aria-label="DailyFlow calendar screen"
     >
       <AppSidebar
@@ -988,7 +988,7 @@ export default function HomeScreen(props: HomeScreenProps) {
         <div className="df-calendarBody">
           <section className="df-weekGrid" aria-label="Calendar view">
             {viewMode === 'week' && (
-              <>
+              <div className="df-calendarHScroll">
                 <div className="df-weekHeader">
                   {weekDates.map((day) => (
                     <div
@@ -1023,7 +1023,7 @@ export default function HomeScreen(props: HomeScreenProps) {
                     );
                   })}
                 </div>
-              </>
+              </div>
             )}
             {viewMode === 'day' && (
               <div className="df-dayView">
@@ -1053,7 +1053,7 @@ export default function HomeScreen(props: HomeScreenProps) {
               </div>
             )}
             {viewMode === 'month' && (
-              <div className="df-monthView">
+              <div className="df-monthView df-calendarHScroll">
                 <div className="df-weekHeader">
                   <div>S</div>
                   <div>M</div>
