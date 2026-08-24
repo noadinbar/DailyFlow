@@ -174,6 +174,41 @@ def _dynamodb_client():
     return boto3.client("dynamodb", region_name=region) if region else boto3.client("dynamodb")
 
 
+def _lambda_client():
+    region = os.getenv("AWS_REGION")
+    return boto3.client("lambda", region_name=region) if region else boto3.client("lambda")
+
+
+def _scheduled_keep_plan_ids(weekly_plan: List[Dict[str, Any]]) -> List[str]:
+    keep: List[str] = []
+    for item in weekly_plan:
+        if not isinstance(item, dict):
+            continue
+        plan_id = str(item.get("id", "")).strip()
+        if plan_id and str(item.get("google_event_id", "")).strip():
+            keep.append(plan_id)
+    return keep
+
+
+def _invoke_workout_image_cleanup(*, user_id: str, keep_plan_ids: List[str]) -> None:
+    function_name = os.getenv("WORKOUT_IMAGE_GENERATOR_LAMBDA", "").strip()
+    if not function_name:
+        print("[workouts-generate-debug] skip image cleanup invoke: missing WORKOUT_IMAGE_GENERATOR_LAMBDA")
+        return
+    payload = json.dumps(
+        {"action": "cleanup", "user_id": user_id, "keep_plan_ids": keep_plan_ids}
+    ).encode("utf-8")
+    try:
+        _lambda_client().invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=payload,
+        )
+        print(f"[workouts-generate-debug] image cleanup queued keep_count={len(keep_plan_ids)}")
+    except Exception as err:
+        print(f"[workouts-generate-debug] image cleanup invoke failed: {err}")
+
+
 def _dynamodb_table_from_name(table_name: str):
     return _dynamodb_resource().Table(table_name)
 
@@ -366,20 +401,22 @@ def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
         rec_end = str(item.get("recommended_end_time", "")).strip()
         if not lib_id or not rec_day or not rec_start or not rec_end:
             continue
-        cleaned.append(
-            {
-                "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned)+1}",
-                "library_workout_id": lib_id,
-                "recommended_day": rec_day,
-                "recommended_start_time": rec_start,
-                "recommended_end_time": rec_end,
-                "recommended_time_label": str(item.get("recommended_time_label", "")).strip() or "Evening",
-                "reason_short": str(item.get("reason_short", "")).strip()
-                or "Matches your saved workout library and current free time.",
-                "google_event_id": str(item.get("google_event_id", "")).strip(),
-                "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
-            }
-        )
+        normalized: Dict[str, Any] = {
+            "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned)+1}",
+            "library_workout_id": lib_id,
+            "recommended_day": rec_day,
+            "recommended_start_time": rec_start,
+            "recommended_end_time": rec_end,
+            "recommended_time_label": str(item.get("recommended_time_label", "")).strip() or "Evening",
+            "reason_short": str(item.get("reason_short", "")).strip()
+            or "Matches your saved workout library and current free time.",
+            "google_event_id": str(item.get("google_event_id", "")).strip(),
+            "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
+        }
+        image_key = str(item.get("workout_image_key", "")).strip()
+        if image_key and str(item.get("google_event_id", "")).strip():
+            normalized["workout_image_key"] = image_key
+        cleaned.append(normalized)
     return cleaned
 
 
@@ -1918,6 +1955,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             favorite_workouts=favorite_workouts,
             busyblocks_signature=busy_sig,
             library_signature=lib_sig,
+        )
+        _invoke_workout_image_cleanup(
+            user_id=user_id,
+            keep_plan_ids=_scheduled_keep_plan_ids(weekly_plan),
         )
         payload = _response_payload(
             period={"start_date": start_date_value.isoformat(), "end_date": end_date_value.isoformat()},

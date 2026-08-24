@@ -120,6 +120,37 @@ def _dailyflow_events_table():
     return _dynamodb_resource().Table(table_name)
 
 
+def _lambda_client():
+    region = os.getenv("AWS_REGION")
+    return boto3.client("lambda", region_name=region) if region else boto3.client("lambda")
+
+
+def _invoke_workout_image_worker(payload: Dict[str, Any]) -> None:
+    function_name = os.getenv("WORKOUT_IMAGE_GENERATOR_LAMBDA", "").strip()
+    if not function_name:
+        print("[workouts-weekly-plan-debug] skip image invoke: missing WORKOUT_IMAGE_GENERATOR_LAMBDA")
+        return
+    action = str(payload.get("action", "")).strip() or "generate"
+    plan_id = str(payload.get("plan_id", "")).strip()
+    try:
+        _lambda_client().invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode("utf-8"),
+        )
+        print(f"[workouts-weekly-plan-debug] image invoke queued action={action} plan_id={plan_id or '-'}")
+    except Exception as err:
+        print(f"[workouts-weekly-plan-debug] image invoke failed action={action} plan_id={plan_id or '-'}: {err}")
+
+
+def _invoke_workout_image_generator(*, user_id: str, plan_id: str) -> None:
+    _invoke_workout_image_worker({"user_id": user_id, "plan_id": plan_id})
+
+
+def _invoke_workout_image_delete(*, user_id: str, plan_id: str) -> None:
+    _invoke_workout_image_worker({"action": "delete", "user_id": user_id, "plan_id": plan_id})
+
+
 def _to_int(value: Any, default: int) -> int:
     if isinstance(value, Decimal):
         try:
@@ -472,19 +503,21 @@ def _normalize_saved_weekly_plan(raw: Any) -> List[Dict[str, Any]]:
         rec_end = str(item.get("recommended_end_time", "")).strip()
         if not lib_id or not rec_day or not rec_start or not rec_end:
             continue
-        cleaned.append(
-            {
-                "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned)+1}",
-                "library_workout_id": lib_id,
-                "recommended_day": rec_day,
-                "recommended_start_time": rec_start,
-                "recommended_end_time": rec_end,
-                "recommended_time_label": str(item.get("recommended_time_label", "")).strip() or "Evening",
-                "reason_short": str(item.get("reason_short", "")).strip() or "Matches your saved workout library and current free time.",
-                "google_event_id": str(item.get("google_event_id", "")).strip(),
-                "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
-            }
-        )
+        normalized: Dict[str, Any] = {
+            "id": str(item.get("id", "")).strip() or f"plan_{len(cleaned)+1}",
+            "library_workout_id": lib_id,
+            "recommended_day": rec_day,
+            "recommended_start_time": rec_start,
+            "recommended_end_time": rec_end,
+            "recommended_time_label": str(item.get("recommended_time_label", "")).strip() or "Evening",
+            "reason_short": str(item.get("reason_short", "")).strip() or "Matches your saved workout library and current free time.",
+            "google_event_id": str(item.get("google_event_id", "")).strip(),
+            "dailyflow_calendar_id": str(item.get("dailyflow_calendar_id", "")).strip(),
+        }
+        image_key = str(item.get("workout_image_key", "")).strip()
+        if image_key and str(item.get("google_event_id", "")).strip():
+            normalized["workout_image_key"] = image_key
+        cleaned.append(normalized)
     return cleaned
 
 
@@ -752,6 +785,7 @@ def _handle_remove_plan_item(*, user_id: str, payload: Dict[str, Any]) -> Dict[s
     )
     _delete_dailyflow_event_row(user_id=user_id, plan_id=plan_id)
     _mark_busy_blocks_stale(user_id)
+    _invoke_workout_image_delete(user_id=user_id, plan_id=plan_id)
     return _json_response(200, {"weekly_plan_suggestions": filtered, "updated_at": updated_at})
 
 
@@ -1001,6 +1035,12 @@ def _handle_add_plan_item_to_calendar(*, user_id: str, payload: Dict[str, Any]) 
         google_event_id=created_event_id,
     )
     _mark_busy_blocks_stale(user_id)
+    scheduled_item = next(
+        (entry for entry in updated_weekly_plan if str(entry.get("id", "")).strip() == plan_id),
+        None,
+    )
+    if scheduled_item and not str(scheduled_item.get("workout_image_key", "")).strip():
+        _invoke_workout_image_generator(user_id=user_id, plan_id=plan_id)
     return _json_response(
         200,
         {
