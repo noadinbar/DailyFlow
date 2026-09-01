@@ -96,7 +96,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
     questionnaire_payload = {k: v for k, v in payload.items() if k in QUESTIONNAIRE_KEYS}
-    missing_keys = sorted(k for k in QUESTIONNAIRE_KEYS if k not in questionnaire_payload)
+    # break_meditation_interest is obsolete for new onboarding but remains optional
+    # so existing stored values are left unchanged when the key is omitted.
+    onboarding_required_keys = QUESTIONNAIRE_KEYS - {"break_meditation_interest"}
+    missing_keys = sorted(k for k in onboarding_required_keys if k not in questionnaire_payload)
     if missing_keys:
         return {
             "statusCode": 400,

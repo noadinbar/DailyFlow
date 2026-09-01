@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ACTIVITY_OPTIONS,
   AGE_RANGE_OPTIONS,
-  BREAK_MEDITATION_OPTIONS,
   DIETARY_OPTIONS,
   type QuestionnaireForm,
   EMPTY_QUESTIONNAIRE,
@@ -655,38 +654,6 @@ export default function ProfileSettingsModal(props: ProfileSettingsModalProps) {
                                   'no_preferences'
                                 ),
                               }))
-                            }
-                            disabled={isSavingPreferences}
-                            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
-                          />
-                          <div className="df-optionBtnTitle">{o.label}</div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="df-field">
-                  <span className="df-fieldLabel">Break &amp; meditation</span>
-                  <div
-                    className="df-prefOptionsWrap"
-                    role="radiogroup"
-                    aria-label="Break and meditation"
-                  >
-                    {BREAK_MEDITATION_OPTIONS.map((o) => {
-                      const active = qForm.break_meditation_interest === o.id;
-                      return (
-                        <label
-                          key={o.id}
-                          className={`df-prefOption df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
-                        >
-                          <input
-                            type="radio"
-                            name="settings-q-break-meditation"
-                            value={o.id}
-                            checked={active}
-                            onChange={() =>
-                              setQForm((f) => ({ ...f, break_meditation_interest: o.id }))
                             }
                             disabled={isSavingPreferences}
                             style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}

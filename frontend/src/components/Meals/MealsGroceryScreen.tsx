@@ -228,7 +228,7 @@ function formatDateTime(date: string, time: string): string {
   if (!date || !time) return 'Not scheduled';
   const base = new Date(`${date}T${time}:00`);
   if (!Number.isFinite(base.getTime())) return `${date} ${time}`;
-  const datePart = base.toLocaleDateString(undefined, {
+  const datePart = base.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -307,6 +307,25 @@ function buildAddPopupDayOptions(
 
 function isValidHHmm(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function buildHHmm15MinuteOptions(): string[] {
+  const out: string[] = [];
+  for (let hour = 0; hour < 24; hour += 1) {
+    for (let minute = 0; minute < 60; minute += 15) {
+      out.push(`${pad2(hour)}:${pad2(minute)}`);
+    }
+  }
+  return out;
+}
+
+const HHMM_15_MINUTE_OPTIONS = buildHHmm15MinuteOptions();
+
+function timeSelectOptions(current: string): string[] {
+  if (current && !HHMM_15_MINUTE_OPTIONS.includes(current) && isValidHHmm(current)) {
+    return [current, ...HHMM_15_MINUTE_OPTIONS];
+  }
+  return HHMM_15_MINUTE_OPTIONS;
 }
 
 function sanitizeHHmmTyping(raw: string): string {
@@ -908,7 +927,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
       doc.setTextColor(...COLOR_MUTED);
       doc.text('Generated from your saved weekly meals', contentLeft, 22);
 
-      const exportDate = new Date().toLocaleDateString(undefined, {
+      const exportDate = new Date().toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -1707,7 +1726,7 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                 <input
                   type="text"
                   inputMode="numeric"
-                  className="df-input"
+                  className="df-input df-timeInputDesktop"
                   value={addMealStartTime}
                   placeholder="HH:mm"
                   maxLength={5}
@@ -1718,6 +1737,22 @@ export default function MealsGroceryScreen(props: MealsGroceryScreenProps) {
                     setAddMealError('');
                   }}
                 />
+                <select
+                  className="df-select df-timeSelectMobile"
+                  value={addMealStartTime}
+                  aria-label="Start time in 24-hour HH:mm format"
+                  onChange={(event) => {
+                    setAddMealStartTime(event.target.value);
+                    setAddMealError('');
+                  }}
+                >
+                  <option value="">Select time</option>
+                  {timeSelectOptions(addMealStartTime).map((time) => (
+                    <option key={time} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
               </label>
               <div className="df-workoutMeta">
                 End time: {calculateEndTime(addMealStartTime, addMealSource.prep_time_minutes) || '--:--'}

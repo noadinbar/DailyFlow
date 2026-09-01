@@ -276,6 +276,11 @@ body {
   box-sizing: border-box;
 }
 
+.df-timeSelectMobile {
+  display: none;
+  width: 100%;
+}
+
 .df-checkboxList {
   display: grid;
   gap: 10px;
@@ -1139,6 +1144,8 @@ body {
     height: auto;
     min-height: 100vh;
     min-height: 100dvh;
+    padding-top: var(--df-mobile-header-height);
+    box-sizing: border-box;
   }
 
   .df-appNavShell {
@@ -1154,8 +1161,10 @@ body {
     box-sizing: border-box;
     border-bottom: 1px solid var(--df-border);
     background: #fafafb;
-    position: sticky;
+    position: fixed;
     top: 0;
+    left: 0;
+    right: 0;
     z-index: 62;
     min-width: 0;
   }
@@ -1263,6 +1272,14 @@ body {
     white-space: normal;
     max-width: 100%;
     box-sizing: border-box;
+  }
+
+  .df-timeInputDesktop {
+    display: none;
+  }
+
+  .df-timeSelectMobile {
+    display: block;
   }
 
   .df-homeCalendar .df-errorText {
@@ -2097,7 +2114,7 @@ select.df-input {
 }
 
 .df-workoutsLoadingOverlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 40;
   pointer-events: all;
@@ -3167,5 +3184,27 @@ select.df-input {
   .df-workoutsScreen .df-workoutLibraryGrid,
   .df-workoutsScreen .df-workoutWeekGrid {
     grid-template-columns: 1fr;
+  }
+
+  .df-workoutsScreen .df-workoutWeekGrid,
+  .df-stressBreaksPage .df-workoutWeekGrid {
+    grid-auto-rows: auto;
+    align-items: start;
+  }
+
+  .df-workoutsScreen .df-workoutWeekGrid > .df-workoutDayCard,
+  .df-stressBreaksPage .df-workoutWeekGrid > .df-workoutDayCard {
+    height: auto;
+  }
+
+  .df-workoutsScreen .df-workoutWeekGrid > .df-workoutDayCard.df-workoutDayCardEmpty,
+  .df-stressBreaksPage .df-workoutWeekGrid > .df-workoutDayCard.df-workoutDayCardEmpty {
+    min-height: 0;
+    height: auto;
+  }
+
+  .df-workoutsScreen .df-workoutDayCardEmpty .df-workoutRestDay,
+  .df-stressBreaksPage .df-workoutDayCardEmpty .df-workoutRestDay {
+    flex: 0 0 auto;
   }
 }

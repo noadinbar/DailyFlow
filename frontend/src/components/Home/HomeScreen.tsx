@@ -59,7 +59,7 @@ function toIsoDateLocal(value: Date): string {
 }
 
 function formatDayHeader(value: Date): string {
-  const weekday = value.toLocaleDateString(undefined, { weekday: 'short' });
+  const weekday = value.toLocaleDateString('en-US', { weekday: 'short' });
   const day = value.getDate();
   return `${weekday} ${day}`;
 }
@@ -784,7 +784,7 @@ export default function HomeScreen(props: HomeScreenProps) {
     return grouped;
   }, [busyBlocks]);
   const miniCalendarMonthLabel = React.useMemo(
-    () => miniCalendarMonthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+    () => miniCalendarMonthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
     [miniCalendarMonthDate]
   );
   const miniCalendarDays = React.useMemo(() => {
@@ -869,8 +869,20 @@ export default function HomeScreen(props: HomeScreenProps) {
   }
 
   const visibleMonthLabel = React.useMemo(() => {
-    const baseDate = viewMode === 'day' ? selectedDate : viewMode === 'week' ? weekStartDate : miniCalendarMonthDate;
-    return baseDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    if (viewMode === 'day') {
+      return selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    }
+    if (viewMode === 'week') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStartDate);
+      weekEnd.setHours(0, 0, 0, 0);
+      weekEnd.setDate(weekStartDate.getDate() + 6);
+      const weekContainsToday = today.getTime() >= weekStartDate.getTime() && today.getTime() <= weekEnd.getTime();
+      const baseDate = weekContainsToday ? today : weekStartDate;
+      return baseDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    }
+    return miniCalendarMonthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }, [viewMode, selectedDate, weekStartDate, miniCalendarMonthDate]);
 
   const effectiveName = (displayName || username || 'Noa Levi').trim();
@@ -1028,7 +1040,7 @@ export default function HomeScreen(props: HomeScreenProps) {
             {viewMode === 'day' && (
               <div className="df-dayView">
                 <div className="df-dayViewHeader">
-                  {selectedDate.toLocaleDateString(undefined, {
+                  {selectedDate.toLocaleDateString('en-US', {
                     weekday: 'long',
                     year: 'numeric',
                     month: 'long',
@@ -1076,7 +1088,12 @@ export default function HomeScreen(props: HomeScreenProps) {
                           setWeekStartDate(startOfWeek(date));
                           setViewMode('day');
                         }}
-                        aria-label={`Open day ${date.toLocaleDateString()}`}
+                        aria-label={`Open day ${date.toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}`}
                       >
                         <span className="df-monthCellDate">{date.getDate()}</span>
                         {blocks.slice(0, 2).map((block) => (
@@ -1145,7 +1162,12 @@ export default function HomeScreen(props: HomeScreenProps) {
                       type="button"
                       className={`df-miniCalendarDayButton${isToday ? ' df-miniCalendarDayActive' : ''}${!inCurrentMonth ? ' df-miniCalendarDayMuted' : ''}`}
                       onClick={() => handleMiniCalendarDateClick(date)}
-                      aria-label={`Open week of ${date.toLocaleDateString()}`}
+                      aria-label={`Open week of ${date.toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}`}
                     >
                       {date.getDate()}
                     </button>

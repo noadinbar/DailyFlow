@@ -594,7 +594,19 @@ def _format_google_event_datetime(date_iso: str, hhmm: str) -> str:
     return f"{date_iso}T{hhmm}:00"
 
 
-def _build_break_event_payload(plan_item: Dict[str, Any]) -> Dict[str, Any]:
+def _curated_youtube_url(library_item: Optional[Dict[str, Any]]) -> str:
+    if not library_item:
+        return ""
+    url = str(library_item.get("youtube_url", "")).strip()
+    if url.startswith("https://www.youtube.com/watch?v="):
+        return url
+    return ""
+
+
+def _build_break_event_payload(
+    plan_item: Dict[str, Any],
+    library_item: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     title = str(plan_item.get("title", "")).strip() or "Break"
     category_label = str(plan_item.get("category_label", "")).strip() or str(plan_item.get("category", "")).strip()
     kind = str(plan_item.get("kind", "")).strip()
@@ -609,6 +621,10 @@ def _build_break_event_payload(plan_item: Dict[str, Any]) -> Dict[str, Any]:
         details.append(f"Duration: {duration_minutes} min")
     if summary_short:
         details.append(summary_short)
+    youtube_url = _curated_youtube_url(library_item)
+    if youtube_url:
+        details.append("Watch video:")
+        details.append(youtube_url)
     description = "\n".join(details) if details else "Planned in DailyFlow."
     return {
         "summary": title,
@@ -1228,7 +1244,10 @@ def _handle_add_to_calendar(user_id: str, payload: Dict[str, Any]) -> Dict[str, 
             connection=connection,
             method="POST",
             url=create_event_url,
-            body=_build_break_event_payload(plan_item),
+            body=_build_break_event_payload(
+                plan_item,
+                _find_library_activity(item, str(plan_item.get("library_activity_id", "")).strip()),
+            ),
             debug_flags=debug_flags,
         )
         created_event_id = str(created_event.get("id", "")).strip()

@@ -178,6 +178,25 @@ function isValidHHmm(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
+function buildHHmm15MinuteOptions(): string[] {
+  const out: string[] = [];
+  for (let hour = 0; hour < 24; hour += 1) {
+    for (let minute = 0; minute < 60; minute += 15) {
+      out.push(`${pad2(hour)}:${pad2(minute)}`);
+    }
+  }
+  return out;
+}
+
+const HHMM_15_MINUTE_OPTIONS = buildHHmm15MinuteOptions();
+
+function timeSelectOptions(current: string): string[] {
+  if (current && !HHMM_15_MINUTE_OPTIONS.includes(current) && isValidHHmm(current)) {
+    return [current, ...HHMM_15_MINUTE_OPTIONS];
+  }
+  return HHMM_15_MINUTE_OPTIONS;
+}
+
 /** Display dd-mm-yyyy (day, month, year). Falls back to the raw value if not ISO. */
 function formatWeeklyPlanDay(value: string): string {
   if (typeof value !== 'string') return '';
@@ -1083,7 +1102,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                 return (
                   <article
                     key={card.dateIso}
-                    className={`df-workoutDayCard${canOpenWeeklyDetails ? ' df-workoutLibraryCardClickable' : ''}`}
+                    className={`df-workoutDayCard${canOpenWeeklyDetails ? ' df-workoutLibraryCardClickable' : ''}${item ? '' : ' df-workoutDayCardEmpty'}`}
                     onClick={() => {
                       if (item && libraryWorkout) openWeeklyPlanWorkoutDetails(item, libraryWorkout);
                     }}
@@ -1499,7 +1518,7 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
               <label className="df-field">
                 <div className="df-fieldLabel" style={{ textAlign: 'start' }}>Start time (24h, HH:mm)</div>
                 <input
-                  className="df-input"
+                  className="df-input df-timeInputDesktop"
                   type="text"
                   inputMode="numeric"
                   value={addFromLibraryStartTime}
@@ -1512,6 +1531,21 @@ export default function WorkoutsScreen(props: WorkoutsScreenProps) {
                     setAddFromLibraryError('');
                   }}
                 />
+                <select
+                  className="df-select df-timeSelectMobile"
+                  value={addFromLibraryStartTime}
+                  aria-label="Start time in 24-hour HH:mm format"
+                  onChange={(event) => {
+                    setAddFromLibraryStartTime(event.target.value);
+                    setAddFromLibraryError('');
+                  }}
+                >
+                  {timeSelectOptions(addFromLibraryStartTime).map((time) => (
+                    <option key={time} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
               </label>
               {addFromLibraryError && (
                 <div className="df-errorText">{addFromLibraryError}</div>

@@ -3,6 +3,29 @@ import { ClockIcon } from '../Sidebar/AppSidebar';
 import { pastelTagStyle } from '../shared/pastelTags';
 import { categoryDisplayLabel, type StressActivity } from './activityCategories';
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function buildHHmm15MinuteOptions(): string[] {
+  const out: string[] = [];
+  for (let hour = 0; hour < 24; hour += 1) {
+    for (let minute = 0; minute < 60; minute += 15) {
+      out.push(`${pad2(hour)}:${pad2(minute)}`);
+    }
+  }
+  return out;
+}
+
+const HHMM_15_MINUTE_OPTIONS = buildHHmm15MinuteOptions();
+
+function timeSelectOptions(current: string): string[] {
+  if (current && !HHMM_15_MINUTE_OPTIONS.includes(current)) {
+    return [current, ...HHMM_15_MINUTE_OPTIONS];
+  }
+  return HHMM_15_MINUTE_OPTIONS;
+}
+
 export type WeeklyBreakPlanItem = {
   id: string;
   library_activity_id: string;
@@ -95,7 +118,7 @@ export default function WeeklyBreakPlanSection(props: WeeklyBreakPlanSectionProp
           return (
             <article
               key={card.dateIso}
-              className={`df-workoutDayCard${canOpen ? ' df-workoutLibraryCardClickable' : ''}`}
+              className={`df-workoutDayCard${canOpen ? ' df-workoutLibraryCardClickable' : ''}${item ? '' : ' df-workoutDayCardEmpty'}`}
               onClick={() => {
                 if (item) onOpenActivity(item.library_activity_id);
               }}
@@ -370,7 +393,7 @@ export function AddToWeeklyPlanModal(props: AddToWeeklyPlanModalProps) {
               Start time (24h, HH:mm)
             </div>
             <input
-              className="df-input"
+              className="df-input df-timeInputDesktop"
               type="text"
               inputMode="numeric"
               value={startTime}
@@ -381,6 +404,19 @@ export function AddToWeeklyPlanModal(props: AddToWeeklyPlanModalProps) {
               disabled={isSaving}
               onChange={(event) => onStartTimeChange(event.target.value)}
             />
+            <select
+              className="df-select df-timeSelectMobile"
+              value={startTime}
+              aria-label="Start time in 24-hour HH:mm format"
+              disabled={isSaving}
+              onChange={(event) => onStartTimeChange(event.target.value)}
+            >
+              {timeSelectOptions(startTime).map((time) => (
+                <option key={time} value={time}>
+                  {time}
+                </option>
+              ))}
+            </select>
           </label>
           {isFlexible && (
             <label className="df-field">

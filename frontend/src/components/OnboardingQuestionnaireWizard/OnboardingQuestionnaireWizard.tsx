@@ -58,14 +58,7 @@ type DietaryPreference =
   | 'kosher'
   | 'no_preferences';
 
-type BreakMeditationInterest =
-  | 'break_suggestions'
-  | 'meditation_suggestions'
-  | 'both'
-  | 'not_interested'
-  | '';
-
-const TOTAL_STEPS = 10;
+const TOTAL_STEPS = 9;
 
 function formatStepText(stepIndex1Based: number, totalSteps: number) {
   return `Step ${stepIndex1Based} of ${totalSteps}`;
@@ -111,7 +104,6 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
   const [preferredWorkoutTimes, setPreferredWorkoutTimes] = useState<PreferredWorkoutTime[]>([]);
   const [preferredWorkoutTypes, setPreferredWorkoutTypes] = useState<PreferredWorkoutType[]>([]);
   const [dietaryPreferences, setDietaryPreferences] = useState<DietaryPreference[]>([]);
-  const [breakMeditationInterest, setBreakMeditationInterest] = useState<BreakMeditationInterest>('');
 
   const stepIndex1Based = stepIndex + 1;
 
@@ -126,12 +118,10 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
       preferred_workout_times: preferredWorkoutTimes,
       preferred_workout_types: preferredWorkoutTypes,
       dietary_preferences: dietaryPreferences,
-      break_meditation_interest: breakMeditationInterest,
     }),
     [
       activityConsiderations,
       ageRange,
-      breakMeditationInterest,
       dietaryPreferences,
       fitnessLevel,
       mainGoal,
@@ -155,12 +145,10 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
     if (stepIndex === 6) return preferredWorkoutTimes.length === 0;
     if (stepIndex === 7) return preferredWorkoutTypes.length === 0;
     if (stepIndex === 8) return dietaryPreferences.length === 0;
-    if (stepIndex === 9) return breakMeditationInterest === '';
     return true;
   }, [
     activityConsiderations.length,
     ageRange,
-    breakMeditationInterest,
     dietaryPreferences.length,
     fitnessLevel,
     mainGoal.length,
@@ -276,7 +264,6 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
           preferred_workout_times: collectedData.preferred_workout_times,
           preferred_workout_types: collectedData.preferred_workout_types,
           dietary_preferences: collectedData.dietary_preferences,
-          break_meditation_interest: collectedData.break_meditation_interest,
         };
 
         for (const key of Object.keys(requestBody)) {
@@ -699,41 +686,6 @@ export default function OnboardingQuestionnaireWizard(props: OnboardingQuestionn
                   />
                   <div className="df-optionBtnTitle">{option.title}</div>
                   <div className="df-optionBtnHint">{option.hint}</div>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {stepIndex === 9 && (
-        <div className="df-question" role="group" aria-label="Break and meditation interest question">
-          <div className="df-questionLabel">10. Break and meditation suggestions</div>
-          <div className="df-optionsGrid">
-            {(
-              [
-                { id: 'break_suggestions' as const, title: 'Break suggestions', hint: '' },
-                { id: 'meditation_suggestions' as const, title: 'Meditation suggestions', hint: '' },
-                { id: 'both' as const, title: 'Both', hint: '' },
-                { id: 'not_interested' as const, title: 'Not interested', hint: '' },
-              ] as const
-            ).map((option) => {
-              const active = breakMeditationInterest === option.id;
-              return (
-                <label
-                  key={option.id}
-                  className={`df-optionBtn ${active ? 'df-optionBtnActive' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="breakMeditationInterest"
-                    value={option.id}
-                    checked={active}
-                    onChange={() => setBreakMeditationInterest(option.id)}
-                    style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
-                  />
-                  <div className="df-optionBtnTitle">{option.title}</div>
-                  {option.hint ? <div className="df-optionBtnHint">{option.hint}</div> : null}
                 </label>
               );
             })}

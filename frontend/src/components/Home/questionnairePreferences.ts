@@ -95,13 +95,6 @@ export const DIETARY_OPTIONS: { id: string; label: string }[] = [
   { id: 'no_preferences', label: 'No preferences' },
 ];
 
-export const BREAK_MEDITATION_OPTIONS: { id: string; label: string }[] = [
-  { id: 'break_suggestions', label: 'Break suggestions' },
-  { id: 'meditation_suggestions', label: 'Meditation suggestions' },
-  { id: 'both', label: 'Both' },
-  { id: 'not_interested', label: 'Not interested' },
-];
-
 function asStringArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string');
   if (typeof v === 'string' && v) return [v];
@@ -177,7 +170,6 @@ export function buildQuestionnairePatchPayload(form: QuestionnaireForm): Record<
     out.preferred_workout_types = form.preferred_workout_types;
   }
   if (form.dietary_preferences.length > 0) out.dietary_preferences = form.dietary_preferences;
-  if (form.break_meditation_interest) out.break_meditation_interest = form.break_meditation_interest;
   return out;
 }
 
@@ -191,6 +183,5 @@ export function validateQuestionnaireFormComplete(form: QuestionnaireForm): bool
   if (form.preferred_workout_times.length === 0) return false;
   if (form.preferred_workout_types.length === 0) return false;
   if (form.dietary_preferences.length === 0) return false;
-  if (!form.break_meditation_interest) return false;
   return true;
 }
